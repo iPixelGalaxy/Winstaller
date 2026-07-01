@@ -65,11 +65,12 @@ public static class SystemInfoImportService
         return candidates;
     }
 
-    public static int ApplyCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates, SymlinkImportMode symlinkMode = SymlinkImportMode.Copy)
+    public static int ApplyCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates, SymlinkImportMode symlinkMode = SymlinkImportMode.Copy, Action<string>? log = null)
     {
         var added = 0;
         foreach (var candidate in candidates)
         {
+            log?.Invoke($"Applying {candidate.Scope}: {candidate.Title}");
             switch (candidate.Value)
             {
                 case string path when candidate.Scope == SystemInfoImportScope.Path:
@@ -132,7 +133,7 @@ public static class SystemInfoImportService
 
                     if (list is not null && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
                     {
-                        MigrateSymlinkData(config, symlink, symlinkMode);
+                        MigrateSymlinkData(config, symlink, symlinkMode, log);
                         list.Add(symlink.Name);
                         added++;
                     }
@@ -445,21 +446,28 @@ public static class SystemInfoImportService
                path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode)
+    private static void MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
         var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
             ? symlink.ExistingTargetPath
             : symlink.SourcePath;
         if (!Directory.Exists(dataSource))
+        {
+            log?.Invoke($"Skipped missing source: {dataSource}");
             return;
+        }
 
         var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
             .Replace("{USERNAME}", Environment.UserName);
         var destination = Path.Combine(baseDir, "AppData", symlink.Section, symlink.Name);
+        log?.Invoke($"{mode} {dataSource} -> {destination}");
         Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? baseDir);
 
         if (Directory.Exists(destination))
+        {
+            log?.Invoke($"Removing existing destination: {destination}");
             Directory.Delete(destination, true);
+        }
 
         if (mode == SymlinkImportMode.Move)
         {
@@ -469,6 +477,7 @@ public static class SystemInfoImportService
             }
             catch
             {
+                log?.Invoke("Move failed, falling back to copy/delete.");
                 CopyDirectory(dataSource, destination);
                 Directory.Delete(dataSource, true);
             }
@@ -489,10 +498,12 @@ public static class SystemInfoImportService
                 var backup = symlink.SourcePath + ".winstaller-backup";
                 if (Directory.Exists(backup))
                     Directory.Delete(backup, true);
+                log?.Invoke($"Moving original to backup: {backup}");
                 Directory.Move(symlink.SourcePath, backup);
             }
         }
 
+        log?.Invoke($"Creating symlink: {symlink.SourcePath} -> {destination}");
         CreateDirectorySymlink(symlink.SourcePath, destination);
     }
 

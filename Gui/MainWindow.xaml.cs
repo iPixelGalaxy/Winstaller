@@ -1324,22 +1324,107 @@ public sealed partial class MainWindow : Window
             await FillNetworkDriveCredentialsAsync(selected);
         }
 
-        SystemInfoImportService.IgnoreCandidates(_config, candidates.Except(selected));
-        var added = SystemInfoImportService.ApplyCandidates(_config, selected, symlinkMode);
-        SaveConfiguration();
-        LoadConfiguration();
-        RebuildNavigation();
-        if (module is null)
+        await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, symlinkMode);
+    }
+
+    private async Task ImportSelectedSystemInfoAsync(
+        SystemInfoImportScope scope,
+        ModuleDescriptor? module,
+        IReadOnlyList<SystemInfoImportCandidate> candidates,
+        IReadOnlyList<SystemInfoImportCandidate> selected,
+        SymlinkImportMode symlinkMode)
+    {
+        var outputBox = new TextBox
         {
-            RenderDashboard();
-        }
-        else
+            AcceptsReturn = true,
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new FontFamily("Cascadia Mono"),
+            MinWidth = 720,
+            MinHeight = 360,
+            MaxHeight = 460
+        };
+        var progress = new ProgressBar
         {
-            var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
-            RenderModule(refreshedModule ?? module);
+            IsIndeterminate = true,
+            MinWidth = 720
+        };
+        var content = new StackPanel
+        {
+            Spacing = 12,
+            Children = { progress, outputBox }
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = $"Importing {SplitName(scope.ToString())}",
+            Content = content,
+            CloseButtonText = string.Empty,
+            DefaultButton = ContentDialogButton.None
+        };
+
+        Directory.CreateDirectory(BootstrapManager.LogsDirectory);
+        var logPath = Path.Combine(BootstrapManager.LogsDirectory, $"import-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        var logLock = new object();
+        void Log(string message)
+        {
+            var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
+            lock (logLock)
+            {
+                File.AppendAllText(logPath, line + Environment.NewLine);
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                outputBox.Text += line + Environment.NewLine;
+                outputBox.SelectionStart = outputBox.Text.Length;
+            });
         }
 
-        AppendOutput($"Imported {added} item(s).");
+        var dialogTask = dialog.ShowAsync().AsTask();
+        try
+        {
+            Log($"Found {candidates.Count} candidate(s).");
+            Log($"Selected {selected.Count} candidate(s).");
+            if (scope == SystemInfoImportScope.Symlinks)
+                Log($"Symlink mode: {symlinkMode}");
+            foreach (var candidate in selected)
+                Log($"{candidate.Title}: {candidate.Detail}");
+
+            var added = await Task.Run(() =>
+            {
+                SystemInfoImportService.IgnoreCandidates(_config, candidates.Except(selected));
+                return SystemInfoImportService.ApplyCandidates(_config, selected, symlinkMode, Log);
+            });
+
+            SaveConfiguration();
+            LoadConfiguration();
+            RebuildNavigation();
+            if (module is null)
+            {
+                RenderDashboard();
+            }
+            else
+            {
+                var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
+                RenderModule(refreshedModule ?? module);
+            }
+
+            Log($"Imported {added} item(s).");
+            AppendOutput($"Imported {added} item(s). Log: {logPath}");
+        }
+        catch (Exception ex)
+        {
+            Log($"Failed: {ex}");
+            AppendOutput($"Import failed: {ex.Message}");
+        }
+        finally
+        {
+            progress.IsIndeterminate = false;
+            dialog.CloseButtonText = "Done";
+        }
+
+        await dialogTask;
     }
 
     private async Task FillNetworkDriveCredentialsAsync(IEnumerable<SystemInfoImportCandidate> selected)
@@ -1475,7 +1560,7 @@ public sealed partial class MainWindow : Window
         var accepted = false;
         ContentDialog? dialog = null;
         var dialogWidth = Math.Min(1080, Math.Max(720, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1180) - 160));
-        var scrollbarGutter = 36;
+        var scrollbarGutter = 24;
         var cardWidth = dialogWidth - scrollbarGutter;
         var innerWidth = cardWidth - 24;
         var panel = new StackPanel
@@ -1620,8 +1705,8 @@ public sealed partial class MainWindow : Window
             dialog.Hide();
         }));
 
-        var result = await dialog.ShowAsync();
-        if (!accepted || result == ContentDialogResult.None)
+        await dialog.ShowAsync();
+        if (!accepted)
             return new([], SymlinkImportMode.Copy);
 
         var selected = checkBoxes
