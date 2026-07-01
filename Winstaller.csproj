@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Winstaller.ico</ApplicationIcon>
+    <AssemblyName>Winstaller</AssemblyName>
+    <RootNamespace>Winstaller</RootNamespace>
+    <Version>1.0.12</Version>
+    <Authors>Winstaller</Authors>
+    <Description>Windows Setup Utility - Automated system configuration and app installation</Description>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="nul" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Primitives" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageReference Include="System.Management" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Include="Gui\App.xaml" />
+    <Page Include="Gui\MainWindow.xaml" />
+  </ItemGroup>
+
+  <Target Name="PublishSingleExeAfterBuild" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' and '$(IsPublishSingleExeAfterBuild)' != 'true'">
+    <MSBuild Projects="$(MSBuildProjectFullPath)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);NoBuild=true;IsPublishSingleExeAfterBuild=true" />
+    <MakeDir Directories="D:\ReinstallFiles" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe"
+          DestinationFiles="D:\ReinstallFiles\Winstaller.exe"
+          Condition="Exists('$(PublishDir)$(AssemblyName).exe')"
+          ContinueOnError="WarnAndContinue"
+          Retries="0" />
+  </Target>
+
+  <Target Name="CopyExeToReinstallFiles" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT' and '$(IsPublishSingleExeAfterBuild)' != 'true' and Exists('$(PublishDir)$(AssemblyName).exe')">
+    <MakeDir Directories="D:\ReinstallFiles" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe" DestinationFiles="D:\ReinstallFiles\Winstaller.exe" ContinueOnError="WarnAndContinue" Retries="0" />
+  </Target>
+
+</Project>

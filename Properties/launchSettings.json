@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "Winstaller": {
+      "commandName": "Project"
+    },
+    "Updater-Test": {
+      "commandName": "Project",
+      "commandLineArgs": "--debug --update"
+    }
+  }
+}
