@@ -9,6 +9,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using CommunityToolkit.WinUI.Controls;
@@ -1356,6 +1357,35 @@ public sealed partial class MainWindow : Window
             MinHeight = 360,
             MaxHeight = 460
         };
+        void CopyLogText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+        }
+
+        outputBox.KeyDown += (sender, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.C &&
+                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+            {
+                CopyLogText(outputBox.SelectedText);
+                args.Handled = true;
+            }
+        };
+        var logMenu = new MenuFlyout();
+        var copySelectionItem = new MenuFlyoutItem { Text = "Copy Selection" };
+        copySelectionItem.Click += (_, _) => CopyLogText(outputBox.SelectedText);
+        var copyAllItem = new MenuFlyoutItem { Text = "Copy All" };
+        copyAllItem.Click += (_, _) => CopyLogText(outputBox.Text);
+        logMenu.Items.Add(copySelectionItem);
+        logMenu.Items.Add(copyAllItem);
+        outputBox.ContextFlyout = logMenu;
+
         var progress = new ProgressBar
         {
             IsIndeterminate = true,
@@ -1363,14 +1393,11 @@ public sealed partial class MainWindow : Window
         };
         var copyLogButton = ActionButton("Copy Log", () =>
         {
-            var package = new DataPackage();
-            package.SetText(outputBox.Text);
-            Clipboard.SetContent(package);
+            CopyLogText(outputBox.Text);
             AppendOutput("Import log copied.");
         });
         copyLogButton.HorizontalAlignment = HorizontalAlignment.Right;
         copyLogButton.IsEnabled = false;
-        Button? retryButton = null;
         var footer = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -1446,18 +1473,21 @@ public sealed partial class MainWindow : Window
 
             var result = await Task.Run(() => ApplyImport(selected));
 
-            SaveConfiguration();
-            LoadConfiguration();
-            RebuildNavigation();
-            if (module is null)
+            await RunOnUiThreadAsync(() =>
             {
-                RenderDashboard();
-            }
-            else
-            {
-                var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
-                RenderModule(refreshedModule ?? module);
-            }
+                SaveConfiguration();
+                LoadConfiguration();
+                RebuildNavigation();
+                if (module is null)
+                {
+                    RenderDashboard();
+                }
+                else
+                {
+                    var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
+                    RenderModule(refreshedModule ?? module);
+                }
+            });
 
             Log($"Imported {result.Added} item(s).");
             Log($"Skipped or failed {Math.Max(0, selected.Count - result.Added)} selected item(s).");
@@ -1479,21 +1509,28 @@ public sealed partial class MainWindow : Window
                     foreach (var process in lockingProcesses)
                         Log($"- {process.ProcessName} (PID {process.ProcessId}) locking {process.Path}");
 
-                    DispatcherQueue.TryEnqueue(() =>
+                    await RunOnUiThreadAsync(() =>
                     {
                         var retryConfirmArmed = false;
-                        retryButton = ActionButton("Kill Apps and Retry", async () =>
+                        Button? button = null;
+                        button = ActionButton("Kill Apps and Retry", async () =>
                         {
+                            if (button is null)
+                                return;
+
                             if (!retryConfirmArmed)
                             {
                                 retryConfirmArmed = true;
-                                retryButton.Content = "Confirm Kill and Retry";
+                                button.Content = "Confirm Kill and Retry";
                                 Log($"Confirm kill and retry: this will kill {lockingProcesses.Count} detected app process(es), then retry {result.SymlinkFailures.Count} failed symlink item(s).");
                                 return;
                             }
 
-                            retryButton.IsEnabled = false;
-                            progress.IsIndeterminate = true;
+                            await RunOnUiThreadAsync(() =>
+                            {
+                                button.IsEnabled = false;
+                                progress.IsIndeterminate = true;
+                            });
                             Log("Killing detected locking apps...");
                             foreach (var processInfo in lockingProcesses)
                             {
@@ -1513,18 +1550,21 @@ public sealed partial class MainWindow : Window
                             Log("Retrying failed symlink item(s)...");
                             var retrySelection = result.SymlinkFailures.Select(failure => failure.Candidate).ToList();
                             var retryResult = await Task.Run(() => ApplyImport(retrySelection));
-                            SaveConfiguration();
-                            LoadConfiguration();
-                            RebuildNavigation();
-                            if (module is null)
+                            await RunOnUiThreadAsync(() =>
                             {
-                                RenderDashboard();
-                            }
-                            else
-                            {
-                                var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
-                                RenderModule(refreshedModule ?? module);
-                            }
+                                SaveConfiguration();
+                                LoadConfiguration();
+                                RebuildNavigation();
+                                if (module is null)
+                                {
+                                    RenderDashboard();
+                                }
+                                else
+                                {
+                                    var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
+                                    RenderModule(refreshedModule ?? module);
+                                }
+                            });
 
                             Log($"Retry imported {retryResult.Added} item(s).");
                             if (retryResult.SymlinkFailures.Count > 0)
@@ -1538,9 +1578,9 @@ public sealed partial class MainWindow : Window
                                 Log("Retry completed without symlink copy failures.");
                             }
 
-                            progress.IsIndeterminate = false;
+                            await RunOnUiThreadAsync(() => progress.IsIndeterminate = false);
                         }, primary: true);
-                        footer.Children.Insert(0, retryButton);
+                        footer.Children.Insert(0, button);
                     });
                 }
                 else
@@ -1558,9 +1598,12 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            progress.IsIndeterminate = false;
-            copyLogButton.IsEnabled = true;
-            dialog.CloseButtonText = "Done";
+            await RunOnUiThreadAsync(() =>
+            {
+                progress.IsIndeterminate = false;
+                copyLogButton.IsEnabled = true;
+                dialog.CloseButtonText = "Done";
+            });
         }
 
         await dialogTask;
@@ -2220,6 +2263,31 @@ public sealed partial class MainWindow : Window
     private void SaveConfiguration()
     {
         ConfigurationManager.SaveConfiguration(_config);
+    }
+
+    private Task RunOnUiThreadAsync(Action action)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var completion = new TaskCompletionSource();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                action();
+                completion.SetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        });
+
+        return completion.Task;
     }
 
     private static string FormatBytes(long bytes)
