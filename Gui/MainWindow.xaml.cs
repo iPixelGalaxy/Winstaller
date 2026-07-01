@@ -1481,6 +1481,8 @@ public sealed partial class MainWindow : Window
             MaxWidth = dialogWidth - 24,
             Margin = new Thickness(0, 0, 18, 0)
         };
+        var rowWidth = dialogWidth - 42;
+        var textWidth = Math.Max(360, rowWidth - 166);
 
         var checkBoxes = new List<CheckBox>();
         void UpdateSelectedCount()
@@ -1504,8 +1506,12 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
-                var itemGrid = new Grid { ColumnSpacing = 10 };
-                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var itemGrid = new Grid
+                {
+                    ColumnSpacing = 10,
+                    Width = rowWidth
+                };
+                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
                 itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -1513,7 +1519,13 @@ public sealed partial class MainWindow : Window
                 {
                     IsChecked = group.Key == "Existing Symlinks",
                     Tag = candidate,
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Width = 20,
+                    Height = 20,
+                    MinWidth = 0,
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(0)
                 };
                 checkBox.Checked += (_, _) => UpdateSelectedCount();
                 checkBox.Unchecked += (_, _) => UpdateSelectedCount();
@@ -1525,16 +1537,18 @@ public sealed partial class MainWindow : Window
                     Spacing = 2,
                     Children =
                     {
-                        new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
-                        new TextBlock { Text = candidate.Detail, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
+                        new TextBlock { Text = candidate.Title, MaxWidth = textWidth, TextWrapping = TextWrapping.Wrap },
+                        new TextBlock { Text = candidate.Detail, MaxWidth = textWidth, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis }
                     }
                 };
+                ToolTipService.SetToolTip(textPanel, candidate.Detail);
                 Grid.SetColumn(textPanel, 1);
                 itemGrid.Children.Add(textPanel);
 
                 var openButton = ActionButton("Open Folder", () => OpenFolder(candidate.Detail));
                 openButton.HorizontalAlignment = HorizontalAlignment.Right;
                 openButton.VerticalAlignment = VerticalAlignment.Center;
+                openButton.MinWidth = 108;
                 Grid.SetColumn(openButton, 2);
                 itemGrid.Children.Add(openButton);
 
@@ -1543,6 +1557,7 @@ public sealed partial class MainWindow : Window
                     Background = ResourceBrush("WinstallerCardBrush"),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12),
+                    Width = rowWidth,
                     Child = itemGrid
                 });
             }
