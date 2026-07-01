@@ -1471,7 +1471,9 @@ public sealed partial class MainWindow : Window
 
     private async Task<SymlinkImportSelection> ShowSymlinkImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
     {
-        var panel = new StackPanel { Spacing = 12, MinWidth = 1020 };
+        var resultMode = SymlinkImportMode.Copy;
+        var accepted = false;
+        var panel = new StackPanel { Spacing = 12, Width = 1080, MaxWidth = 1080 };
         var selectedCount = new TextBlock
         {
             FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
@@ -1497,7 +1499,7 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
-                var row = new Grid { ColumnSpacing = 10, MinWidth = 1000 };
+                var row = new Grid { ColumnSpacing = 10, MaxWidth = 1060 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -1508,6 +1510,7 @@ public sealed partial class MainWindow : Window
                     Content = new StackPanel
                     {
                         Spacing = 2,
+                        MaxWidth = 820,
                         Children =
                         {
                             new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
@@ -1528,18 +1531,50 @@ public sealed partial class MainWindow : Window
         }
         UpdateSelectedCount();
 
+        var footer = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Import {candidates.Count} symlink item(s)?",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 600, MinWidth = 1040 },
-            PrimaryButtonText = "Copy (Safe, but slower)",
-            SecondaryButtonText = "Move (faster but risky)",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary
+            FullSizeDesired = true,
+            Content = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new ScrollViewer { Content = panel, MaxHeight = 600, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
+                    footer
+                }
+            },
+            DefaultButton = ContentDialogButton.None
         };
+
+        footer.Children.Add(ActionButton("Copy (Safe, but slower)", () =>
+        {
+            resultMode = SymlinkImportMode.Copy;
+            accepted = true;
+            dialog.Hide();
+        }, primary: true));
+        footer.Children.Add(ActionButton("Move (faster but risky)", () =>
+        {
+            resultMode = SymlinkImportMode.Move;
+            accepted = true;
+            dialog.Hide();
+        }));
+        footer.Children.Add(ActionButton("Cancel", () =>
+        {
+            accepted = false;
+            dialog.Hide();
+        }));
+
         var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.None)
+        if (!accepted || result == ContentDialogResult.None)
             return new([], SymlinkImportMode.Copy);
 
         var selected = checkBoxes
@@ -1547,7 +1582,7 @@ public sealed partial class MainWindow : Window
             .Select(checkBox => checkBox.Tag)
             .OfType<SystemInfoImportCandidate>()
             .ToList();
-        return new(selected, result == ContentDialogResult.Secondary ? SymlinkImportMode.Move : SymlinkImportMode.Copy);
+        return new(selected, resultMode);
     }
 
     private void OpenFolder(string path)
