@@ -716,8 +716,10 @@ public sealed partial class MainWindow : Window
             for (var index = 0; index < list.Count; index++)
             {
                 panel.Children.Add(itemType == typeof(string)
-                    ? BuildCompactStringListItem(list, index, Refresh, GetConfigGlyph(property, null), placeholder)
-                    : BuildListItemEditor(list, itemType, index, Refresh, property));
+                    ? BuildCompactStringListItem(config, property, list, index, Refresh, placeholder)
+                    : itemType == typeof(SpecialSymlink)
+                        ? BuildCompactSpecialSymlinkItem(config, list, index, Refresh)
+                        : BuildListItemEditor(list, itemType, index, Refresh, property));
             }
 
             panel.Children.Add(ActionButton($"+ Add {title}", () =>
@@ -1140,24 +1142,22 @@ public sealed partial class MainWindow : Window
         return Card(row);
     }
 
-    private FrameworkElement BuildCompactStringListItem(IList list, int index, Action refresh, string glyph, string placeholder)
+    private FrameworkElement BuildCompactStringListItem(SymlinksConfig config, PropertyInfo property, IList list, int index, Action refresh, string placeholder)
     {
         var row = new Grid { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        row.Children.Add(new FontIcon
-        {
-            Glyph = glyph,
-            FontSize = 17,
-            Width = 22,
-            VerticalAlignment = VerticalAlignment.Center
-        });
+        var value = list[index]?.ToString() ?? string.Empty;
+        var iconButton = SymlinkOpenButton(
+            GetPathGlyph(value),
+            () => OpenFolder(GetManagedAppDataSymlinkTarget(config, property.Name, list[index]?.ToString() ?? string.Empty)));
+        row.Children.Add(iconButton);
 
         var box = new TextBox
         {
-            Text = list[index]?.ToString() ?? string.Empty,
+            Text = value,
             PlaceholderText = placeholder,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             MinWidth = 0
@@ -1165,12 +1165,124 @@ public sealed partial class MainWindow : Window
         box.LostFocus += (_, _) =>
         {
             list[index] = box.Text.Trim();
+            iconButton.Content = new FontIcon { Glyph = GetPathGlyph(box.Text), FontSize = 16 };
             SaveConfiguration();
         };
         Grid.SetColumn(box, 1);
         row.Children.Add(box);
 
-        var removeButton = new Button
+        var removeButton = CompactRemoveButton(() =>
+        {
+            list.RemoveAt(index);
+            SaveConfiguration();
+            refresh();
+        });
+        Grid.SetColumn(removeButton, 2);
+        row.Children.Add(removeButton);
+
+        return row;
+    }
+
+    private FrameworkElement BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, int index, Action refresh)
+    {
+        var symlink = (SpecialSymlink)list[index]!;
+        var outer = new Grid { ColumnSpacing = 8 };
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var iconButton = SymlinkOpenButton(
+            GetSpecialSymlinkGlyph(symlink),
+            () => OpenFolder(GetSpecialSymlinkTarget(config, symlink)));
+        outer.Children.Add(iconButton);
+
+        var fields = new StackPanel { Spacing = 6 };
+        var descriptionBox = CompactTextBox(symlink.Description, "Description", value =>
+        {
+            symlink.Description = value;
+            SaveConfiguration();
+        });
+        var sourceBox = CompactTextBox(symlink.Source, "Source", value =>
+        {
+            symlink.Source = value;
+            symlink.IsDirectory = !LooksLikeFilePath(value);
+            iconButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            SaveConfiguration();
+        });
+        var targetBox = CompactTextBox(symlink.Target, "Target override", value =>
+        {
+            symlink.Target = value;
+            iconButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            SaveConfiguration();
+        });
+        var typeToggle = new ToggleSwitch
+        {
+            IsOn = symlink.IsDirectory,
+            OnContent = "Directory",
+            OffContent = "File",
+            MinWidth = 0
+        };
+        typeToggle.Toggled += (_, _) =>
+        {
+            symlink.IsDirectory = typeToggle.IsOn;
+            iconButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            SaveConfiguration();
+        };
+        fields.Children.Add(descriptionBox);
+        fields.Children.Add(sourceBox);
+        fields.Children.Add(targetBox);
+        fields.Children.Add(typeToggle);
+        Grid.SetColumn(fields, 1);
+        outer.Children.Add(fields);
+
+        var removeButton = CompactRemoveButton(() =>
+        {
+            list.RemoveAt(index);
+            SaveConfiguration();
+            refresh();
+        });
+        Grid.SetColumn(removeButton, 2);
+        outer.Children.Add(removeButton);
+
+        return outer;
+    }
+
+    private TextBox CompactTextBox(string value, string placeholder, Action<string> save)
+    {
+        var box = new TextBox
+        {
+            Text = value,
+            PlaceholderText = placeholder,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            MinWidth = 0
+        };
+        box.LostFocus += (_, _) =>
+        {
+            save(box.Text.Trim());
+        };
+        return box;
+    }
+
+    private Button SymlinkOpenButton(string glyph, Action open)
+    {
+        var button = new Button
+        {
+            Content = new FontIcon { Glyph = glyph, FontSize = 16 },
+            Width = 30,
+            Height = 32,
+            MinWidth = 30,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(4),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(button, "Open managed data folder");
+        button.Click += (_, _) => open();
+        return button;
+    }
+
+    private Button CompactRemoveButton(Action remove)
+    {
+        var button = new Button
         {
             Content = new FontIcon { Glyph = "\uE74D", FontSize = 13 },
             Width = 32,
@@ -1180,17 +1292,9 @@ public sealed partial class MainWindow : Window
             CornerRadius = new CornerRadius(4),
             VerticalAlignment = VerticalAlignment.Center
         };
-        ToolTipService.SetToolTip(removeButton, "Remove");
-        removeButton.Click += (_, _) =>
-        {
-            list.RemoveAt(index);
-            SaveConfiguration();
-            refresh();
-        };
-        Grid.SetColumn(removeButton, 2);
-        row.Children.Add(removeButton);
-
-        return row;
+        ToolTipService.SetToolTip(button, "Remove");
+        button.Click += (_, _) => remove();
+        return button;
     }
 
     private FrameworkElement BuildInlineObjectPropertyEditor(object target, PropertyInfo property)
@@ -2185,6 +2289,66 @@ public sealed partial class MainWindow : Window
         {
             AppendOutput($"Open folder failed: {ex.Message}");
         }
+    }
+
+    private static string GetManagedAppDataSymlinkTarget(SymlinksConfig config, string propertyName, string relativePath)
+    {
+        var section = propertyName switch
+        {
+            nameof(SymlinksConfig.RoamingDirectories) => "Roaming",
+            nameof(SymlinksConfig.LocalDirectories) => "Local",
+            nameof(SymlinksConfig.LocalLowDirectories) => "LocalLow",
+            _ => string.Empty
+        };
+        var baseDir = ExpandConfigPath(config.BaseSymlinkDirectory);
+        return Path.Combine(baseDir, "AppData", section, relativePath);
+    }
+
+    private static string GetSpecialSymlinkTarget(SymlinksConfig config, SpecialSymlink symlink)
+    {
+        if (!string.IsNullOrWhiteSpace(symlink.Target))
+            return ExpandConfigPath(symlink.Target);
+
+        var source = ExpandConfigPath(symlink.Source);
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localLow = Path.Combine(profile, "AppData", "LocalLow");
+        var baseDir = ExpandConfigPath(config.BaseSymlinkDirectory);
+
+        var relative = source.StartsWith(roaming, StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine("AppData", "Roaming", Path.GetRelativePath(roaming, source))
+            : source.StartsWith(local, StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine("AppData", "Local", Path.GetRelativePath(local, source))
+                : source.StartsWith(localLow, StringComparison.OrdinalIgnoreCase)
+                    ? Path.Combine("AppData", "LocalLow", Path.GetRelativePath(localLow, source))
+                    : Path.GetFileName(source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return Path.Combine(baseDir, relative);
+    }
+
+    private static string ExpandConfigPath(string path)
+    {
+        return Environment.ExpandEnvironmentVariables(path).Replace("{USERNAME}", Environment.UserName);
+    }
+
+    private static string GetSpecialSymlinkGlyph(SpecialSymlink symlink)
+    {
+        if (LooksLikeFilePath(symlink.Source) || LooksLikeFilePath(symlink.Target) || !symlink.IsDirectory)
+            return "\uE8A5";
+
+        return "\uE8B7";
+    }
+
+    private static string GetPathGlyph(string path)
+    {
+        return LooksLikeFilePath(path) ? "\uE8A5" : "\uE8B7";
+    }
+
+    private static bool LooksLikeFilePath(string path)
+    {
+        var fileName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return !string.IsNullOrWhiteSpace(fileName) && Path.HasExtension(fileName);
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
