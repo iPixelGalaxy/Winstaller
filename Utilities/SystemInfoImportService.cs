@@ -41,12 +41,6 @@ public static class SystemInfoImportService
     private static string AppDataRoaming => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
     private static string AppDataLocal => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     private static string AppDataLocalLow => Path.Combine(UserProfile, "AppData", "LocalLow");
-    private static readonly string[] WindowsShellJunctionNames =
-    [
-        "Application Data",
-        "History",
-        "Temporary Internet Files"
-    ];
     private const string BackupSuffix = ".winstaller-backup";
 
     public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope)
@@ -162,6 +156,17 @@ public static class SystemInfoImportService
                     if (string.IsNullOrWhiteSpace(symlink.Name))
                     {
                         log?.Invoke("Skipped blank symlink entry.");
+                        break;
+                    }
+
+                    if (!SymlinkSafetyPolicy.IsSafeAppDataRelativePath(symlink.Section, symlink.Name, out var unsafeReason))
+                    {
+                        log?.Invoke($"Blocked unsafe symlink path: [{symlink.Section}] {symlink.Name} ({unsafeReason})");
+                        failures.Add(new SymlinkImportFailure(
+                            candidate,
+                            candidate.Title,
+                            [symlink.SourcePath],
+                            $"Blocked unsafe symlink path: {unsafeReason}"));
                         break;
                     }
 
@@ -497,9 +502,10 @@ public static class SystemInfoImportService
         foreach (var dir in directories)
         {
             var leafName = Path.GetFileName(dir);
-            var relativePath = Path.GetRelativePath(rootPath, dir);
+            var relativePath = SymlinkSafetyPolicy.NormalizeRelativePath(Path.GetRelativePath(rootPath, dir));
             var info = new DirectoryInfo(dir);
-            if (IsWindowsShellJunction(info))
+            if (SymlinkSafetyPolicy.IsWindowsShellJunction(info) ||
+                !SymlinkSafetyPolicy.IsSafeAppDataRelativePath(section, relativePath, out _))
                 continue;
 
             if (leafName.EndsWith(BackupSuffix, StringComparison.OrdinalIgnoreCase))
@@ -560,21 +566,25 @@ public static class SystemInfoImportService
 
         foreach (var configuredName in configured.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var sourcePath = Path.Combine(rootPath, configuredName);
+            var safeName = SymlinkSafetyPolicy.NormalizeRelativePath(configuredName);
+            if (!SymlinkSafetyPolicy.IsSafeAppDataRelativePath(section, safeName, out _))
+                continue;
+
+            var sourcePath = Path.Combine(rootPath, safeName);
             if (Directory.Exists(sourcePath))
                 continue;
 
-            var destination = GetSymlinkDestination(config, section, configuredName);
+            var destination = GetSymlinkDestination(config, section, safeName);
             if (!Directory.Exists(destination))
                 continue;
 
             yield return new SystemInfoImportCandidate(
                 SystemInfoImportScope.Symlinks,
-                $"[{section}] {configuredName}",
+                $"[{section}] {safeName}",
                 $"Repair missing configured symlink to {destination}",
                 new SymlinkImport(
                     section,
-                    configuredName,
+                    safeName,
                     sourcePath,
                     false,
                     destination,
@@ -617,6 +627,12 @@ public static class SystemInfoImportService
 
     private static SymlinkMigrationResult MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
+        if (!SymlinkSafetyPolicy.IsSafeAppDataRelativePath(symlink.Section, symlink.Name, out var unsafeReason))
+        {
+            log?.Invoke($"Blocked unsafe symlink path: [{symlink.Section}] {symlink.Name} ({unsafeReason})");
+            return SymlinkMigrationResult.Fail($"Blocked unsafe symlink path: {unsafeReason}", [symlink.SourcePath]);
+        }
+
         if (symlink.Kind is SymlinkImportKind.BackupRecovery or SymlinkImportKind.BackupRollback)
             return RecoverBackupSymlink(config, symlink, log);
 
@@ -649,6 +665,21 @@ public static class SystemInfoImportService
         {
             log?.Invoke($"Skipped missing source: {dataSource}");
             return SymlinkMigrationResult.Fail($"Missing source: {dataSource}", [dataSource]);
+        }
+
+        var rootPath = symlink.Section switch
+        {
+            "Roaming" => AppDataRoaming,
+            "Local" => AppDataLocal,
+            "LocalLow" => AppDataLocalLow,
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(rootPath) ||
+            !SymlinkSafetyPolicy.IsSafeAppDataPath(rootPath, symlink.SourcePath, symlink.Section, out unsafeReason))
+        {
+            log?.Invoke($"Blocked unsafe symlink source: {symlink.SourcePath} ({unsafeReason})");
+            return SymlinkMigrationResult.Fail($"Blocked unsafe symlink source: {unsafeReason}", [symlink.SourcePath]);
         }
 
         var destination = GetSymlinkDestination(config, symlink.Section, symlink.Name);
@@ -883,15 +914,6 @@ public static class SystemInfoImportService
         }
     }
 
-    private static bool IsWindowsShellJunction(DirectoryInfo info)
-    {
-        if (!WindowsShellJunctionNames.Contains(info.Name, StringComparer.OrdinalIgnoreCase))
-            return false;
-
-        return info.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
-               info.Attributes.HasFlag(FileAttributes.Hidden) &&
-               info.Attributes.HasFlag(FileAttributes.System);
-    }
 
     private static bool IsReparseDirectory(string path)
     {
@@ -1302,3 +1324,6 @@ public static class SystemInfoImportService
         public bool bRestartable;
     }
 }
+
+
+

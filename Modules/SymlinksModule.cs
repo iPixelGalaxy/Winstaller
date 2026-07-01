@@ -90,10 +90,17 @@ public class SymlinksModule : ModuleBase
 
     private async Task<bool> CreateAppDataSymlink(string category, string relativePath, string appDataPath, string symlinkBasePath)
     {
-        var sourcePath = Path.Combine(appDataPath, relativePath);
-        var targetPath = Path.Combine(symlinkBasePath, relativePath);
+        var safeRelativePath = SymlinkSafetyPolicy.NormalizeRelativePath(relativePath);
+        if (!SymlinkSafetyPolicy.IsSafeAppDataRelativePath(category, safeRelativePath, out var reason))
+        {
+            ConsoleHelper.WriteWarning($"  Skipped unsafe {category} symlink path: {relativePath} ({reason})");
+            return false;
+        }
 
-        Console.WriteLine($"  Symlinking {category}\\{relativePath}...");
+        var sourcePath = Path.Combine(appDataPath, safeRelativePath);
+        var targetPath = Path.Combine(symlinkBasePath, safeRelativePath);
+
+        Console.WriteLine($"  Symlinking {category}\\{safeRelativePath}...");
 
         return await CreateSymlink(sourcePath, targetPath, true);
     }
@@ -418,3 +425,5 @@ public class SymlinksModule : ModuleBase
         }
     }
 }
+
+

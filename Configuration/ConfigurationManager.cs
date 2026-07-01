@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Winstaller.Models;
+using Winstaller.Utilities;
 
 namespace Winstaller.Configuration;
 
@@ -227,6 +228,9 @@ public static class ConfigurationManager
         RemoveBlankEntries(config.IgnoredRoamingDirectories);
         RemoveBlankEntries(config.IgnoredLocalDirectories);
         RemoveBlankEntries(config.IgnoredLocalLowDirectories);
+        SanitizeAppDataList("Roaming", config.RoamingDirectories, config.IgnoredRoamingDirectories);
+        SanitizeAppDataList("Local", config.LocalDirectories, config.IgnoredLocalDirectories);
+        SanitizeAppDataList("LocalLow", config.LocalLowDirectories, config.IgnoredLocalLowDirectories);
         config.SpecialSymlinks.RemoveAll(item =>
             string.IsNullOrWhiteSpace(item.Source) ||
             string.IsNullOrWhiteSpace(item.Target));
@@ -235,6 +239,35 @@ public static class ConfigurationManager
     private static void RemoveBlankEntries(List<string> values)
     {
         values.RemoveAll(string.IsNullOrWhiteSpace);
+    }
+
+    private static void SanitizeAppDataList(string section, List<string> active, List<string> ignored)
+    {
+        for (var i = active.Count - 1; i >= 0; i--)
+        {
+            var normalized = SymlinkSafetyPolicy.NormalizeRelativePath(active[i]);
+            if (!SymlinkSafetyPolicy.IsSafeAppDataRelativePath(section, normalized, out _))
+            {
+                active.RemoveAt(i);
+                if (!ignored.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                    ignored.Add(normalized);
+                continue;
+            }
+
+            active[i] = normalized;
+        }
+
+        for (var i = ignored.Count - 1; i >= 0; i--)
+        {
+            var normalized = SymlinkSafetyPolicy.NormalizeRelativePath(ignored[i]);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                ignored.RemoveAt(i);
+                continue;
+            }
+
+            ignored[i] = normalized;
+        }
     }
     private static void EnsureSplitConfiguration()
     {
@@ -370,3 +403,4 @@ public static class ConfigurationManager
         }
     }
 }
+
