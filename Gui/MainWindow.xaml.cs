@@ -34,7 +34,6 @@ public sealed partial class MainWindow : Window
     private readonly NavigationView _navigation = new();
     private readonly ScrollViewer _contentScroll = new();
     private readonly StackPanel _content = new();
-    private readonly TextBox _outputBox = new();
     private readonly ComboBox _themeBox = new();
     private readonly Button _paneButton = new();
     private readonly Grid _titleBar = new();
@@ -44,6 +43,7 @@ public sealed partial class MainWindow : Window
     private WinstallerConfig _config = null!;
     private List<ModuleDescriptor> _modules = [];
     private ElementTheme _requestedTheme = ElementTheme.Default;
+    private TextBox? _activeOutputBox;
     private bool _isRunning;
     private bool _isLoadingUi;
 
@@ -329,7 +329,6 @@ public sealed partial class MainWindow : Window
         }
         _content.Children.Add(list);
 
-        _content.Children.Add(OutputCard());
         _isLoadingUi = false;
     }
 
@@ -341,7 +340,6 @@ public sealed partial class MainWindow : Window
         _content.Children.Add(ModulePageHeader(module));
 
         _content.Children.Add(BuildConfigEditor(module.Config));
-        _content.Children.Add(OutputCard());
         _isLoadingUi = false;
     }
 
@@ -498,7 +496,7 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildConfigEditor(object config)
     {
-        var panel = new StackPanel { Spacing = 10 };
+        var panel = new StackPanel { Spacing = 12 };
         foreach (var property in config.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (!property.CanRead || !property.CanWrite || property.Name == "Enabled")
@@ -506,23 +504,60 @@ public sealed partial class MainWindow : Window
                 continue;
             }
 
-            panel.Children.Add(BuildPropertyEditor(config, property));
+            panel.Children.Add(BuildConfigSection(config, property));
         }
 
-        return Card(new StackPanel
+        return panel;
+    }
+
+    private FrameworkElement BuildConfigSection(object target, PropertyInfo property)
+    {
+        return IsSupportedList(property.PropertyType)
+            ? BuildListSection(target, property)
+            : BuildSettingRow(target, property);
+    }
+
+    private FrameworkElement BuildSettingRow(object target, PropertyInfo property)
+    {
+        var row = new Grid { ColumnSpacing = 14 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360) });
+
+        row.Children.Add(new FontIcon
         {
-            Spacing = 14,
-            Children =
-            {
-                SectionTitle("Configuration"),
-                panel
-            }
+            Glyph = GetConfigGlyph(property, null),
+            FontSize = 20,
+            Width = 28,
+            VerticalAlignment = VerticalAlignment.Center
         });
+
+        var label = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        label.Children.Add(new TextBlock
+        {
+            Text = SplitName(property.Name),
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        label.Children.Add(new TextBlock
+        {
+            Text = GetSettingDescription(property),
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap
+        });
+        Grid.SetColumn(label, 1);
+        row.Children.Add(label);
+
+        var editor = BuildValueEditor(target, property);
+        editor.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(editor, 2);
+        row.Children.Add(editor);
+
+        return Card(row);
     }
 
     private FrameworkElement BuildPropertyEditor(object target, PropertyInfo property)
     {
-        var value = property.GetValue(target);
         var row = new Grid { ColumnSpacing = 16 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -535,6 +570,19 @@ public sealed partial class MainWindow : Window
                 new TextBlock { Text = property.PropertyType.Name, Opacity = 0.6, FontSize = 12 }
             }
         });
+
+        var editor = IsSupportedList(property.PropertyType)
+            ? BuildListEditor(target, property)
+            : BuildValueEditor(target, property);
+
+        Grid.SetColumn(editor, 1);
+        row.Children.Add(editor);
+        return row;
+    }
+
+    private FrameworkElement BuildValueEditor(object target, PropertyInfo property)
+    {
+        var value = property.GetValue(target);
 
         FrameworkElement editor;
         if (property.PropertyType == typeof(bool))
@@ -589,10 +637,6 @@ public sealed partial class MainWindow : Window
             };
             editor = box;
         }
-        else if (IsSupportedList(property.PropertyType))
-        {
-            editor = BuildListEditor(target, property);
-        }
         else
         {
             editor = new TextBlock
@@ -603,8 +647,53 @@ public sealed partial class MainWindow : Window
             };
         }
 
-        Grid.SetColumn(editor, 1);
-        row.Children.Add(editor);
+        return editor;
+    }
+
+    private FrameworkElement BuildListSection(object target, PropertyInfo property)
+    {
+        return Card(new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                BuildListHeader(target, property),
+                BuildListEditor(target, property)
+            }
+        });
+    }
+
+    private FrameworkElement BuildListHeader(object target, PropertyInfo property)
+    {
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        row.Children.Add(new FontIcon
+        {
+            Glyph = GetConfigGlyph(property, null),
+            FontSize = 20,
+            Width = 28,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var title = new StackPanel { Spacing = 2 };
+        title.Children.Add(new TextBlock
+        {
+            Text = SplitName(property.Name),
+            FontSize = 18,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        title.Children.Add(new TextBlock
+        {
+            Text = GetSettingDescription(property),
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            FontSize = 12
+        });
+        Grid.SetColumn(title, 1);
+        row.Children.Add(title);
+
         return row;
     }
 
@@ -653,9 +742,7 @@ public sealed partial class MainWindow : Window
     private FrameworkElement BuildListItemEditor(IList list, Type itemType, int index, Action refresh)
     {
         var item = list[index]!;
-        var header = itemType == typeof(string)
-            ? $"Item {index + 1}"
-            : $"{SplitName(itemType.Name)} {index + 1}";
+        var header = GetItemTitle(item, itemType, index);
 
         var body = new StackPanel { Spacing = 8 };
         if (itemType == typeof(string))
@@ -684,19 +771,41 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        body.Children.Add(ActionButton("Remove", () =>
+        var removeButton = ActionButton("Remove", () =>
         {
             list.RemoveAt(index);
             SaveConfiguration();
             refresh();
-        }));
+        });
 
-        return new SettingsExpander
+        var row = new Grid { ColumnSpacing = 14 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        row.Children.Add(new FontIcon
         {
-            Header = header,
-            IsExpanded = true,
-            Content = body
-        };
+            Glyph = GetConfigGlyph(null, item),
+            FontSize = 20,
+            Width = 28,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 4, 0, 0)
+        });
+
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock
+        {
+            Text = header,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        content.Children.Add(body);
+        Grid.SetColumn(content, 1);
+        row.Children.Add(content);
+
+        Grid.SetColumn(removeButton, 2);
+        row.Children.Add(removeButton);
+
+        return Card(row);
     }
 
     private FrameworkElement BuildInlineObjectPropertyEditor(object target, PropertyInfo property)
@@ -804,25 +913,6 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch
         };
-    }
-
-    private FrameworkElement OutputCard()
-    {
-        _outputBox.AcceptsReturn = true;
-        _outputBox.IsReadOnly = true;
-        _outputBox.TextWrapping = TextWrapping.NoWrap;
-        _outputBox.FontFamily = new FontFamily("Cascadia Mono");
-        _outputBox.MinHeight = 180;
-        _outputBox.MaxHeight = 320;
-        return Card(new StackPanel
-        {
-            Spacing = 12,
-            Children =
-            {
-                SectionTitle("Output"),
-                _outputBox
-            }
-        });
     }
 
     private StackPanel PageTitle(string title, string subtitle)
@@ -1010,7 +1100,7 @@ public sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            await RunModulesAsync(modules);
+            await RunModulesWithOutputDialogAsync(modules);
         }
     }
 
@@ -1149,6 +1239,44 @@ public sealed partial class MainWindow : Window
 
         await dialog.ShowAsync();
     }
+
+    private async Task RunModulesWithOutputDialogAsync(IReadOnlyList<ModuleDescriptor> modules)
+    {
+        var outputBox = new TextBox
+        {
+            AcceptsReturn = true,
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new FontFamily("Cascadia Mono"),
+            MinWidth = 720,
+            MinHeight = 420,
+            MaxHeight = 520
+        };
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = modules.Count == 1 ? $"Running {modules[0].Name}" : $"Running {modules.Count} modules",
+            Content = outputBox,
+            CloseButtonText = string.Empty,
+            DefaultButton = ContentDialogButton.None
+        };
+
+        _activeOutputBox = outputBox;
+        var dialogTask = dialog.ShowAsync().AsTask();
+        try
+        {
+            await RunModulesAsync(modules);
+        }
+        finally
+        {
+            _activeOutputBox = null;
+            dialog.CloseButtonText = "Done";
+        }
+
+        await dialogTask;
+    }
+
     private async Task RunModulesAsync(IReadOnlyList<ModuleDescriptor> modules)
     {
         if (_isRunning)
@@ -1385,8 +1513,86 @@ public sealed partial class MainWindow : Window
 
     private void AppendOutputText(string text)
     {
-        _outputBox.Text += text;
-        _outputBox.SelectionStart = _outputBox.Text.Length;
+        if (_activeOutputBox is null)
+        {
+            return;
+        }
+
+        _activeOutputBox.Text += text;
+        _activeOutputBox.SelectionStart = _activeOutputBox.Text.Length;
+    }
+
+    private static string GetSettingDescription(PropertyInfo property)
+    {
+        if (IsSupportedList(property.PropertyType))
+        {
+            return "Configured items";
+        }
+
+        var nullableType = Nullable.GetUnderlyingType(property.PropertyType);
+        return SplitName((nullableType ?? property.PropertyType).Name);
+    }
+
+    private static string GetItemTitle(object item, Type itemType, int index)
+    {
+        return item switch
+        {
+            string value when !string.IsNullOrWhiteSpace(value) => value,
+            NetworkDriveMapping drive when !string.IsNullOrWhiteSpace(drive.DriveLetter) => $"{drive.DriveLetter}: {drive.NetworkPath}",
+            ShellFolderMapping folder when !string.IsNullOrWhiteSpace(folder.FolderName) => folder.FolderName,
+            StartupProgram program when !string.IsNullOrWhiteSpace(program.Name) => program.Name,
+            ProcessToRun process when !string.IsNullOrWhiteSpace(process.Path) => Path.GetFileName(process.Path),
+            FileCopyOperation copy when !string.IsNullOrWhiteSpace(copy.Source) => Path.GetFileName(copy.Source),
+            RegistryModification modification when !string.IsNullOrWhiteSpace(modification.Key) => modification.Key,
+            CustomInstaller installer when !string.IsNullOrWhiteSpace(installer.Name) => installer.Name,
+            SpecialSymlink symlink when !string.IsNullOrWhiteSpace(symlink.Description) => symlink.Description,
+            _ => itemType == typeof(string) ? $"Item {index + 1}" : $"{SplitName(itemType.Name)} {index + 1}"
+        };
+    }
+
+    private static string GetConfigGlyph(PropertyInfo? property, object? item)
+    {
+        if (item is ShellFolderMapping folder)
+        {
+            return folder.FolderName.ToLowerInvariant() switch
+            {
+                "desktop" => "\uE80F",
+                "downloads" => "\uE896",
+                "documents" => "\uE8A5",
+                "pictures" => "\uEB9F",
+                "music" => "\uEC4F",
+                "videos" => "\uE8B2",
+                _ => "\uE8B7"
+            };
+        }
+
+        if (item is NetworkDriveMapping)
+            return "\uE839";
+        if (item is StartupProgram or ProcessToRun)
+            return "\uE768";
+        if (item is FileCopyOperation)
+            return "\uE8C8";
+        if (item is RegistryModification)
+            return "\uE7B8";
+        if (item is CustomInstaller)
+            return "\uE896";
+        if (item is SpecialSymlink)
+            return "\uE71B";
+
+        var name = property?.Name ?? string.Empty;
+        return name switch
+        {
+            "Folders" => "\uE8B7",
+            "Drives" => "\uE839",
+            "Additions" => "\uE943",
+            "Programs" or "ProcessesToRun" => "\uE768",
+            "FilesToImport" or "Modifications" => "\uE7B8",
+            "Operations" => "\uE8C8",
+            "PreparedInstallers" or "ManualInstalls" or "CustomScripts" or "DefaultInstalls" => "\uE896",
+            "RoamingDirectories" or "LocalDirectories" or "LocalLowDirectories" or "SpecialSymlinks" => "\uE71B",
+            "FontsDirectory" => "\uE8D2",
+            _ => "\uE713"
+        };
     }
 
     private static string SplitName(string value)
