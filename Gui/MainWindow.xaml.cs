@@ -214,17 +214,17 @@ public sealed partial class MainWindow : Window
         _config = ConfigurationManager.LoadConfiguration();
         _modules =
         [
-            new("Network Drives", "Map configured network drives", "\uE839", _config.NetworkDrives, () => new NetworkDrivesModule(_config)),
-            new("Symlinks", "Restore configured profile symlinks", "\uE71B", _config.Symlinks, () => new SymlinksModule(_config)),
-            new("App Installer", "Install configured applications", "\uE896", _config.AppInstaller, () => new AppInstallerModule(_config)),
-            new("Fonts", "Install configured fonts", "\uE8D2", _config.Fonts, () => new FontsModule(_config)),
-            new("Shell Folders", "Configure user shell folders", "\uE8B7", _config.ShellFolders, () => new ShellFoldersModule(_config)),
-            new("Registry", "Apply registry files and changes", "\uE7B8", _config.Registry, () => new RegistryModule(_config)),
-            new("File Copy", "Run configured copy operations", "\uE8C8", _config.FileCopy, () => new FileCopyModule(_config)),
-            new("Startup", "Configure startup programs and processes", "\uE768", _config.Startup, () => new StartupModule(_config)),
-            new("Path", "Configure PATH additions", "\uE943", _config.Path, () => new PathModule(_config)),
-            new("Discord", "Install and patch Discord", "\uE716", _config.Discord, () => new DiscordModule(_config)),
-            new("Spotify", "Install and patch Spotify", "\uE768", _config.Spotify, () => new SpotifyModule(_config)),
+            new("Network Drives", "Map configured network drives", "\uE839", _config.NetworkDrives, () => new NetworkDrivesModule(_config), SystemInfoImportScope.NetworkDrives),
+            new("Symlinks", "Restore configured profile symlinks", "\uE71B", _config.Symlinks, () => new SymlinksModule(_config), SystemInfoImportScope.Symlinks),
+            new("App Installer", "Install configured applications", "\uE896", _config.AppInstaller, () => new AppInstallerModule(_config), SystemInfoImportScope.AppInstaller),
+            new("Fonts", "Install configured fonts", "\uE8D2", _config.Fonts, () => new FontsModule(_config), null),
+            new("Shell Folders", "Configure user shell folders", "\uE8B7", _config.ShellFolders, () => new ShellFoldersModule(_config), SystemInfoImportScope.ShellFolders),
+            new("Registry", "Apply registry files and changes", "\uE7B8", _config.Registry, () => new RegistryModule(_config), null),
+            new("File Copy", "Run configured copy operations", "\uE8C8", _config.FileCopy, () => new FileCopyModule(_config), null),
+            new("Startup", "Configure startup programs and processes", "\uE768", _config.Startup, () => new StartupModule(_config), SystemInfoImportScope.Startup),
+            new("Path", "Configure PATH additions", "\uE943", _config.Path, () => new PathModule(_config), SystemInfoImportScope.Path),
+            new("Discord", "Install and patch Discord", "\uE716", _config.Discord, () => new DiscordModule(_config), null),
+            new("Spotify", "Install and patch Spotify", "\uE768", _config.Spotify, () => new SpotifyModule(_config), null),
         ];
     }
 
@@ -349,7 +349,8 @@ public sealed partial class MainWindow : Window
     {
         _topBarActions.Children.Clear();
         _topBarActionLabels.Clear();
-        _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run All Enabled", async () => await RunModulesAsync(_modules.Where(m => m.IsEnabled).ToList()), primary: true));
+        _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run All Enabled", async () => await ConfirmAndRunModulesAsync(_modules.Where(m => m.IsEnabled).ToList()), primary: true));
+        _topBarActions.Children.Add(TopBarActionButton(Symbol.Download, "Import System Info", async () => await ImportSystemInfoAsync(SystemInfoImportScope.All)));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Refresh, "Reload All Configs", () =>
         {
             LoadConfiguration();
@@ -365,7 +366,11 @@ public sealed partial class MainWindow : Window
     {
         _topBarActions.Children.Clear();
         _topBarActionLabels.Clear();
-        _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run This Module", async () => await RunModulesAsync([module]), primary: true));
+        _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run This Module", async () => await ConfirmAndRunModulesAsync([module]), primary: true));
+        if (module.ImportScope is { } importScope)
+        {
+            _topBarActions.Children.Add(TopBarActionButton(Symbol.Download, "Import System Info", async () => await ImportSystemInfoAsync(importScope, module)));
+        }
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Save, "Save Config", SaveConfiguration));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Folder, "Open Config Directory", OpenConfig));
         UpdateTopBarActionLabelVisibility();
@@ -929,18 +934,17 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private SettingsCard Card(UIElement child)
+    private Border Card(UIElement child)
     {
-        return new SettingsCard
+        return new Border
         {
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(16),
-            Content = child,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch
+            Child = child,
+            HorizontalAlignment = HorizontalAlignment.Stretch
         };
     }
 
@@ -978,6 +982,163 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> modules)
+    {
+        if (modules.Count == 0)
+        {
+            AppendOutput("No modules selected.");
+            return;
+        }
+
+        var moduleNames = string.Join(Environment.NewLine, modules.Select(module => $"- {module.Name}"));
+        var confirmed = await ConfirmAsync(
+            modules.Count == 1 ? "Run module?" : "Run enabled modules?",
+            modules.Count == 1
+                ? $"This will run {modules[0].Name}."
+                : $"This will run {modules.Count} module(s):{Environment.NewLine}{moduleNames}",
+            "Run");
+
+        if (confirmed)
+        {
+            await RunModulesAsync(modules);
+        }
+    }
+
+    private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDescriptor? module = null)
+    {
+        AppendOutput(module is null ? "Scanning system info..." : $"Scanning system info for {module.Name}...");
+        var candidates = await SystemInfoImportService.FindCandidatesAsync(_config, scope);
+        if (candidates.Count == 0)
+        {
+            await ShowMessageAsync("Import System Info", "No new system info was found for this scope.");
+            AppendOutput("No new system info found.");
+            return;
+        }
+
+        var selected = await ShowImportReviewDialogAsync(candidates);
+        if (selected.Count == 0)
+        {
+            AppendOutput("Import cancelled.");
+            return;
+        }
+
+        var added = SystemInfoImportService.ApplyCandidates(_config, selected);
+        SaveConfiguration();
+        LoadConfiguration();
+        RebuildNavigation();
+        if (module is null)
+        {
+            RenderDashboard();
+        }
+        else
+        {
+            var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
+            RenderModule(refreshedModule ?? module);
+        }
+
+        AppendOutput($"Imported {added} item(s).");
+    }
+
+    private async Task<List<SystemInfoImportCandidate>> ShowImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
+    {
+        var selected = new List<SystemInfoImportCandidate>();
+        var panel = new StackPanel { Spacing = 12 };
+
+        foreach (var group in candidates.GroupBy(candidate => candidate.Scope))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = SplitName(group.Key.ToString()),
+                FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+            });
+
+            foreach (var candidate in group)
+            {
+                var checkBox = new CheckBox
+                {
+                    IsChecked = true,
+                    Tag = candidate,
+                    Content = new StackPanel
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
+                            new TextBlock
+                            {
+                                Text = candidate.Detail,
+                                Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+                                FontSize = 12,
+                                TextWrapping = TextWrapping.Wrap
+                            }
+                        }
+                    }
+                };
+                panel.Children.Add(checkBox);
+            }
+        }
+
+        var scroll = new ScrollViewer
+        {
+            Content = panel,
+            MaxHeight = 520
+        };
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = $"Import {candidates.Count} system item(s)?",
+            Content = scroll,
+            PrimaryButtonText = "Import Selected",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return selected;
+
+        foreach (var checkBox in panel.Children.OfType<CheckBox>())
+        {
+            if (checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate)
+            {
+                selected.Add(candidate);
+            }
+        }
+
+        return selected;
+    }
+
+    private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = title,
+            Content = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap
+            },
+            PrimaryButtonText = primaryText,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private async Task ShowMessageAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = title,
+            Content = message,
+            CloseButtonText = "OK"
+        };
+
+        await dialog.ShowAsync();
+    }
     private async Task RunModulesAsync(IReadOnlyList<ModuleDescriptor> modules)
     {
         if (_isRunning)
@@ -1242,7 +1403,8 @@ public sealed partial class MainWindow : Window
         string Description,
         string IconGlyph,
         object Config,
-        Func<IModule> CreateModule)
+        Func<IModule> CreateModule,
+        SystemInfoImportScope? ImportScope)
     {
         public bool IsEnabled => Config.GetType().GetProperty("Enabled")?.GetValue(Config) is true;
 
