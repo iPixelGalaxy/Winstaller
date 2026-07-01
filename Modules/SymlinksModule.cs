@@ -75,9 +75,10 @@ public class SymlinksModule : ModuleBase
             foreach (var symlink in Config.Symlinks.SpecialSymlinks)
             {
                 Console.WriteLine($"\nProcessing: {symlink.Description}");
+                var source = ExpandEnvironmentVariables(symlink.Source);
                 var result = await CreateSymlink(
-                    ExpandEnvironmentVariables(symlink.Source),
-                    ExpandEnvironmentVariables(symlink.Target),
+                    source,
+                    ResolveSpecialTarget(baseDir, source, symlink.Target),
                     symlink.IsDirectory
                 );
                 if (!result) success = false;
@@ -227,15 +228,32 @@ public class SymlinksModule : ModuleBase
         EnsureAdministrator();
 
         ConsoleHelper.WriteSubHeader("Special Symlinks");
+        var baseDir = ExpandEnvironmentVariables(Config.Symlinks.BaseSymlinkDirectory);
         foreach (var symlink in Config.Symlinks.SpecialSymlinks)
         {
             Console.WriteLine($"\nProcessing: {symlink.Description}");
             await CreateSymlink(
                 ExpandEnvironmentVariables(symlink.Source),
-                ExpandEnvironmentVariables(symlink.Target),
+                ResolveSpecialTarget(baseDir, ExpandEnvironmentVariables(symlink.Source), symlink.Target),
                 symlink.IsDirectory
             );
         }
+    }
+
+    private string ResolveSpecialTarget(string baseDir, string source, string configuredTarget)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredTarget))
+            return ExpandEnvironmentVariables(configuredTarget);
+
+        var relative = source.StartsWith(AppDataRoaming, StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine("AppData", "Roaming", Path.GetRelativePath(AppDataRoaming, source))
+            : source.StartsWith(AppDataLocal, StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine("AppData", "Local", Path.GetRelativePath(AppDataLocal, source))
+                : source.StartsWith(AppDataLocalLow, StringComparison.OrdinalIgnoreCase)
+                    ? Path.Combine("AppData", "LocalLow", Path.GetRelativePath(AppDataLocalLow, source))
+                    : Path.GetFileName(source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return Path.Combine(baseDir, relative);
     }
 
     private Task ListConfiguredSymlinks()

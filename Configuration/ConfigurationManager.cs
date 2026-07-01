@@ -135,6 +135,7 @@ public static class ConfigurationManager
                 PreparedInstallers = [],
                 ManualInstalls = [],
                 CustomScripts = [],
+                Behaviors = new(StringComparer.OrdinalIgnoreCase),
                 DefaultInstalls =
                 [
                     "Microsoft.DotNet.DesktopRuntime.6", "Microsoft.DotNet.DesktopRuntime.7",

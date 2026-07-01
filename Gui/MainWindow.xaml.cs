@@ -148,7 +148,7 @@ public sealed partial class MainWindow : Window
 
         _topBarActions.Orientation = Orientation.Horizontal;
         _topBarActions.Spacing = 8;
-        _topBarActions.Margin = new Thickness(222, 0, 0, 0);
+        _topBarActions.Margin = new Thickness(153, 0, 0, 0);
         _topBarActions.VerticalAlignment = VerticalAlignment.Center;
 
         var themePanel = new StackPanel
@@ -531,29 +531,18 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
     {
-        var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(BuildAppTileSection("Default Installs", config.DefaultInstalls));
-        panel.Children.Add(BuildAppTileSection("Prepared Installers", config.PreparedInstallers));
-        panel.Children.Add(BuildAppTileSection("Manual Installs", config.ManualInstalls));
-        panel.Children.Add(BuildListSection(config, typeof(AppInstallerConfig).GetProperty(nameof(AppInstallerConfig.CustomScripts))!));
-        return panel;
-    }
-
-    private FrameworkElement BuildAppTileSection(string title, List<string> apps)
-    {
         var grid = new VariableSizedWrapGrid
         {
             Orientation = Orientation.Horizontal,
-            MaximumRowsOrColumns = 4,
             HorizontalAlignment = HorizontalAlignment.Left
         };
 
         void Refresh()
         {
             grid.Children.Clear();
-            foreach (var app in apps.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            foreach (var app in config.DefaultInstalls.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
             {
-                grid.Children.Add(BuildAppTile(app, apps, Refresh));
+                grid.Children.Add(BuildAppTile(app, config, Refresh));
             }
         }
 
@@ -564,16 +553,10 @@ public sealed partial class MainWindow : Window
             Spacing = 12,
             Children =
             {
-                new TextBlock
-                {
-                    Text = title,
-                    FontSize = 18,
-                    FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
-                },
                 grid,
-                ActionButton($"+ Add {Singularize(title)}", () =>
+                ActionButton("+ Add App", () =>
                 {
-                    apps.Add(string.Empty);
+                    config.DefaultInstalls.Add(string.Empty);
                     SaveConfiguration();
                     Refresh();
                 })
@@ -581,7 +564,7 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private FrameworkElement BuildAppTile(string packageId, List<string> apps, Action refresh)
+    private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
     {
         var title = GetKnownPackageName(packageId);
         var box = new TextBox
@@ -592,10 +575,10 @@ public sealed partial class MainWindow : Window
         };
         box.LostFocus += (_, _) =>
         {
-            var index = apps.IndexOf(packageId);
+            var index = config.DefaultInstalls.IndexOf(packageId);
             if (index >= 0)
             {
-                apps[index] = box.Text.Trim();
+                config.DefaultInstalls[index] = box.Text.Trim();
                 SaveConfiguration();
                 refresh();
             }
@@ -604,7 +587,7 @@ public sealed partial class MainWindow : Window
         return new Border
         {
             Width = 230,
-            MinHeight = 116,
+            MinHeight = 132,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerDashboardCardBrush"),
             CornerRadius = new CornerRadius(8),
@@ -622,9 +605,13 @@ public sealed partial class MainWindow : Window
                         TextWrapping = TextWrapping.Wrap
                     },
                     box,
+                    KnownBehaviorPackage(packageId)
+                        ? ActionButton("Edit", async () => await ShowAppBehaviorDialogAsync(config, packageId))
+                        : new Grid(),
                     ActionButton("Remove", () =>
                     {
-                        apps.Remove(packageId);
+                        config.DefaultInstalls.Remove(packageId);
+                        config.Behaviors.Remove(packageId);
                         SaveConfiguration();
                         refresh();
                     })
@@ -1314,7 +1301,18 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var selected = await ShowImportReviewDialogAsync(candidates);
+        List<SystemInfoImportCandidate> selected;
+        var symlinkMode = SymlinkImportMode.Copy;
+        if (scope == SystemInfoImportScope.Symlinks)
+        {
+            var result = await ShowSymlinkImportReviewDialogAsync(candidates);
+            selected = result.Selected;
+            symlinkMode = result.Mode;
+        }
+        else
+        {
+            selected = await ShowImportReviewDialogAsync(candidates, scope == SystemInfoImportScope.AppInstaller);
+        }
         if (selected.Count == 0)
         {
             AppendOutput("Import cancelled.");
@@ -1327,7 +1325,7 @@ public sealed partial class MainWindow : Window
         }
 
         SystemInfoImportService.IgnoreCandidates(_config, candidates.Except(selected));
-        var added = SystemInfoImportService.ApplyCandidates(_config, selected);
+        var added = SystemInfoImportService.ApplyCandidates(_config, selected, symlinkMode);
         SaveConfiguration();
         LoadConfiguration();
         RebuildNavigation();
@@ -1389,10 +1387,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task<List<SystemInfoImportCandidate>> ShowImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
+    private async Task<List<SystemInfoImportCandidate>> ShowImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates, bool includeRecommendedApps = false)
     {
         var selected = new List<SystemInfoImportCandidate>();
         var panel = new StackPanel { Spacing = 12 };
+        CheckBox? recommended = null;
+        if (includeRecommendedApps)
+        {
+            recommended = new CheckBox
+            {
+                Content = "Import Recommended Apps",
+                IsChecked = false
+            };
+            panel.Children.Add(recommended);
+        }
 
         foreach (var group in candidates.GroupBy(candidate => candidate.Scope))
         {
@@ -1455,7 +1463,61 @@ public sealed partial class MainWindow : Window
             }
         }
 
+        if (recommended?.IsChecked == true)
+            selected.AddRange(SystemInfoImportService.GetRecommendedAppCandidates(_config));
+
         return selected;
+    }
+
+    private async Task<SymlinkImportSelection> ShowSymlinkImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        foreach (var group in candidates.GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.Group) ? "Folders Not Yet Symlinked" : candidate.Group))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = group.Key,
+                FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+            });
+            foreach (var candidate in group)
+            {
+                panel.Children.Add(new CheckBox
+                {
+                    IsChecked = true,
+                    Tag = candidate,
+                    Content = new StackPanel
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
+                            new TextBlock { Text = candidate.Detail, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
+                        }
+                    }
+                });
+            }
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = $"Import {candidates.Count} symlink item(s)?",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 520 },
+            PrimaryButtonText = "Copy (Safe, but slower)",
+            SecondaryButtonText = "Move (faster but risky)",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.None)
+            return new([], SymlinkImportMode.Copy);
+
+        var selected = panel.Children.OfType<CheckBox>()
+            .Where(checkBox => checkBox.IsChecked == true)
+            .Select(checkBox => checkBox.Tag)
+            .OfType<SystemInfoImportCandidate>()
+            .ToList();
+        return new(selected, result == ContentDialogResult.Secondary ? SymlinkImportMode.Move : SymlinkImportMode.Copy);
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
@@ -1525,6 +1587,56 @@ public sealed partial class MainWindow : Window
 
         await dialog.ShowAsync();
         RenderModule(module);
+    }
+
+    private async Task ShowAppBehaviorDialogAsync(AppInstallerConfig config, string packageId)
+    {
+        if (!config.Behaviors.TryGetValue(packageId, out var behavior))
+        {
+            behavior = new AppInstallBehavior();
+            config.Behaviors[packageId] = behavior;
+        }
+
+        var mode = new ComboBox { MinWidth = 180 };
+        mode.Items.Add("Default");
+        mode.Items.Add("Prepared");
+        mode.Items.Add("Manual");
+        mode.SelectedItem = string.IsNullOrWhiteSpace(behavior.InstallMode) ? "Default" : behavior.InstallMode;
+
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = packageId, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        panel.Children.Add(new TextBlock { Text = "Install mode" });
+        panel.Children.Add(mode);
+
+        if (packageId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
+        {
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallVencord))!));
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallOpenAsar))!));
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.DiscordLocation))!));
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.VencordInstallerUrl))!));
+        }
+        else if (packageId.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
+        {
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.InstallSpicetify))!));
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.BlockUpdates))!));
+            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.SidebarConfig))!));
+            panel.Children.Add(BuildListSection(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.CustomApps))!));
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = "Edit App Behavior",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel"
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            behavior.InstallMode = mode.SelectedItem?.ToString() ?? "Default";
+            SaveConfiguration();
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        }
     }
 
     private async Task ShowIgnoredItemsAsync(ModuleDescriptor module)
@@ -1944,6 +2056,12 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    private static bool KnownBehaviorPackage(string packageId)
+    {
+        return packageId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase) ||
+               packageId.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string GetItemTitle(object item, Type itemType, int index)
     {
         return item switch
@@ -2028,6 +2146,7 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record ShellFolderPreset(string Name, string RegistryValue, string DefaultPath);
+    private sealed record SymlinkImportSelection(List<SystemInfoImportCandidate> Selected, SymlinkImportMode Mode);
 
     private sealed record ModuleDescriptor(
         string Name,

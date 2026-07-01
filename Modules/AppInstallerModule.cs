@@ -33,6 +33,14 @@ public class AppInstallerModule : ModuleBase
         var successCount = 0;
         var totalCount = 0;
 
+        foreach (var packageId in Config.AppInstaller.DefaultInstalls)
+        {
+            totalCount++;
+            if (await InstallConfiguredPackageAsync(packageId))
+                successCount++;
+            Console.WriteLine();
+        }
+
         // Phase 1: Prepared Installers (with INF files)
         if (Config.AppInstaller.PreparedInstallers.Count > 0)
         {
@@ -72,15 +80,6 @@ public class AppInstallerModule : ModuleBase
             }
         }
 
-        // Phase 4: Default Installs (bulk)
-        if (Config.AppInstaller.DefaultInstalls.Count > 0)
-        {
-            ConsoleHelper.WriteSubHeader("Phase 4: Default Installations (Bulk)");
-            totalCount += Config.AppInstaller.DefaultInstalls.Count;
-            if (await InstallDefaultPackagesBulkAsync())
-                successCount += Config.AppInstaller.DefaultInstalls.Count;
-        }
-
         // Summary
         ConsoleHelper.WriteHeader("Installation Summary");
         Console.WriteLine($"Total packages processed: {totalCount}");
@@ -88,6 +87,92 @@ public class AppInstallerModule : ModuleBase
         Console.WriteLine($"Failed installations: {totalCount - successCount}");
 
         return successCount == totalCount;
+    }
+
+    private async Task<bool> InstallConfiguredPackageAsync(string packageId)
+    {
+        if (!Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior))
+        {
+            return await InstallDefaultPackageAsync(packageId);
+        }
+
+        var success = behavior.InstallMode.ToLowerInvariant() switch
+        {
+            "prepared" => await InstallPreparedPackageAsync(packageId),
+            "manual" => await InstallManualPackageAsync(packageId),
+            _ => await InstallDefaultPackageAsync(packageId)
+        };
+
+        if (!success)
+            return false;
+
+        if (packageId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
+            return await ApplyDiscordOptionsAsync(behavior.Discord);
+
+        if (packageId.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
+            return await ApplySpotifyOptionsAsync(behavior.Spotify);
+
+        return true;
+    }
+
+    private async Task<bool> ApplyDiscordOptionsAsync(DiscordInstallOptions options)
+    {
+        if (!options.InstallVencord)
+            return true;
+
+        await RunCmdAsync("taskkill /F /IM discord.exe", 5000);
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var installerPath = Path.Combine(tempDir, "VencordInstallerCli.exe");
+            using var response = await HttpClient.GetAsync(options.VencordInstallerUrl);
+            response.EnsureSuccessStatusCode();
+            await using (var fileStream = new FileStream(installerPath, FileMode.Create))
+            {
+                await response.Content.CopyToAsync(fileStream);
+            }
+
+            var location = ExpandEnvironmentVariables(options.DiscordLocation);
+            var result = await RunProcessAsync(installerPath, $"-install -location \"{location}\"", 120000);
+            if (options.InstallOpenAsar)
+                await RunProcessAsync(installerPath, $"-install-openasar -location \"{location}\"", 120000);
+            return result == 0;
+        }
+        catch (Exception ex)
+        {
+            ConsoleHelper.WriteError($"Discord options failed: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    private async Task<bool> ApplySpotifyOptionsAsync(SpotifyInstallOptions options)
+    {
+        if (!options.InstallSpicetify)
+            return true;
+
+        var installCmd = "$ProgressPreference = 'SilentlyContinue'; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/spicetify/cli/main/install.ps1'))";
+        if (await RunPowerShellAsync(installCmd, 300000) != 0)
+            return false;
+
+        var spicetifyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "spicetify", "spicetify");
+        if (!File.Exists(spicetifyPath) && File.Exists(spicetifyPath + ".exe"))
+            spicetifyPath += ".exe";
+        if (!File.Exists(spicetifyPath))
+            return true;
+
+        if (options.BlockUpdates)
+            await RunProcessAsync(spicetifyPath, "spotify-updates block", 30000);
+        if (!string.IsNullOrWhiteSpace(options.SidebarConfig))
+            await RunProcessAsync(spicetifyPath, $"config sidebar_config {options.SidebarConfig}", 30000);
+        foreach (var customApp in options.CustomApps)
+            await RunProcessAsync(spicetifyPath, $"config custom_apps {customApp}", 30000);
+        await RunProcessAsync(spicetifyPath, "apply", 60000);
+        return true;
     }
 
     private async Task<bool> InstallPreparedPackageAsync(string packageId)

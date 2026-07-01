@@ -21,7 +21,14 @@ public sealed record SystemInfoImportCandidate(
     SystemInfoImportScope Scope,
     string Title,
     string Detail,
-    object Value);
+    object Value,
+    string Group = "");
+
+public enum SymlinkImportMode
+{
+    Copy,
+    Move
+}
 
 public static class SystemInfoImportService
 {
@@ -58,7 +65,7 @@ public static class SystemInfoImportService
         return candidates;
     }
 
-    public static int ApplyCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates)
+    public static int ApplyCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates, SymlinkImportMode symlinkMode = SymlinkImportMode.Copy)
     {
         var added = 0;
         foreach (var candidate in candidates)
@@ -125,7 +132,7 @@ public static class SystemInfoImportService
 
                     if (list is not null && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
                     {
-                        CopySymlinkDataToBackup(config, symlink);
+                        MigrateSymlinkData(config, symlink, symlinkMode);
                         list.Add(symlink.Name);
                         added++;
                     }
@@ -292,6 +299,25 @@ public static class SystemInfoImportService
             .ToList();
     }
 
+    public static IEnumerable<SystemInfoImportCandidate> GetRecommendedAppCandidates(WinstallerConfig config)
+    {
+        string[] recommended =
+        [
+            "Git.Git",
+            "Discord.Discord",
+            "Spotify.Spotify"
+        ];
+        var configured = GetConfiguredPackageIds(config);
+        return recommended
+            .Where(id => !configured.Contains(id))
+            .Select(id => new SystemInfoImportCandidate(
+                SystemInfoImportScope.AppInstaller,
+                id,
+                "Recommended app",
+                id,
+                "Recommended"));
+    }
+
     private static IEnumerable<SystemInfoImportCandidate> FindFontCandidates(WinstallerConfig config)
     {
         var windowsFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
@@ -386,14 +412,14 @@ public static class SystemInfoImportService
             }
 
             var info = new DirectoryInfo(dir);
-            var target = info.Attributes.HasFlag(FileAttributes.ReparsePoint)
-                ? info.LinkTarget ?? "(unknown target)"
-                : dir;
+            var existingSymlink = info.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            var target = existingSymlink ? info.LinkTarget ?? "(unknown target)" : dir;
             yield return new SystemInfoImportCandidate(
                 SystemInfoImportScope.Symlinks,
                 $"[{section}] {name}",
                 target,
-                new SymlinkImport(section, name, dir));
+                new SymlinkImport(section, name, dir, existingSymlink, target),
+                existingSymlink ? "Existing Symlinks" : "Folders Not Yet Symlinked");
         }
     }
 
@@ -415,15 +441,55 @@ public static class SystemInfoImportService
                path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void CopySymlinkDataToBackup(WinstallerConfig config, SymlinkImport symlink)
+    private static void MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode)
     {
-        if (!Directory.Exists(symlink.SourcePath))
+        var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
+            ? symlink.ExistingTargetPath
+            : symlink.SourcePath;
+        if (!Directory.Exists(dataSource))
             return;
 
         var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
             .Replace("{USERNAME}", Environment.UserName);
         var destination = Path.Combine(baseDir, "AppData", symlink.Section, symlink.Name);
-        CopyDirectory(symlink.SourcePath, destination);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? baseDir);
+
+        if (Directory.Exists(destination))
+            Directory.Delete(destination, true);
+
+        if (mode == SymlinkImportMode.Move)
+        {
+            try
+            {
+                Directory.Move(dataSource, destination);
+            }
+            catch
+            {
+                CopyDirectory(dataSource, destination);
+                Directory.Delete(dataSource, true);
+            }
+        }
+        else
+        {
+            CopyDirectory(dataSource, destination);
+        }
+
+        if (Directory.Exists(symlink.SourcePath))
+        {
+            if (symlink.IsExistingSymlink)
+            {
+                Directory.Delete(symlink.SourcePath);
+            }
+            else if (mode == SymlinkImportMode.Copy)
+            {
+                var backup = symlink.SourcePath + ".winstaller-backup";
+                if (Directory.Exists(backup))
+                    Directory.Delete(backup, true);
+                Directory.Move(symlink.SourcePath, backup);
+            }
+        }
+
+        CreateDirectorySymlink(symlink.SourcePath, destination);
     }
 
     private static void CopyDirectory(string source, string destination)
@@ -439,6 +505,19 @@ public static class SystemInfoImportService
             var target = Path.Combine(destination, Path.GetFileName(directory));
             CopyDirectory(directory, target);
         }
+    }
+
+    private static void CreateDirectorySymlink(string source, string target)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(source) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c mklink /D \"{source}\" \"{target}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+        process?.WaitForExit();
     }
 
     private static IEnumerable<StartupProgram> ReadStartupKey(RegistryKey root, string path, bool machineLevel)
@@ -675,5 +754,5 @@ public static class SystemInfoImportService
     }
 
     private sealed record WingetInstalledPackage(string Name, string Id, string Version);
-    private sealed record SymlinkImport(string Section, string Name, string SourcePath);
+    private sealed record SymlinkImport(string Section, string Name, string SourcePath, bool IsExistingSymlink, string ExistingTargetPath);
 }
