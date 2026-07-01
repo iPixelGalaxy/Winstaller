@@ -47,17 +47,17 @@
     <MSBuild Projects="$(MSBuildProjectFullPath)"
              Targets="Publish"
              Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);NoBuild=true;IsPublishSingleExeAfterBuild=true" />
-    <MakeDir Directories="D:\ReinstallFiles" />
+    <MakeDir Directories="D:\iPixelGalaxy\Desktop" />
     <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe"
-          DestinationFiles="D:\ReinstallFiles\Winstaller.exe"
+          DestinationFiles="D:\iPixelGalaxy\Desktop\Winstaller.exe"
           Condition="Exists('$(PublishDir)$(AssemblyName).exe')"
           ContinueOnError="WarnAndContinue"
           Retries="0" />
   </Target>
 
   <Target Name="CopyExeToReinstallFiles" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT' and '$(IsPublishSingleExeAfterBuild)' != 'true' and Exists('$(PublishDir)$(AssemblyName).exe')">
-    <MakeDir Directories="D:\ReinstallFiles" />
-    <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe" DestinationFiles="D:\ReinstallFiles\Winstaller.exe" ContinueOnError="WarnAndContinue" Retries="0" />
+    <MakeDir Directories="D:\iPixelGalaxy\Desktop" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe" DestinationFiles="D:\iPixelGalaxy\Desktop\Winstaller.exe" ContinueOnError="WarnAndContinue" Retries="0" />
   </Target>
 
 </Project>

@@ -1309,9 +1309,9 @@ public sealed partial class MainWindow : Window
             var result = await ShowSymlinkImportReviewDialogAsync(candidates);
             selected = result.Selected;
             symlinkMode = result.Mode;
-            if (selected.Count == 0 && result.Ignored.Count == 0)
+            if (selected.Count == 0)
             {
-                AppendOutput("Import cancelled.");
+                AppendOutput("No symlink items selected.");
                 return;
             }
 
@@ -1427,7 +1427,18 @@ public sealed partial class MainWindow : Window
             var added = await Task.Run(() =>
             {
                 SystemInfoImportService.IgnoreCandidates(_config, ignored);
-                return SystemInfoImportService.ApplyCandidates(_config, selected, symlinkMode, Log);
+                return SystemInfoImportService.ApplyCandidates(
+                    _config,
+                    selected,
+                    symlinkMode,
+                    Log,
+                    scope == SystemInfoImportScope.Symlinks
+                        ? candidate =>
+                        {
+                            ConfigurationManager.SaveConfiguration(_config);
+                            Log($"Saved successful symlink config: {candidate.Title}");
+                        }
+                        : null);
             });
 
             SaveConfiguration();
@@ -1615,13 +1626,13 @@ public sealed partial class MainWindow : Window
         {
             if (dialog is not null)
             {
-                dialog.Title = $"Import {checkBoxes.Count(checkBox => checkBox.IsChecked == true)} symlink item(s)?";
+                dialog.Title = $"Import {checkBoxes.Count(checkBox => checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate && !ignoredCandidates.Contains(candidate))} symlink item(s)?";
             }
         }
 
         var orderedGroups = candidates
             .GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.Group) ? "Folders Not Yet Symlinked" : candidate.Group)
-            .OrderBy(group => group.Key == "Existing Symlinks" ? 0 : 1);
+            .OrderBy(group => group.Key == "Existing Symlinks" ? 0 : group.Key == "Ignored" ? 2 : 1);
 
         foreach (var group in orderedGroups)
         {
@@ -1632,6 +1643,12 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
+                var isIgnored = group.Key == "Ignored";
+                if (isIgnored)
+                {
+                    ignoredCandidates.Add(candidate);
+                }
+
                 var itemGrid = new Grid
                 {
                     ColumnSpacing = 10,
@@ -1643,7 +1660,7 @@ public sealed partial class MainWindow : Window
 
                 var checkBox = new CheckBox
                 {
-                    IsChecked = group.Key == "Existing Symlinks",
+                    IsChecked = !isIgnored,
                     Tag = candidate,
                     VerticalAlignment = VerticalAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center,
@@ -1685,16 +1702,23 @@ public sealed partial class MainWindow : Window
                     if (ignoredCandidates.Remove(candidate))
                     {
                         ignoreButton!.Content = "Ignore";
-                        checkBox.IsEnabled = true;
+                        SystemInfoImportService.UnignoreCandidates(_config, [candidate]);
+                        SaveConfiguration();
+                        AppendOutput($"Unignored {candidate.Title}.");
                     }
                     else
                     {
                         ignoredCandidates.Add(candidate);
                         ignoreButton!.Content = "Ignored";
                         checkBox.IsChecked = false;
-                        checkBox.IsEnabled = false;
+                        SystemInfoImportService.IgnoreCandidates(_config, [candidate]);
+                        SaveConfiguration();
+                        AppendOutput($"Ignored {candidate.Title}.");
                     }
+
+                    UpdateSelectedCount();
                 });
+                ignoreButton.Content = isIgnored ? "Ignored" : "Ignore";
                 ignoreButton.MinWidth = 84;
                 actionPanel.Children.Add(ignoreButton);
 
@@ -1790,7 +1814,7 @@ public sealed partial class MainWindow : Window
             return new([], [], SymlinkImportMode.Copy);
 
         var selected = checkBoxes
-            .Where(checkBox => checkBox.IsChecked == true)
+            .Where(checkBox => checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate && !ignoredCandidates.Contains(candidate))
             .Select(checkBox => checkBox.Tag)
             .OfType<SystemInfoImportCandidate>()
             .ToList();

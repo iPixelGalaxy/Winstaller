@@ -65,7 +65,12 @@ public static class SystemInfoImportService
         return candidates;
     }
 
-    public static int ApplyCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates, SymlinkImportMode symlinkMode = SymlinkImportMode.Copy, Action<string>? log = null)
+    public static int ApplyCandidates(
+        WinstallerConfig config,
+        IEnumerable<SystemInfoImportCandidate> candidates,
+        SymlinkImportMode symlinkMode = SymlinkImportMode.Copy,
+        Action<string>? log = null,
+        Action<SystemInfoImportCandidate>? applied = null)
     {
         var added = 0;
         foreach (var candidate in candidates)
@@ -137,6 +142,7 @@ public static class SystemInfoImportService
                         {
                             list.Add(symlink.Name);
                             added++;
+                            applied?.Invoke(candidate);
                         }
                     }
                     break;
@@ -171,6 +177,25 @@ public static class SystemInfoImportService
                         ignored.Add(symlink.Name);
                     break;
             }
+        }
+    }
+
+    public static void UnignoreCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Value is not SymlinkImport symlink)
+                continue;
+
+            var ignored = symlink.Section switch
+            {
+                "Roaming" => config.Symlinks.IgnoredRoamingDirectories,
+                "Local" => config.Symlinks.IgnoredLocalDirectories,
+                "LocalLow" => config.Symlinks.IgnoredLocalLowDirectories,
+                _ => null
+            };
+
+            ignored?.RemoveAll(item => item.Equals(symlink.Name, StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -408,8 +433,7 @@ public static class SystemInfoImportService
         {
             var name = Path.GetFileName(dir);
             if (config.AppDataUtility.ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase) ||
-                configured.Contains(name, StringComparer.OrdinalIgnoreCase) ||
-                ignored.Contains(name, StringComparer.OrdinalIgnoreCase))
+                configured.Contains(name, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -417,6 +441,7 @@ public static class SystemInfoImportService
             var info = new DirectoryInfo(dir);
             var existingSymlink = info.Attributes.HasFlag(FileAttributes.ReparsePoint);
             var target = existingSymlink ? info.LinkTarget ?? "(unknown target)" : dir;
+            var isIgnored = ignored.Contains(name, StringComparer.OrdinalIgnoreCase);
             if (existingSymlink && !Path.IsPathRooted(target) && target != "(unknown target)")
             {
                 target = Path.GetFullPath(target, Path.GetDirectoryName(dir) ?? appDataPath);
@@ -426,7 +451,7 @@ public static class SystemInfoImportService
                 $"[{section}] {name}",
                 target,
                 new SymlinkImport(section, name, dir, existingSymlink, target),
-                existingSymlink ? "Existing Symlinks" : "Folders Not Yet Symlinked");
+                isIgnored ? "Ignored" : existingSymlink ? "Existing Symlinks" : "Folders Not Yet Symlinked");
         }
     }
 
