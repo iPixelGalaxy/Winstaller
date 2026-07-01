@@ -47,6 +47,7 @@ public static class SystemInfoImportService
         "History",
         "Temporary Internet Files"
     ];
+    private const string BackupSuffix = ".winstaller-backup";
 
     public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope)
     {
@@ -158,12 +159,15 @@ public static class SystemInfoImportService
                         _ => null
                     };
 
-                    if (list is not null && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
+                    if (list is not null &&
+                        (!list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase) ||
+                         symlink.Kind is SymlinkImportKind.BackupRecovery or SymlinkImportKind.BackupRollback))
                     {
                         var result = MigrateSymlinkData(config, symlink, symlinkMode, log);
                         if (result.Success)
                         {
-                            list.Add(symlink.Name);
+                            if (result.AddToConfig && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
+                                list.Add(symlink.Name);
                             added++;
                             applied?.Invoke(candidate);
                         }
@@ -464,6 +468,30 @@ public static class SystemInfoImportService
         {
             var name = Path.GetFileName(dir);
             var info = new DirectoryInfo(dir);
+            if (name.EndsWith(BackupSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                var originalName = name[..^BackupSuffix.Length];
+                var originalPath = Path.Combine(appDataPath, originalName);
+                var destination = GetSymlinkDestination(config, section, originalName);
+                var hasDestination = Directory.Exists(destination);
+
+                yield return new SystemInfoImportCandidate(
+                    SystemInfoImportScope.Symlinks,
+                    $"[{section}] {originalName}",
+                    hasDestination
+                        ? $"Recover missing symlink from {destination}"
+                        : $"Restore original folder from {dir}",
+                    new SymlinkImport(
+                        section,
+                        originalName,
+                        originalPath,
+                        false,
+                        dir,
+                        hasDestination ? SymlinkImportKind.BackupRecovery : SymlinkImportKind.BackupRollback),
+                    "Recovery Needed");
+                continue;
+            }
+
             if (config.AppDataUtility.ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase) ||
                 configured.Contains(name, StringComparer.OrdinalIgnoreCase) ||
                 IsWindowsShellJunction(info))
@@ -482,7 +510,7 @@ public static class SystemInfoImportService
                 SystemInfoImportScope.Symlinks,
                 $"[{section}] {name}",
                 target,
-                new SymlinkImport(section, name, dir, existingSymlink, target),
+                new SymlinkImport(section, name, dir, existingSymlink, target, existingSymlink ? SymlinkImportKind.ExistingSymlink : SymlinkImportKind.Normal),
                 isIgnored ? "Ignored" : existingSymlink ? "Existing Symlinks" : "Folders Not Yet Symlinked");
         }
     }
@@ -521,6 +549,9 @@ public static class SystemInfoImportService
 
     private static SymlinkMigrationResult MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
+        if (symlink.Kind is SymlinkImportKind.BackupRecovery or SymlinkImportKind.BackupRollback)
+            return RecoverBackupSymlink(config, symlink, log);
+
         var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
             ? symlink.ExistingTargetPath
             : symlink.SourcePath;
@@ -530,13 +561,11 @@ public static class SystemInfoImportService
             return SymlinkMigrationResult.Fail($"Missing source: {dataSource}", [dataSource]);
         }
 
-        var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
-            .Replace("{USERNAME}", Environment.UserName);
-        var destination = Path.Combine(baseDir, "AppData", symlink.Section, symlink.Name);
+        var destination = GetSymlinkDestination(config, symlink.Section, symlink.Name);
         log?.Invoke($"{mode} {dataSource} -> {destination}");
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? baseDir);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? destination);
 
             if (Directory.Exists(destination))
             {
@@ -618,6 +647,69 @@ public static class SystemInfoImportService
             CleanupFailedDestination(destination, log);
             return SymlinkMigrationResult.Fail($"Finalize failed: {ex.Message}", [symlink.SourcePath]);
         }
+    }
+
+    private static SymlinkMigrationResult RecoverBackupSymlink(WinstallerConfig config, SymlinkImport symlink, Action<string>? log)
+    {
+        var backupPath = symlink.ExistingTargetPath;
+        var destination = GetSymlinkDestination(config, symlink.Section, symlink.Name);
+
+        if (Directory.Exists(symlink.SourcePath))
+        {
+            log?.Invoke($"Skipped backup recovery because original path already exists: {symlink.SourcePath}");
+            return SymlinkMigrationResult.Fail($"Original path already exists: {symlink.SourcePath}", [symlink.SourcePath, backupPath]);
+        }
+
+        if (!Directory.Exists(backupPath))
+        {
+            log?.Invoke($"Skipped backup recovery because backup is missing: {backupPath}");
+            return SymlinkMigrationResult.Fail($"Backup missing: {backupPath}", [backupPath]);
+        }
+
+        if (!Directory.Exists(destination))
+        {
+            try
+            {
+                log?.Invoke($"Restoring original folder from backup: {backupPath} -> {symlink.SourcePath}");
+                Directory.Move(backupPath, symlink.SourcePath);
+                return SymlinkMigrationResult.Ok(addToConfig: false);
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"Failed restoring original folder from backup: {backupPath} ({ex.Message})");
+                return SymlinkMigrationResult.Fail($"Restore failed: {ex.Message}", [backupPath, symlink.SourcePath]);
+            }
+        }
+
+        try
+        {
+            log?.Invoke($"Recovering missing symlink: {symlink.SourcePath} -> {destination}");
+            CreateDirectorySymlink(symlink.SourcePath, destination);
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Failed recovering symlink: {symlink.SourcePath} ({ex.Message})");
+            return SymlinkMigrationResult.Fail($"Symlink recovery failed: {ex.Message}", [symlink.SourcePath, destination]);
+        }
+
+        try
+        {
+            log?.Invoke($"Removing recovered backup folder: {backupPath}");
+            Directory.Delete(backupPath, true);
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Recovered symlink but failed to remove backup folder: {backupPath} ({ex.Message})");
+        }
+
+        return SymlinkMigrationResult.Ok();
+    }
+
+    private static string GetSymlinkDestination(WinstallerConfig config, string section, string name)
+    {
+        var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
+            .Replace("{USERNAME}", Environment.UserName);
+        return Path.Combine(baseDir, "AppData", section, name);
     }
 
     private static CopyDirectoryResult CopyDirectory(string source, string destination, Action<string>? log)
@@ -733,7 +825,12 @@ public static class SystemInfoImportService
             UseShellExecute = false,
             CreateNoWindow = true
         });
-        process?.WaitForExit();
+        if (process is null)
+            throw new InvalidOperationException("Failed to start mklink.");
+
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new IOException($"mklink failed with exit code {process.ExitCode}.");
     }
 
     private static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(string path)
@@ -1036,12 +1133,20 @@ public static class SystemInfoImportService
     }
 
     private sealed record WingetInstalledPackage(string Name, string Id, string Version);
-    private sealed record SymlinkImport(string Section, string Name, string SourcePath, bool IsExistingSymlink, string ExistingTargetPath);
-    private sealed record SymlinkMigrationResult(bool Success, IReadOnlyList<string> FailedPaths, string Message)
+    private sealed record SymlinkImport(string Section, string Name, string SourcePath, bool IsExistingSymlink, string ExistingTargetPath, SymlinkImportKind Kind);
+    private enum SymlinkImportKind
     {
-        public static SymlinkMigrationResult Ok() => new(true, [], string.Empty);
-        public static SymlinkMigrationResult Fail(IReadOnlyList<string> failedPaths, string message) => new(false, failedPaths, message);
-        public static SymlinkMigrationResult Fail(string message, IReadOnlyList<string> failedPaths) => new(false, failedPaths, message);
+        Normal,
+        ExistingSymlink,
+        BackupRecovery,
+        BackupRollback
+    }
+
+    private sealed record SymlinkMigrationResult(bool Success, IReadOnlyList<string> FailedPaths, string Message, bool AddToConfig)
+    {
+        public static SymlinkMigrationResult Ok(bool addToConfig = true) => new(true, [], string.Empty, addToConfig);
+        public static SymlinkMigrationResult Fail(IReadOnlyList<string> failedPaths, string message) => new(false, failedPaths, message, false);
+        public static SymlinkMigrationResult Fail(string message, IReadOnlyList<string> failedPaths) => new(false, failedPaths, message, false);
     }
 
     private sealed record CopyDirectoryResult(bool Success, IReadOnlyList<string> FailedPaths, string Message)
