@@ -8,43 +8,103 @@ internal static class NativePathPicker
 {
     private const uint FOS_PICKFOLDERS = 0x00000020;
     private const uint FOS_FORCEFILESYSTEM = 0x00000040;
+    private const uint FOS_NOCHANGEDIR = 0x00000008;
     private const uint FOS_PATHMUSTEXIST = 0x00000800;
     private const uint FOS_FILEMUSTEXIST = 0x00001000;
     private const uint SIGDN_FILESYSPATH = 0x80058000;
     private const int HRESULT_CANCELLED = unchecked((int)0x800704C7);
+    private static readonly Guid ClientGuid = new("6D3CC738-BD04-4DF5-A762-91BEE398333D");
 
-    public static string? PickFolder(IntPtr ownerHwnd)
+    public static Task<string?> PickFolderAsync(IntPtr ownerHwnd, string? initialFolder, string title)
     {
-        return Pick(ownerHwnd, FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+        return PickAsync(ownerHwnd, initialFolder, title, FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR);
     }
 
-    public static string? PickFile(IntPtr ownerHwnd)
+    public static Task<string?> PickFileAsync(IntPtr ownerHwnd, string? initialFolder, string title)
     {
-        return Pick(ownerHwnd, FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST);
+        return PickAsync(ownerHwnd, initialFolder, title, FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST | FOS_NOCHANGEDIR);
     }
 
-    private static string? Pick(IntPtr ownerHwnd, uint options)
+    private static Task<string?> PickAsync(IntPtr ownerHwnd, string? initialFolder, string title, uint options)
+    {
+        var completion = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.SetResult(Pick(ownerHwnd, initialFolder, title, options));
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        });
+        thread.Name = "Winstaller native picker";
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
+    }
+
+    private static string? Pick(IntPtr ownerHwnd, string? initialFolder, string title, uint options)
     {
         var dialog = (IFileOpenDialog)new FileOpenDialog();
-        dialog.GetOptions(out var existingOptions);
-        dialog.SetOptions(existingOptions | options);
-
-        var hr = dialog.Show(ownerHwnd);
-        if (hr == HRESULT_CANCELLED)
-            return null;
-
-        Marshal.ThrowExceptionForHR(hr);
-        dialog.GetResult(out var item);
-        item.GetDisplayName(SIGDN_FILESYSPATH, out var pathPointer);
         try
         {
-            return Marshal.PtrToStringUni(pathPointer);
+            dialog.GetOptions(out var existingOptions);
+            dialog.SetOptions(existingOptions | options);
+            var clientGuid = ClientGuid;
+            dialog.SetClientGuid(ref clientGuid);
+            dialog.SetTitle(title);
+            SetInitialFolder(dialog, initialFolder);
+
+            var hr = dialog.Show(ownerHwnd);
+            if (hr == HRESULT_CANCELLED)
+                return null;
+
+            Marshal.ThrowExceptionForHR(hr);
+            dialog.GetResult(out var item);
+            item.GetDisplayName(SIGDN_FILESYSPATH, out var pathPointer);
+            try
+            {
+                return Marshal.PtrToStringUni(pathPointer);
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(pathPointer);
+                Marshal.ReleaseComObject(item);
+            }
         }
         finally
         {
-            Marshal.FreeCoTaskMem(pathPointer);
+            Marshal.ReleaseComObject(dialog);
         }
     }
+
+    private static void SetInitialFolder(IFileOpenDialog dialog, string? initialFolder)
+    {
+        if (string.IsNullOrWhiteSpace(initialFolder) || !Directory.Exists(initialFolder))
+            return;
+
+        var riid = typeof(IShellItem).GUID;
+        var hr = SHCreateItemFromParsingName(initialFolder, IntPtr.Zero, ref riid, out var item);
+        Marshal.ThrowExceptionForHR(hr);
+        try
+        {
+            dialog.SetDefaultFolder(item);
+            dialog.SetFolder(item);
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(item);
+        }
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHCreateItemFromParsingName(
+        string pszPath,
+        IntPtr pbc,
+        ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
 
     [ComImport]
     [Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
@@ -66,8 +126,8 @@ internal static class NativePathPicker
         void Unadvise(uint dwCookie);
         void SetOptions(uint fos);
         void GetOptions(out uint pfos);
-        void SetDefaultFolder(IntPtr psi);
-        void SetFolder(IntPtr psi);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
         void GetFolder(out IntPtr ppsi);
         void GetCurrentSelection(out IntPtr ppsi);
         void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);

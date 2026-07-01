@@ -1236,7 +1236,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
 
-                var picked = await PickPathForTypeAsync(symlink.IsDirectory);
+                var picked = await PickPathForTypeAsync(symlink.IsDirectory, symlink.Source, "Select symlink source");
                 if (picked is null)
                     return;
 
@@ -1261,7 +1261,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
 
-                var picked = await PickPathForTypeAsync(symlink.IsDirectory);
+                var picked = await PickPathForTypeAsync(symlink.IsDirectory, GetSpecialSymlinkTarget(config, symlink), "Select symlink target");
                 if (picked is null)
                     return;
 
@@ -2404,11 +2404,12 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> PickSymlinkPathAsync(string rootPath, string currentValue)
     {
-        var picked = await PickFolderPathAsync();
+        var expandedRoot = ExpandConfigPath(rootPath);
+        var initialFolder = GetExistingFolder(Path.Combine(expandedRoot, currentValue), expandedRoot);
+        var picked = await PickFolderPathAsync(initialFolder, "Select AppData folder");
         if (picked is null)
             return null;
 
-        var expandedRoot = ExpandConfigPath(rootPath);
         if (!picked.StartsWith(expandedRoot.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase) &&
             !picked.Equals(expandedRoot, StringComparison.OrdinalIgnoreCase))
         {
@@ -2419,29 +2420,46 @@ public sealed partial class MainWindow : Window
         return Path.GetRelativePath(expandedRoot, picked);
     }
 
-    private async Task<string?> PickPathForTypeAsync(bool isDirectory)
+    private async Task<string?> PickPathForTypeAsync(bool isDirectory, string? currentPath, string title)
     {
-        return isDirectory ? await PickFolderPathAsync() : await PickFilePathAsync();
+        var initialFolder = GetExistingFolder(currentPath, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        return isDirectory ? await PickFolderPathAsync(initialFolder, title) : await PickFilePathAsync(initialFolder, title);
     }
 
-    private async Task<string?> PickFolderPathAsync()
+    private async Task<string?> PickFolderPathAsync(string? initialFolder, string title)
     {
         WriteDiagnosticLog("Folder picker create.");
         var hwnd = WindowNative.GetWindowHandle(this);
-        WriteDiagnosticLog($"Native folder picker show hwnd={hwnd}.");
-        var folder = NativePathPicker.PickFolder(hwnd);
+        WriteDiagnosticLog($"Native folder picker show hwnd={hwnd}; initialFolder={initialFolder}; title={title}.");
+        var folder = await NativePathPicker.PickFolderAsync(hwnd, initialFolder, title);
         WriteDiagnosticLog(folder is null ? "Folder picker canceled." : $"Folder picker picked: {folder}");
-        return await Task.FromResult(folder);
+        return folder;
     }
 
-    private async Task<string?> PickFilePathAsync()
+    private async Task<string?> PickFilePathAsync(string? initialFolder, string title)
     {
         WriteDiagnosticLog("File picker create.");
         var hwnd = WindowNative.GetWindowHandle(this);
-        WriteDiagnosticLog($"Native file picker show hwnd={hwnd}.");
-        var file = NativePathPicker.PickFile(hwnd);
+        WriteDiagnosticLog($"Native file picker show hwnd={hwnd}; initialFolder={initialFolder}; title={title}.");
+        var file = await NativePathPicker.PickFileAsync(hwnd, initialFolder, title);
         WriteDiagnosticLog(file is null ? "File picker canceled." : $"File picker picked: {file}");
-        return await Task.FromResult(file);
+        return file;
+    }
+
+    private static string GetExistingFolder(string? path, string fallback)
+    {
+        var expandedFallback = ExpandConfigPath(fallback);
+        var expandedPath = string.IsNullOrWhiteSpace(path) ? expandedFallback : ExpandConfigPath(path);
+        if (Directory.Exists(expandedPath))
+            return expandedPath;
+
+        var parent = Path.GetDirectoryName(expandedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+            return parent;
+
+        return Directory.Exists(expandedFallback)
+            ? expandedFallback
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
     private static string GetAppDataRootForProperty(string propertyName)
