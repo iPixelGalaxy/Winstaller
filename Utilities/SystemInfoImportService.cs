@@ -133,9 +133,11 @@ public static class SystemInfoImportService
 
                     if (list is not null && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
                     {
-                        MigrateSymlinkData(config, symlink, symlinkMode, log);
-                        list.Add(symlink.Name);
-                        added++;
+                        if (MigrateSymlinkData(config, symlink, symlinkMode, log))
+                        {
+                            list.Add(symlink.Name);
+                            added++;
+                        }
                     }
                     break;
             }
@@ -446,7 +448,7 @@ public static class SystemInfoImportService
                path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
+    private static bool MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
         var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
             ? symlink.ExistingTargetPath
@@ -454,7 +456,7 @@ public static class SystemInfoImportService
         if (!Directory.Exists(dataSource))
         {
             log?.Invoke($"Skipped missing source: {dataSource}");
-            return;
+            return false;
         }
 
         var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
@@ -478,13 +480,23 @@ public static class SystemInfoImportService
             catch
             {
                 log?.Invoke("Move failed, falling back to copy/delete.");
-                CopyDirectory(dataSource, destination);
+                var copyResult = CopyDirectory(dataSource, destination, log);
+                if (!copyResult.Success)
+                {
+                    log?.Invoke($"Skipped symlink item because copy was incomplete: {symlink.Name}");
+                    return false;
+                }
                 Directory.Delete(dataSource, true);
             }
         }
         else
         {
-            CopyDirectory(dataSource, destination);
+            var copyResult = CopyDirectory(dataSource, destination, log);
+            if (!copyResult.Success)
+            {
+                log?.Invoke($"Skipped symlink item because copy was incomplete: {symlink.Name}");
+                return false;
+            }
         }
 
         if (Directory.Exists(symlink.SourcePath))
@@ -505,21 +517,49 @@ public static class SystemInfoImportService
 
         log?.Invoke($"Creating symlink: {symlink.SourcePath} -> {destination}");
         CreateDirectorySymlink(symlink.SourcePath, destination);
+        return true;
     }
 
-    private static void CopyDirectory(string source, string destination)
+    private static CopyDirectoryResult CopyDirectory(string source, string destination, Action<string>? log)
     {
+        var skipped = 0;
         Directory.CreateDirectory(destination);
-        foreach (var file in Directory.GetFiles(source))
+        try
         {
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
+            foreach (var file in Directory.GetFiles(source))
+            {
+                try
+                {
+                    File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    skipped++;
+                    log?.Invoke($"Skipped locked or unavailable file: {file} ({ex.Message})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            skipped++;
+            log?.Invoke($"Skipped locked or unavailable directory: {source} ({ex.Message})");
         }
 
-        foreach (var directory in Directory.GetDirectories(source))
+        try
         {
-            var target = Path.Combine(destination, Path.GetFileName(directory));
-            CopyDirectory(directory, target);
+            foreach (var directory in Directory.GetDirectories(source))
+            {
+                var target = Path.Combine(destination, Path.GetFileName(directory));
+                skipped += CopyDirectory(directory, target, log).SkippedCount;
+            }
         }
+        catch (Exception ex)
+        {
+            skipped++;
+            log?.Invoke($"Skipped locked or unavailable directory children: {source} ({ex.Message})");
+        }
+
+        return new CopyDirectoryResult(skipped);
     }
 
     private static void CreateDirectorySymlink(string source, string target)
@@ -770,4 +810,8 @@ public static class SystemInfoImportService
 
     private sealed record WingetInstalledPackage(string Name, string Id, string Version);
     private sealed record SymlinkImport(string Section, string Name, string SourcePath, bool IsExistingSymlink, string ExistingTargetPath);
+    private sealed record CopyDirectoryResult(int SkippedCount)
+    {
+        public bool Success => SkippedCount == 0;
+    }
 }

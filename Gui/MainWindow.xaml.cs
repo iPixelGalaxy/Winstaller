@@ -17,6 +17,7 @@ using Winstaller.Configuration;
 using Winstaller.Modules;
 using Winstaller.Utilities;
 using WinRT.Interop;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 
 namespace Winstaller.Gui;
@@ -1343,25 +1344,43 @@ public sealed partial class MainWindow : Window
         IReadOnlyList<SystemInfoImportCandidate> ignored,
         SymlinkImportMode symlinkMode)
     {
+        var logDialogWidth = Math.Min(1800, Math.Max(900, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1900) - 160));
         var outputBox = new TextBox
         {
             AcceptsReturn = true,
             IsReadOnly = true,
             TextWrapping = TextWrapping.NoWrap,
             FontFamily = new FontFamily("Cascadia Mono"),
-            MinWidth = 720,
+            MinWidth = logDialogWidth,
+            Width = logDialogWidth,
             MinHeight = 360,
             MaxHeight = 460
         };
         var progress = new ProgressBar
         {
             IsIndeterminate = true,
-            MinWidth = 720
+            MinWidth = logDialogWidth
+        };
+        var copyLogButton = ActionButton("Copy Log", () =>
+        {
+            var package = new DataPackage();
+            package.SetText(outputBox.Text);
+            Clipboard.SetContent(package);
+            AppendOutput("Import log copied.");
+        });
+        copyLogButton.HorizontalAlignment = HorizontalAlignment.Right;
+        copyLogButton.IsEnabled = false;
+        var footer = new StackPanel
+        {
+            Width = logDialogWidth,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { copyLogButton }
         };
         var content = new StackPanel
         {
             Spacing = 12,
-            Children = { progress, outputBox }
+            Width = logDialogWidth,
+            Children = { progress, outputBox, footer }
         };
         var dialog = new ContentDialog
         {
@@ -1371,6 +1390,8 @@ public sealed partial class MainWindow : Window
             CloseButtonText = string.Empty,
             DefaultButton = ContentDialogButton.None
         };
+        dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
+        dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
 
         Directory.CreateDirectory(BootstrapManager.LogsDirectory);
         var logPath = Path.Combine(BootstrapManager.LogsDirectory, $"import-{DateTime.Now:yyyyMMdd-HHmmss}.log");
@@ -1423,6 +1444,8 @@ public sealed partial class MainWindow : Window
             }
 
             Log($"Imported {added} item(s).");
+            Log($"Skipped or failed {Math.Max(0, selected.Count - added)} selected item(s).");
+            Log($"Log path: {logPath}");
             AppendOutput($"Imported {added} item(s). Log: {logPath}");
         }
         catch (Exception ex)
@@ -1433,6 +1456,7 @@ public sealed partial class MainWindow : Window
         finally
         {
             progress.IsIndeterminate = false;
+            copyLogButton.IsEnabled = true;
             dialog.CloseButtonText = "Done";
         }
 
