@@ -1471,8 +1471,24 @@ public sealed partial class MainWindow : Window
 
     private async Task<SymlinkImportSelection> ShowSymlinkImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
     {
-        var panel = new StackPanel { Spacing = 12 };
-        foreach (var group in candidates.GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.Group) ? "Folders Not Yet Symlinked" : candidate.Group))
+        var panel = new StackPanel { Spacing = 12, MinWidth = 1020 };
+        var selectedCount = new TextBlock
+        {
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        };
+        panel.Children.Add(selectedCount);
+
+        var checkBoxes = new List<CheckBox>();
+        void UpdateSelectedCount()
+        {
+            selectedCount.Text = $"{checkBoxes.Count(checkBox => checkBox.IsChecked == true)} selected";
+        }
+
+        var orderedGroups = candidates
+            .GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.Group) ? "Folders Not Yet Symlinked" : candidate.Group)
+            .OrderBy(group => group.Key == "Existing Symlinks" ? 0 : 1);
+
+        foreach (var group in orderedGroups)
         {
             panel.Children.Add(new TextBlock
             {
@@ -1481,7 +1497,7 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
-                var row = new Grid { ColumnSpacing = 10, MinWidth = 820 };
+                var row = new Grid { ColumnSpacing = 10, MinWidth = 1000 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -1499,6 +1515,9 @@ public sealed partial class MainWindow : Window
                         }
                     }
                 };
+                checkBox.Checked += (_, _) => UpdateSelectedCount();
+                checkBox.Unchecked += (_, _) => UpdateSelectedCount();
+                checkBoxes.Add(checkBox);
                 row.Children.Add(checkBox);
 
                 var openButton = ActionButton("Open Folder", () => OpenFolder(candidate.Detail));
@@ -1507,12 +1526,13 @@ public sealed partial class MainWindow : Window
                 panel.Children.Add(row);
             }
         }
+        UpdateSelectedCount();
 
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Import {candidates.Count} symlink item(s)?",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 560, MinWidth = 860 },
+            Content = new ScrollViewer { Content = panel, MaxHeight = 600, MinWidth = 1040 },
             PrimaryButtonText = "Copy (Safe, but slower)",
             SecondaryButtonText = "Move (faster but risky)",
             CloseButtonText = "Cancel",
@@ -1522,8 +1542,7 @@ public sealed partial class MainWindow : Window
         if (result == ContentDialogResult.None)
             return new([], SymlinkImportMode.Copy);
 
-        var selected = panel.Children.OfType<Grid>()
-            .SelectMany(row => row.Children.OfType<CheckBox>())
+        var selected = checkBoxes
             .Where(checkBox => checkBox.IsChecked == true)
             .Select(checkBox => checkBox.Tag)
             .OfType<SystemInfoImportCandidate>()
