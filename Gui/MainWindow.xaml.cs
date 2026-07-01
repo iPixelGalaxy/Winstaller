@@ -1479,9 +1479,9 @@ public sealed partial class MainWindow : Window
         {
             Spacing = 12,
             MaxWidth = dialogWidth - 24,
-            Margin = new Thickness(0, 0, 18, 0)
+            Margin = new Thickness(0, 0, 44, 0)
         };
-        var rowWidth = dialogWidth - 42;
+        var rowWidth = dialogWidth - 68;
         var textWidth = Math.Max(360, rowWidth - 166);
 
         var checkBoxes = new List<CheckBox>();
