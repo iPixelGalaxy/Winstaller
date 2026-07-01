@@ -36,6 +36,12 @@ public static class SystemInfoImportService
     private static string AppDataRoaming => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
     private static string AppDataLocal => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     private static string AppDataLocalLow => Path.Combine(UserProfile, "AppData", "LocalLow");
+    private static readonly string[] WindowsShellJunctionNames =
+    [
+        "Application Data",
+        "History",
+        "Temporary Internet Files"
+    ];
 
     public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope)
     {
@@ -432,13 +438,14 @@ public static class SystemInfoImportService
         foreach (var dir in Directory.GetDirectories(appDataPath))
         {
             var name = Path.GetFileName(dir);
+            var info = new DirectoryInfo(dir);
             if (config.AppDataUtility.ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase) ||
-                configured.Contains(name, StringComparer.OrdinalIgnoreCase))
+                configured.Contains(name, StringComparer.OrdinalIgnoreCase) ||
+                IsWindowsShellJunction(info))
             {
                 continue;
             }
 
-            var info = new DirectoryInfo(dir);
             var existingSymlink = info.Attributes.HasFlag(FileAttributes.ReparsePoint);
             var target = existingSymlink ? info.LinkTarget ?? "(unknown target)" : dir;
             var isIgnored = ignored.Contains(name, StringComparer.OrdinalIgnoreCase);
@@ -548,6 +555,12 @@ public static class SystemInfoImportService
     private static CopyDirectoryResult CopyDirectory(string source, string destination, Action<string>? log)
     {
         var skipped = 0;
+        if (IsReparseDirectory(source))
+        {
+            log?.Invoke($"Skipped reparse directory: {source}");
+            return new CopyDirectoryResult(1);
+        }
+
         Directory.CreateDirectory(destination);
         try
         {
@@ -574,6 +587,13 @@ public static class SystemInfoImportService
         {
             foreach (var directory in Directory.GetDirectories(source))
             {
+                if (IsReparseDirectory(directory))
+                {
+                    skipped++;
+                    log?.Invoke($"Skipped reparse directory: {directory}");
+                    continue;
+                }
+
                 var target = Path.Combine(destination, Path.GetFileName(directory));
                 skipped += CopyDirectory(directory, target, log).SkippedCount;
             }
@@ -585,6 +605,28 @@ public static class SystemInfoImportService
         }
 
         return new CopyDirectoryResult(skipped);
+    }
+
+    private static bool IsWindowsShellJunction(DirectoryInfo info)
+    {
+        if (!WindowsShellJunctionNames.Contains(info.Name, StringComparer.OrdinalIgnoreCase))
+            return false;
+
+        return info.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
+               info.Attributes.HasFlag(FileAttributes.Hidden) &&
+               info.Attributes.HasFlag(FileAttributes.System);
+    }
+
+    private static bool IsReparseDirectory(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static void CreateDirectorySymlink(string source, string target)
