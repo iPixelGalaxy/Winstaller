@@ -1308,6 +1308,14 @@ public sealed partial class MainWindow : Window
             var result = await ShowSymlinkImportReviewDialogAsync(candidates);
             selected = result.Selected;
             symlinkMode = result.Mode;
+            if (selected.Count == 0 && result.Ignored.Count == 0)
+            {
+                AppendOutput("Import cancelled.");
+                return;
+            }
+
+            await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, result.Ignored, symlinkMode);
+            return;
         }
         else
         {
@@ -1324,7 +1332,7 @@ public sealed partial class MainWindow : Window
             await FillNetworkDriveCredentialsAsync(selected);
         }
 
-        await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, symlinkMode);
+        await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, [], symlinkMode);
     }
 
     private async Task ImportSelectedSystemInfoAsync(
@@ -1332,6 +1340,7 @@ public sealed partial class MainWindow : Window
         ModuleDescriptor? module,
         IReadOnlyList<SystemInfoImportCandidate> candidates,
         IReadOnlyList<SystemInfoImportCandidate> selected,
+        IReadOnlyList<SystemInfoImportCandidate> ignored,
         SymlinkImportMode symlinkMode)
     {
         var outputBox = new TextBox
@@ -1386,14 +1395,17 @@ public sealed partial class MainWindow : Window
         {
             Log($"Found {candidates.Count} candidate(s).");
             Log($"Selected {selected.Count} candidate(s).");
+            Log($"Ignored {ignored.Count} candidate(s).");
             if (scope == SystemInfoImportScope.Symlinks)
                 Log($"Symlink mode: {symlinkMode}");
             foreach (var candidate in selected)
                 Log($"{candidate.Title}: {candidate.Detail}");
+            foreach (var candidate in ignored)
+                Log($"Ignored: {candidate.Title}: {candidate.Detail}");
 
             var added = await Task.Run(() =>
             {
-                SystemInfoImportService.IgnoreCandidates(_config, candidates.Except(selected));
+                SystemInfoImportService.IgnoreCandidates(_config, ignored);
                 return SystemInfoImportService.ApplyCandidates(_config, selected, symlinkMode, Log);
             });
 
@@ -1557,6 +1569,7 @@ public sealed partial class MainWindow : Window
     private async Task<SymlinkImportSelection> ShowSymlinkImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
     {
         var resultMode = SymlinkImportMode.Copy;
+        var actionName = "Copy and Symlink";
         var accepted = false;
         ContentDialog? dialog = null;
         var dialogWidth = Math.Min(1080, Math.Max(720, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1180) - 160));
@@ -1570,9 +1583,10 @@ public sealed partial class MainWindow : Window
             MaxWidth = cardWidth,
             Margin = new Thickness(0, 0, scrollbarGutter, 0)
         };
-        var textWidth = Math.Max(360, innerWidth - 196);
+        var textWidth = Math.Max(360, innerWidth - 316);
 
         var checkBoxes = new List<CheckBox>();
+        var ignoredCandidates = new HashSet<SystemInfoImportCandidate>();
         void UpdateSelectedCount()
         {
             if (dialog is not null)
@@ -1601,7 +1615,7 @@ public sealed partial class MainWindow : Window
                 };
                 itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
                 itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(128) });
+                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) });
 
                 var checkBox = new CheckBox
                 {
@@ -1633,12 +1647,40 @@ public sealed partial class MainWindow : Window
                 Grid.SetColumn(textPanel, 1);
                 itemGrid.Children.Add(textPanel);
 
+                var actionPanel = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                Button? ignoreButton = null;
+                ignoreButton = ActionButton("Ignore", () =>
+                {
+                    if (ignoredCandidates.Remove(candidate))
+                    {
+                        ignoreButton!.Content = "Ignore";
+                        checkBox.IsEnabled = true;
+                    }
+                    else
+                    {
+                        ignoredCandidates.Add(candidate);
+                        ignoreButton!.Content = "Ignored";
+                        checkBox.IsChecked = false;
+                        checkBox.IsEnabled = false;
+                    }
+                });
+                ignoreButton.MinWidth = 84;
+                actionPanel.Children.Add(ignoreButton);
+
                 var openButton = ActionButton("Open Folder", () => OpenFolder(candidate.Detail));
                 openButton.HorizontalAlignment = HorizontalAlignment.Right;
                 openButton.VerticalAlignment = VerticalAlignment.Center;
                 openButton.MinWidth = 108;
-                Grid.SetColumn(openButton, 2);
-                itemGrid.Children.Add(openButton);
+                actionPanel.Children.Add(openButton);
+                Grid.SetColumn(actionPanel, 2);
+                itemGrid.Children.Add(actionPanel);
 
                 panel.Children.Add(new Border
                 {
@@ -1655,11 +1697,12 @@ public sealed partial class MainWindow : Window
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Right
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Width = cardWidth
         };
         var dialogContent = new StackPanel
         {
-            Spacing = 14,
+            Spacing = 10,
             Width = dialogWidth,
             MaxWidth = dialogWidth,
             Children =
@@ -1671,7 +1714,12 @@ public sealed partial class MainWindow : Window
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto
                 },
-                footer
+                new StackPanel
+                {
+                    Width = cardWidth,
+                    Margin = new Thickness(0, 0, scrollbarGutter, 0),
+                    Children = { footer }
+                }
             }
         };
 
@@ -1687,14 +1735,16 @@ public sealed partial class MainWindow : Window
         dialog.Resources["ContentDialogMaxWidth"] = dialogWidth + 80;
         UpdateSelectedCount();
 
-        footer.Children.Add(ActionButton("Copy (Safe, but slower)", () =>
+        footer.Children.Add(ActionButton("Copy and Symlink (Safe, but slower)", () =>
         {
+            actionName = "Copy and Symlink";
             resultMode = SymlinkImportMode.Copy;
             accepted = true;
             dialog.Hide();
         }, primary: true));
-        footer.Children.Add(ActionButton("Move (faster but risky)", () =>
+        footer.Children.Add(ActionButton("Move and Symlink (Faster, but riskier)", () =>
         {
+            actionName = "Move and Symlink";
             resultMode = SymlinkImportMode.Move;
             accepted = true;
             dialog.Hide();
@@ -1707,14 +1757,20 @@ public sealed partial class MainWindow : Window
 
         await dialog.ShowAsync();
         if (!accepted)
-            return new([], SymlinkImportMode.Copy);
+            return new([], [], SymlinkImportMode.Copy);
+
+        if (!await ConfirmAsync(
+                $"Continue with {actionName}?",
+                $"Are you sure you want to continue with {actionName}?",
+                actionName))
+            return new([], [], SymlinkImportMode.Copy);
 
         var selected = checkBoxes
             .Where(checkBox => checkBox.IsChecked == true)
             .Select(checkBox => checkBox.Tag)
             .OfType<SystemInfoImportCandidate>()
             .ToList();
-        return new(selected, resultMode);
+        return new(selected, ignoredCandidates.ToList(), resultMode);
     }
 
     private void OpenFolder(string path)
@@ -2364,7 +2420,10 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record ShellFolderPreset(string Name, string RegistryValue, string DefaultPath);
-    private sealed record SymlinkImportSelection(List<SystemInfoImportCandidate> Selected, SymlinkImportMode Mode);
+    private sealed record SymlinkImportSelection(
+        List<SystemInfoImportCandidate> Selected,
+        List<SystemInfoImportCandidate> Ignored,
+        SymlinkImportMode Mode);
 
     private sealed record ModuleDescriptor(
         string Name,
