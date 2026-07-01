@@ -658,16 +658,102 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
     {
+        var grid = new Grid { ColumnSpacing = 18 };
+        for (var i = 0; i < 4; i++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        var roaming = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.RoamingDirectories))!, "Roaming", "Microsoft\\VisualStudio");
+        var local = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalDirectories))!, "Local", "Microsoft\\VisualStudio");
+        var localLow = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalLowDirectories))!, "LocalLow", "Company\\Game");
+        var special = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.SpecialSymlinks))!, "Special", string.Empty);
+
+        Grid.SetColumn(roaming, 0);
+        Grid.SetColumn(local, 1);
+        Grid.SetColumn(localLow, 2);
+        Grid.SetColumn(special, 3);
+        grid.Children.Add(roaming);
+        grid.Children.Add(local);
+        grid.Children.Add(localLow);
+        grid.Children.Add(special);
+        return grid;
+    }
+
+    private FrameworkElement BuildSymlinkColumn(SymlinksConfig config, PropertyInfo property, string title, string placeholder)
+    {
+        var list = (IList?)property.GetValue(config);
+        if (list is null)
+        {
+            list = (IList)Activator.CreateInstance(property.PropertyType)!;
+            property.SetValue(config, list);
+        }
+
+        var itemType = property.PropertyType.GetGenericArguments()[0];
+        var panel = new StackPanel { Spacing = 8 };
+        var countText = new TextBlock
+        {
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        void Refresh()
+        {
+            panel.Children.Clear();
+            countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
+
+            if (list.Count == 0)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "No items configured.",
+                    Opacity = 0.65,
+                    FontSize = 12
+                });
+            }
+
+            for (var index = 0; index < list.Count; index++)
+            {
+                panel.Children.Add(itemType == typeof(string)
+                    ? BuildCompactStringListItem(list, index, Refresh, GetConfigGlyph(property, null), placeholder)
+                    : BuildListItemEditor(list, itemType, index, Refresh, property));
+            }
+
+            panel.Children.Add(ActionButton($"+ Add {title}", () =>
+            {
+                list.Add(CreateDefaultItem(itemType));
+                SaveConfiguration();
+                Refresh();
+            }));
+        }
+
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.Children.Add(new FontIcon
+        {
+            Glyph = GetConfigGlyph(property, null),
+            FontSize = 18,
+            Width = 24,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        var text = new StackPanel { Spacing = 1 };
+        text.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 17,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        text.Children.Add(countText);
+        Grid.SetColumn(text, 1);
+        header.Children.Add(text);
+
+        Refresh();
         return new StackPanel
         {
             Spacing = 10,
-            Children =
-            {
-                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.RoamingDirectories))!, "Roaming", "AppData\\Roaming relative folders"),
-                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalDirectories))!, "Local", "AppData\\Local relative folders"),
-                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalLowDirectories))!, "LocalLow", "AppData\\LocalLow relative folders"),
-                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.SpecialSymlinks))!, "Special", "Arbitrary paths outside AppData")
-            }
+            Children = { header, panel }
         };
     }
 
@@ -1052,6 +1138,59 @@ public sealed partial class MainWindow : Window
         row.Children.Add(removeButton);
 
         return Card(row);
+    }
+
+    private FrameworkElement BuildCompactStringListItem(IList list, int index, Action refresh, string glyph, string placeholder)
+    {
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        row.Children.Add(new FontIcon
+        {
+            Glyph = glyph,
+            FontSize = 17,
+            Width = 22,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var box = new TextBox
+        {
+            Text = list[index]?.ToString() ?? string.Empty,
+            PlaceholderText = placeholder,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            MinWidth = 0
+        };
+        box.LostFocus += (_, _) =>
+        {
+            list[index] = box.Text.Trim();
+            SaveConfiguration();
+        };
+        Grid.SetColumn(box, 1);
+        row.Children.Add(box);
+
+        var removeButton = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE74D", FontSize = 13 },
+            Width = 32,
+            Height = 32,
+            MinWidth = 32,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(4),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(removeButton, "Remove");
+        removeButton.Click += (_, _) =>
+        {
+            list.RemoveAt(index);
+            SaveConfiguration();
+            refresh();
+        };
+        Grid.SetColumn(removeButton, 2);
+        row.Children.Add(removeButton);
+
+        return row;
     }
 
     private FrameworkElement BuildInlineObjectPropertyEditor(object target, PropertyInfo property)
