@@ -19,7 +19,6 @@ using Winstaller.Modules;
 using Winstaller.Utilities;
 using WinRT.Interop;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage.Pickers;
 
 namespace Winstaller.Gui;
 
@@ -2428,48 +2427,21 @@ public sealed partial class MainWindow : Window
     private async Task<string?> PickFolderPathAsync()
     {
         WriteDiagnosticLog("Folder picker create.");
-        var picker = new FolderPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder
-        };
-        picker.FileTypeFilter.Add("*");
         var hwnd = WindowNative.GetWindowHandle(this);
-        WriteDiagnosticLog($"Folder picker initialize hwnd={hwnd}.");
-        InitializeWithWindow.Initialize(picker, hwnd);
-        WriteDiagnosticLog("Folder picker show.");
-        var folder = await picker.PickSingleFolderAsync();
-        WriteDiagnosticLog(folder is null ? "Folder picker canceled." : $"Folder picker picked: {folder.Path}");
-        return folder?.Path;
+        WriteDiagnosticLog($"Native folder picker show hwnd={hwnd}.");
+        var folder = NativePathPicker.PickFolder(hwnd);
+        WriteDiagnosticLog(folder is null ? "Folder picker canceled." : $"Folder picker picked: {folder}");
+        return await Task.FromResult(folder);
     }
 
     private async Task<string?> PickFilePathAsync()
     {
         WriteDiagnosticLog("File picker create.");
-        var picker = new FileOpenPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder
-        };
-        AddFilePickerFilters(picker);
         var hwnd = WindowNative.GetWindowHandle(this);
-        WriteDiagnosticLog($"File picker initialize hwnd={hwnd}.");
-        InitializeWithWindow.Initialize(picker, hwnd);
-        WriteDiagnosticLog("File picker show.");
-        var file = await picker.PickSingleFileAsync();
-        WriteDiagnosticLog(file is null ? "File picker canceled." : $"File picker picked: {file.Path}");
-        return file?.Path;
-    }
-
-    private static void AddFilePickerFilters(FileOpenPicker picker)
-    {
-        foreach (var extension in new[]
-                 {
-                     ".txt", ".json", ".xml", ".ini", ".config", ".cfg", ".yaml", ".yml",
-                     ".db", ".sqlite", ".dat", ".bin", ".log", ".exe", ".dll", ".ps1",
-                     ".bat", ".cmd", ".lnk", ".url", ".zip", ".7z", ".rar"
-                 })
-        {
-            picker.FileTypeFilter.Add(extension);
-        }
+        WriteDiagnosticLog($"Native file picker show hwnd={hwnd}.");
+        var file = NativePathPicker.PickFile(hwnd);
+        WriteDiagnosticLog(file is null ? "File picker canceled." : $"File picker picked: {file}");
+        return await Task.FromResult(file);
     }
 
     private static string GetAppDataRootForProperty(string propertyName)
