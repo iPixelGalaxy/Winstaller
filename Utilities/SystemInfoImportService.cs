@@ -414,6 +414,10 @@ public static class SystemInfoImportService
             var info = new DirectoryInfo(dir);
             var existingSymlink = info.Attributes.HasFlag(FileAttributes.ReparsePoint);
             var target = existingSymlink ? info.LinkTarget ?? "(unknown target)" : dir;
+            if (existingSymlink && !Path.IsPathRooted(target) && target != "(unknown target)")
+            {
+                target = Path.GetFullPath(target, Path.GetDirectoryName(dir) ?? appDataPath);
+            }
             yield return new SystemInfoImportCandidate(
                 SystemInfoImportScope.Symlinks,
                 $"[{section}] {name}",

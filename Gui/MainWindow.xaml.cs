@@ -1481,9 +1481,13 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
-                panel.Children.Add(new CheckBox
+                var row = new Grid { ColumnSpacing = 10, MinWidth = 820 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var checkBox = new CheckBox
                 {
-                    IsChecked = true,
+                    IsChecked = group.Key == "Existing Symlinks",
                     Tag = candidate,
                     Content = new StackPanel
                     {
@@ -1494,7 +1498,13 @@ public sealed partial class MainWindow : Window
                             new TextBlock { Text = candidate.Detail, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
                         }
                     }
-                });
+                };
+                row.Children.Add(checkBox);
+
+                var openButton = ActionButton("Open Folder", () => OpenFolder(candidate.Detail));
+                Grid.SetColumn(openButton, 1);
+                row.Children.Add(openButton);
+                panel.Children.Add(row);
             }
         }
 
@@ -1502,7 +1512,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Import {candidates.Count} symlink item(s)?",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 520 },
+            Content = new ScrollViewer { Content = panel, MaxHeight = 560, MinWidth = 860 },
             PrimaryButtonText = "Copy (Safe, but slower)",
             SecondaryButtonText = "Move (faster but risky)",
             CloseButtonText = "Cancel",
@@ -1512,12 +1522,29 @@ public sealed partial class MainWindow : Window
         if (result == ContentDialogResult.None)
             return new([], SymlinkImportMode.Copy);
 
-        var selected = panel.Children.OfType<CheckBox>()
+        var selected = panel.Children.OfType<Grid>()
+            .SelectMany(row => row.Children.OfType<CheckBox>())
             .Where(checkBox => checkBox.IsChecked == true)
             .Select(checkBox => checkBox.Tag)
             .OfType<SystemInfoImportCandidate>()
             .ToList();
         return new(selected, result == ContentDialogResult.Secondary ? SymlinkImportMode.Move : SymlinkImportMode.Copy);
+    }
+
+    private void OpenFolder(string path)
+    {
+        var target = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(target) || !Directory.Exists(target))
+            return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = target, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendOutput($"Open folder failed: {ex.Message}");
+        }
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
