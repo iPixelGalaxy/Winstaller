@@ -214,17 +214,15 @@ public sealed partial class MainWindow : Window
         _config = ConfigurationManager.LoadConfiguration();
         _modules =
         [
-            new("Network Drives", "Map configured network drives", "\uE839", _config.NetworkDrives, () => new NetworkDrivesModule(_config), SystemInfoImportScope.NetworkDrives),
             new("Symlinks", "Restore configured profile symlinks", "\uE71B", _config.Symlinks, () => new SymlinksModule(_config), SystemInfoImportScope.Symlinks),
             new("App Installer", "Install configured applications", "\uE896", _config.AppInstaller, () => new AppInstallerModule(_config), SystemInfoImportScope.AppInstaller),
             new("Fonts", "Install configured fonts", "\uE8D2", _config.Fonts, () => new FontsModule(_config), SystemInfoImportScope.Fonts),
             new("Shell Folders", "Configure user shell folders", "\uE8B7", _config.ShellFolders, () => new ShellFoldersModule(_config), SystemInfoImportScope.ShellFolders),
+            new("Path", "Configure PATH additions", "\uE943", _config.Path, () => new PathModule(_config), SystemInfoImportScope.Path),
+            new("Network Drives", "Map configured network drives", "\uE839", _config.NetworkDrives, () => new NetworkDrivesModule(_config), SystemInfoImportScope.NetworkDrives),
             new("Registry", "Apply registry files and changes", "\uE7B8", _config.Registry, () => new RegistryModule(_config), null),
             new("File Copy", "Run configured copy operations", "\uE8C8", _config.FileCopy, () => new FileCopyModule(_config), null),
             new("Startup", "Configure startup programs and processes", "\uE768", _config.Startup, () => new StartupModule(_config), SystemInfoImportScope.Startup),
-            new("Path", "Configure PATH additions", "\uE943", _config.Path, () => new PathModule(_config), SystemInfoImportScope.Path),
-            new("Discord", "Install and patch Discord", "\uE716", _config.Discord, () => new DiscordModule(_config), null),
-            new("Spotify", "Install and patch Spotify", "\uE768", _config.Spotify, () => new SpotifyModule(_config), null),
         ];
     }
 
@@ -311,6 +309,7 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
+            _ = ShowGuidedSetupPromptAsync();
         };
         return card;
     }
@@ -321,6 +320,7 @@ public sealed partial class MainWindow : Window
         SetDashboardTopBarActions();
         _content.Children.Clear();
         _content.Children.Add(PageTitle("Dashboard", "Choose what Winstaller should restore or install."));
+        _content.Children.Add(GuidedSetupCard());
 
         var list = new StackPanel { Spacing = 8 };
         foreach (var module in _modules)
@@ -368,9 +368,31 @@ public sealed partial class MainWindow : Window
         {
             _topBarActions.Children.Add(TopBarActionButton(Symbol.Download, GetImportLabel(module), async () => await ImportSystemInfoAsync(importScope, module)));
         }
+        if (HasIgnoredItems(module.Config))
+        {
+            _topBarActions.Children.Add(TopBarActionButton(Symbol.List, "Ignored Items", async () => await ShowIgnoredItemsAsync(module)));
+        }
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Setting, "Module Settings", async () => await ShowModuleSettingsAsync(module)));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Folder, "Open Config Directory", OpenConfig));
         UpdateTopBarActionLabelVisibility();
+    }
+
+    private FrameworkElement GuidedSetupCard()
+    {
+        var grid = new Grid { ColumnSpacing = 14 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.Children.Add(new FontIcon { Glyph = "\uE9D9", FontSize = 22, Width = 28, VerticalAlignment = VerticalAlignment.Center });
+        var text = new StackPanel { Spacing = 2 };
+        text.Children.Add(new TextBlock { Text = "Guided setup", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        text.Children.Add(new TextBlock { Text = "Walk through standard restore setup.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        var button = ActionButton("Start", async () => await RunGuidedSetupAsync(), primary: true);
+        Grid.SetColumn(button, 2);
+        grid.Children.Add(button);
+        return Card(grid);
     }
 
     private void ClearTopBarActions()
@@ -499,6 +521,10 @@ public sealed partial class MainWindow : Window
         {
             return BuildAppInstallerTiles(appInstaller);
         }
+        if (module.Config is ShellFoldersConfig shellFolders)
+        {
+            return BuildShellFoldersContent(shellFolders);
+        }
 
         return BuildConfigEditor(module.Config, includeScalarSettings: false);
     }
@@ -533,7 +559,7 @@ public sealed partial class MainWindow : Window
 
         Refresh();
 
-        return Card(new StackPanel
+        return new StackPanel
         {
             Spacing = 12,
             Children =
@@ -552,7 +578,7 @@ public sealed partial class MainWindow : Window
                     Refresh();
                 })
             }
-        });
+        };
     }
 
     private FrameworkElement BuildAppTile(string packageId, List<string> apps, Action refresh)
@@ -607,6 +633,36 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    private FrameworkElement BuildShellFoldersContent(ShellFoldersConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(BuildListSection(config, typeof(ShellFoldersConfig).GetProperty(nameof(ShellFoldersConfig.Folders))!, allowAdd: false));
+
+        var presets = GetShellFolderPresets()
+            .Where(preset => !config.Folders.Any(folder => folder.RegistryValue.Equals(preset.RegistryValue, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        if (presets.Count > 0)
+        {
+            var addButton = new Button { Content = "+ Add Folder", CornerRadius = new CornerRadius(4) };
+            var flyout = new MenuFlyout();
+            foreach (var preset in presets)
+            {
+                var item = new MenuFlyoutItem { Text = preset.Name };
+                item.Click += (_, _) =>
+                {
+                    config.Folders.Add(new ShellFolderMapping { FolderName = preset.Name, RegistryValue = preset.RegistryValue, Path = preset.DefaultPath });
+                    SaveConfiguration();
+                    RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+                };
+                flyout.Items.Add(item);
+            }
+            addButton.Flyout = flyout;
+            panel.Children.Add(addButton);
+        }
+
+        return panel;
+    }
+
     private FrameworkElement BuildConfigEditor(object config, bool includeScalarSettings = true)
     {
         var panel = new StackPanel { Spacing = 12 };
@@ -618,6 +674,11 @@ public sealed partial class MainWindow : Window
             }
 
             if (!includeScalarSettings && !IsSupportedList(property.PropertyType))
+            {
+                continue;
+            }
+
+            if (!includeScalarSettings && property.Name.Contains("Ignored", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -768,7 +829,7 @@ public sealed partial class MainWindow : Window
         return editor;
     }
 
-    private FrameworkElement BuildListSection(object target, PropertyInfo property)
+    private FrameworkElement BuildListSection(object target, PropertyInfo property, bool allowAdd = true)
     {
         return Card(new StackPanel
         {
@@ -776,7 +837,7 @@ public sealed partial class MainWindow : Window
             Children =
             {
                 BuildListHeader(target, property),
-                BuildListEditor(target, property)
+                BuildListEditor(target, property, allowAdd)
             }
         });
     }
@@ -815,7 +876,7 @@ public sealed partial class MainWindow : Window
         return row;
     }
 
-    private FrameworkElement BuildListEditor(object target, PropertyInfo property)
+    private FrameworkElement BuildListEditor(object target, PropertyInfo property, bool allowAdd = true)
     {
         var list = (IList?)property.GetValue(target);
         if (list is null)
@@ -845,12 +906,15 @@ public sealed partial class MainWindow : Window
                 panel.Children.Add(BuildListItemEditor(list, itemType, index, Refresh, property));
             }
 
-            panel.Children.Add(ActionButton($"+ Add {Singularize(SplitName(property.Name))}", () =>
+            if (allowAdd)
             {
-                list.Add(CreateDefaultItem(itemType));
-                SaveConfiguration();
-                Refresh();
-            }));
+                panel.Children.Add(ActionButton($"+ Add {Singularize(SplitName(property.Name))}", () =>
+                {
+                    list.Add(CreateDefaultItem(itemType));
+                    SaveConfiguration();
+                    Refresh();
+                }));
+            }
         }
 
         Refresh();
@@ -1180,7 +1244,19 @@ public sealed partial class MainWindow : Window
             Tag = "dashboard"
         });
         _navigation.MenuItems.Add(new NavigationViewItemSeparator());
-        foreach (var module in _modules)
+        _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Basic" });
+        foreach (var module in _modules.Where(module => IsBasicModule(module.Name)))
+        {
+            _navigation.MenuItems.Add(new NavigationViewItem
+            {
+                Content = module.Name,
+                Icon = new FontIcon { Glyph = module.IconGlyph },
+                Tag = module
+            });
+        }
+        _navigation.MenuItems.Add(new NavigationViewItemSeparator());
+        _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Advanced" });
+        foreach (var module in _modules.Where(module => !IsBasicModule(module.Name)))
         {
             _navigation.MenuItems.Add(new NavigationViewItem
             {
@@ -1232,8 +1308,9 @@ public sealed partial class MainWindow : Window
         var candidates = await SystemInfoImportService.FindCandidatesAsync(_config, scope);
         if (candidates.Count == 0)
         {
-            await ShowMessageAsync("Import System Info", "No new system info was found for this scope.");
-            AppendOutput("No new system info found.");
+            var message = GetEmptyImportMessage(scope);
+            await ShowMessageAsync("Import", message);
+            AppendOutput(message);
             return;
         }
 
@@ -1448,6 +1525,59 @@ public sealed partial class MainWindow : Window
 
         await dialog.ShowAsync();
         RenderModule(module);
+    }
+
+    private async Task ShowIgnoredItemsAsync(ModuleDescriptor module)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        foreach (var property in module.Config.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (property.Name.Contains("Ignored", StringComparison.OrdinalIgnoreCase) && IsSupportedList(property.PropertyType))
+            {
+                panel.Children.Add(BuildListSection(module.Config, property));
+            }
+        }
+
+        if (panel.Children.Count == 0)
+            panel.Children.Add(new TextBlock { Text = "No ignored items." });
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = $"{module.Name} Ignored Items",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
+            CloseButtonText = "Done"
+        };
+
+        await dialog.ShowAsync();
+        RenderModule(module);
+    }
+
+    private async Task ShowGuidedSetupPromptAsync()
+    {
+        if (await ConfirmAsync("Start guided setup?", "Walk through Symlinks, App Installer, Fonts, Shell Folders, PATH, and Network Drives if detected.", "Start"))
+        {
+            await RunGuidedSetupAsync();
+        }
+    }
+
+    private async Task RunGuidedSetupAsync()
+    {
+        var standard = new[] { "Symlinks", "App Installer", "Fonts", "Shell Folders", "Path" }
+            .Select(name => _modules.First(module => module.Name == name))
+            .ToList();
+
+        if ((await SystemInfoImportService.FindCandidatesAsync(_config, SystemInfoImportScope.NetworkDrives)).Count > 0)
+            standard.Add(_modules.First(module => module.Name == "Network Drives"));
+
+        foreach (var module in standard)
+        {
+            var runStep = await ConfirmAsync($"Guided setup: {module.Name}", "Import detected system information for this module?", "Import");
+            if (runStep && module.ImportScope is { } scope)
+            {
+                await ImportSystemInfoAsync(scope, module);
+            }
+        }
     }
 
     private async Task RunModulesWithOutputDialogAsync(IReadOnlyList<ModuleDescriptor> modules)
@@ -1739,8 +1869,50 @@ public sealed partial class MainWindow : Window
             return "Configured items";
         }
 
-        var nullableType = Nullable.GetUnderlyingType(property.PropertyType);
-        return SplitName((nullableType ?? property.PropertyType).Name);
+        return property.PropertyType == typeof(bool) ? "On or off" :
+            property.PropertyType == typeof(int) ? "Number" :
+            property.PropertyType == typeof(string) ? "Text" :
+            "Setting";
+    }
+
+    private static bool IsBasicModule(string name)
+    {
+        return name is "Symlinks" or "App Installer" or "Fonts" or "Shell Folders" or "Path" or "Network Drives";
+    }
+
+    private static bool HasIgnoredItems(object config)
+    {
+        return config.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Any(property => property.Name.Contains("Ignored", StringComparison.OrdinalIgnoreCase) &&
+                             IsSupportedList(property.PropertyType));
+    }
+
+    private static string GetEmptyImportMessage(SystemInfoImportScope scope)
+    {
+        return scope switch
+        {
+            SystemInfoImportScope.NetworkDrives => "No new network drives were found.",
+            SystemInfoImportScope.AppInstaller => "No new installed apps were found.",
+            SystemInfoImportScope.Fonts => "No new installed fonts were found.",
+            SystemInfoImportScope.ShellFolders => "All standard shell folders are already configured.",
+            SystemInfoImportScope.Symlinks => "No new symlink candidates were found.",
+            SystemInfoImportScope.Path => "No new PATH entries were found.",
+            SystemInfoImportScope.Startup => "No new startup items were found.",
+            _ => "No new importable items were found."
+        };
+    }
+
+    private static IReadOnlyList<ShellFolderPreset> GetShellFolderPresets()
+    {
+        return
+        [
+            new("Desktop", "Desktop", @"D:\{USERNAME}\Desktop"),
+            new("Downloads", "{374DE290-123F-4565-9164-39C4925E467B}", @"D:\{USERNAME}\Downloads"),
+            new("Documents", "Personal", @"D:\{USERNAME}\Documents"),
+            new("Pictures", "My Pictures", @"D:\{USERNAME}\Pictures"),
+            new("Music", "My Music", @"D:\{USERNAME}\Music"),
+            new("Videos", "My Video", @"D:\{USERNAME}\Videos")
+        ];
     }
 
     private static string GetImportLabel(ModuleDescriptor module)
@@ -1850,8 +2022,12 @@ public sealed partial class MainWindow : Window
 
     private static string Singularize(string value)
     {
-        return value.EndsWith('s') && value.Length > 1 ? value[..^1] : value;
+        return value.EndsWith("Directories", StringComparison.Ordinal) ? value[..^3] + "y" :
+            value.EndsWith("ies", StringComparison.Ordinal) ? value[..^3] + "y" :
+            value.EndsWith('s') && value.Length > 1 ? value[..^1] : value;
     }
+
+    private sealed record ShellFolderPreset(string Name, string RegistryValue, string DefaultPath);
 
     private sealed record ModuleDescriptor(
         string Name,

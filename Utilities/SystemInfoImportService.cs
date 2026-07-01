@@ -191,6 +191,7 @@ public static class SystemInfoImportService
         var configured = config.NetworkDrives.Drives
             .Select(drive => drive.DriveLetter)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var found = new Dictionary<string, NetworkDriveMapping>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Network))
         {
@@ -202,20 +203,28 @@ public static class SystemInfoImportService
             if (string.IsNullOrWhiteSpace(path))
                 continue;
 
-            var label = drive.VolumeLabel ?? string.Empty;
-            var mapping = new NetworkDriveMapping
+            found[letter] = new NetworkDriveMapping
             {
                 DriveLetter = letter,
                 NetworkPath = path,
-                Label = label,
+                Label = drive.VolumeLabel ?? string.Empty,
                 Persistent = true,
                 DeleteFirst = true
             };
+        }
 
+        foreach (var mapping in GetNetUseMappings())
+        {
+            if (!configured.Contains(mapping.DriveLetter))
+                found.TryAdd(mapping.DriveLetter, mapping);
+        }
+
+        foreach (var mapping in found.Values.OrderBy(drive => drive.DriveLetter, StringComparer.OrdinalIgnoreCase))
+        {
             yield return new SystemInfoImportCandidate(
                 SystemInfoImportScope.NetworkDrives,
-                $"{letter}: -> {path}",
-                string.IsNullOrWhiteSpace(label) ? "Network drive" : label,
+                $"{mapping.DriveLetter}: -> {mapping.NetworkPath}",
+                string.IsNullOrWhiteSpace(mapping.Label) ? "Network drive" : mapping.Label,
                 mapping);
         }
     }
@@ -520,6 +529,47 @@ public static class SystemInfoImportService
         }
 
         return string.Empty;
+    }
+
+    private static IEnumerable<NetworkDriveMapping> GetNetUseMappings()
+    {
+        string output;
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "net",
+                Arguments = "use",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true
+            };
+            process.Start();
+            output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var drive = parts.FirstOrDefault(part => part.Length == 2 && part[1] == ':');
+            var remote = parts.FirstOrDefault(part => part.StartsWith(@"\\", StringComparison.Ordinal));
+            if (drive is null || remote is null)
+                continue;
+
+            yield return new NetworkDriveMapping
+            {
+                DriveLetter = drive.TrimEnd(':'),
+                NetworkPath = remote,
+                Persistent = true,
+                DeleteFirst = true
+            };
+        }
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunWingetListAsync()
