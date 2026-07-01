@@ -527,6 +527,10 @@ public sealed partial class MainWindow : Window
         {
             return BuildShellFoldersContent(shellFolders);
         }
+        if (module.Config is SymlinksConfig symlinks)
+        {
+            return BuildSymlinksContent(symlinks);
+        }
 
         return BuildConfigEditor(module.Config, includeScalarSettings: false);
     }
@@ -650,6 +654,21 @@ public sealed partial class MainWindow : Window
         }
 
         return panel;
+    }
+
+    private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
+    {
+        return new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.RoamingDirectories))!, "Roaming", "AppData\\Roaming relative folders"),
+                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalDirectories))!, "Local", "AppData\\Local relative folders"),
+                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalLowDirectories))!, "LocalLow", "AppData\\LocalLow relative folders"),
+                BuildCollapsibleListSection(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.SpecialSymlinks))!, "Special", "Arbitrary paths outside AppData")
+            }
+        };
     }
 
     private FrameworkElement BuildConfigEditor(object config, bool includeScalarSettings = true)
@@ -831,6 +850,58 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    private FrameworkElement BuildCollapsibleListSection(object target, PropertyInfo property, string title, string description, bool allowAdd = true)
+    {
+        var list = (IList?)property.GetValue(target);
+        var count = list?.Count ?? 0;
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        header.Children.Add(new FontIcon
+        {
+            Glyph = GetConfigGlyph(property, null),
+            FontSize = 19,
+            Width = 28,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var label = new StackPanel { Spacing = 2 };
+        label.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 17,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        label.Children.Add(new TextBlock
+        {
+            Text = description,
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            FontSize = 12
+        });
+        Grid.SetColumn(label, 1);
+        header.Children.Add(label);
+
+        var countText = new TextBlock
+        {
+            Text = $"{count} item{(count == 1 ? string.Empty : "s")}",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(countText, 2);
+        header.Children.Add(countText);
+
+        var expander = new Expander
+        {
+            Header = header,
+            Content = BuildListEditor(target, property, allowAdd),
+            IsExpanded = count <= 8
+        };
+
+        return Card(expander);
+    }
+
     private FrameworkElement BuildListHeader(object target, PropertyInfo property)
     {
         var row = new Grid { ColumnSpacing = 12 };
@@ -960,7 +1031,7 @@ public sealed partial class MainWindow : Window
 
         row.Children.Add(new FontIcon
         {
-            Glyph = GetConfigGlyph(null, item),
+            Glyph = GetConfigGlyph(listProperty, item),
             FontSize = 20,
             Width = 28,
             VerticalAlignment = VerticalAlignment.Top,
@@ -2557,7 +2628,7 @@ public sealed partial class MainWindow : Window
             RegistryModification modification when !string.IsNullOrWhiteSpace(modification.Key) => modification.Key,
             CustomInstaller installer when !string.IsNullOrWhiteSpace(installer.Name) => installer.Name,
             SpecialSymlink symlink when !string.IsNullOrWhiteSpace(symlink.Description) => symlink.Description,
-            _ => itemType == typeof(string) ? $"Item {index + 1}" : $"{SplitName(itemType.Name)} {index + 1}"
+            _ => itemType == typeof(string) ? "New entry" : $"New {SplitName(itemType.Name).ToLowerInvariant()}"
         };
     }
 
@@ -2600,9 +2671,12 @@ public sealed partial class MainWindow : Window
             "FilesToImport" or "Modifications" => "\uE7B8",
             "Operations" => "\uE8C8",
             "PreparedInstallers" or "ManualInstalls" or "CustomScripts" or "DefaultInstalls" => "\uE896",
-            "RoamingDirectories" or "LocalDirectories" or "LocalLowDirectories" or "SpecialSymlinks" => "\uE71B",
+            "RoamingDirectories" => "\uE8B7",
+            "LocalDirectories" => "\uE8B7",
+            "LocalLowDirectories" => "\uE8B7",
+            "SpecialSymlinks" => "\uE8A5",
             "FontsDirectory" => "\uE8D2",
-            _ => "\uE713"
+            _ => "\uE8A5"
         };
     }
 

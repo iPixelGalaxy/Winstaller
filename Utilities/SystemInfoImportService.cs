@@ -464,26 +464,57 @@ public static class SystemInfoImportService
         if (!Directory.Exists(appDataPath))
             yield break;
 
-        foreach (var dir in Directory.GetDirectories(appDataPath))
+        foreach (var candidate in FindSymlinksRecursive(appDataPath, appDataPath, section, configured, ignored, config, 0))
+            yield return candidate;
+    }
+
+    private static IEnumerable<SystemInfoImportCandidate> FindSymlinksRecursive(
+        string rootPath,
+        string currentPath,
+        string section,
+        List<string> configured,
+        List<string> ignored,
+        WinstallerConfig config,
+        int depth)
+    {
+        IEnumerable<string> directories;
+        try
         {
-            var name = Path.GetFileName(dir);
+            directories = Directory.GetDirectories(currentPath);
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (var dir in directories)
+        {
+            var leafName = Path.GetFileName(dir);
+            var relativePath = Path.GetRelativePath(rootPath, dir);
             var info = new DirectoryInfo(dir);
-            if (name.EndsWith(BackupSuffix, StringComparison.OrdinalIgnoreCase))
+            if (IsWindowsShellJunction(info))
+                continue;
+
+            if (leafName.EndsWith(BackupSuffix, StringComparison.OrdinalIgnoreCase))
             {
-                var originalName = name[..^BackupSuffix.Length];
-                var originalPath = Path.Combine(appDataPath, originalName);
-                var destination = GetSymlinkDestination(config, section, originalName);
+                var originalName = leafName[..^BackupSuffix.Length];
+                var parentRelative = Path.GetDirectoryName(relativePath);
+                var originalRelativePath = string.IsNullOrWhiteSpace(parentRelative)
+                    ? originalName
+                    : Path.Combine(parentRelative, originalName);
+                var originalPath = Path.Combine(rootPath, originalRelativePath);
+                var destination = GetSymlinkDestination(config, section, originalRelativePath);
                 var hasDestination = Directory.Exists(destination);
 
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Symlinks,
-                    $"[{section}] {originalName}",
+                    $"[{section}] {originalRelativePath}",
                     hasDestination
                         ? $"Recover missing symlink from {destination}"
                         : $"Restore original folder from {dir}",
                     new SymlinkImport(
                         section,
-                        originalName,
+                        originalRelativePath,
                         originalPath,
                         false,
                         dir,
@@ -492,26 +523,32 @@ public static class SystemInfoImportService
                 continue;
             }
 
-            if (config.AppDataUtility.ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase) ||
-                configured.Contains(name, StringComparer.OrdinalIgnoreCase) ||
-                IsWindowsShellJunction(info))
-            {
-                continue;
-            }
-
             var existingSymlink = info.Attributes.HasFlag(FileAttributes.ReparsePoint);
             var target = existingSymlink ? info.LinkTarget ?? "(unknown target)" : dir;
-            var isIgnored = ignored.Contains(name, StringComparer.OrdinalIgnoreCase);
+            var isConfigured = configured.Contains(relativePath, StringComparer.OrdinalIgnoreCase);
+            var isIgnored = ignored.Contains(relativePath, StringComparer.OrdinalIgnoreCase);
+            var isExcluded = config.AppDataUtility.ExcludedDirectories.Contains(leafName, StringComparer.OrdinalIgnoreCase);
+
             if (existingSymlink && !Path.IsPathRooted(target) && target != "(unknown target)")
             {
-                target = Path.GetFullPath(target, Path.GetDirectoryName(dir) ?? appDataPath);
+                target = Path.GetFullPath(target, Path.GetDirectoryName(dir) ?? currentPath);
             }
-            yield return new SystemInfoImportCandidate(
-                SystemInfoImportScope.Symlinks,
-                $"[{section}] {name}",
-                target,
-                new SymlinkImport(section, name, dir, existingSymlink, target, existingSymlink ? SymlinkImportKind.ExistingSymlink : SymlinkImportKind.Normal),
-                isIgnored ? "Ignored" : existingSymlink ? "Existing Symlinks" : "Folders Not Yet Symlinked");
+
+            if (!isConfigured && (existingSymlink || (depth == 0 && !isExcluded)))
+            {
+                yield return new SystemInfoImportCandidate(
+                    SystemInfoImportScope.Symlinks,
+                    $"[{section}] {relativePath}",
+                    target,
+                    new SymlinkImport(section, relativePath, dir, existingSymlink, target, existingSymlink ? SymlinkImportKind.ExistingSymlink : SymlinkImportKind.Normal),
+                    isIgnored ? "Ignored" : existingSymlink ? "Existing Symlinks" : "Folders Not Yet Symlinked");
+            }
+
+            if (!existingSymlink)
+            {
+                foreach (var child in FindSymlinksRecursive(rootPath, dir, section, configured, ignored, config, depth + 1))
+                    yield return child;
+            }
         }
     }
 
