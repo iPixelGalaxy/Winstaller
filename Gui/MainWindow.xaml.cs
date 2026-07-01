@@ -20,6 +20,7 @@ using Winstaller.Utilities;
 using WinRT.Interop;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
+using Windows.Storage.Pickers;
 
 namespace Winstaller.Gui;
 
@@ -1150,23 +1151,54 @@ public sealed partial class MainWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var value = list[index]?.ToString() ?? string.Empty;
-        var iconButton = SymlinkOpenButton(
+        Button? iconButton = null;
+        TextBox? box = null;
+        iconButton = SymlinkOpenButton(
             GetPathGlyph(value),
-            () => OpenFolder(GetManagedAppDataSymlinkTarget(config, property.Name, list[index]?.ToString() ?? string.Empty)));
+            async () =>
+            {
+                var currentValue = list[index]?.ToString() ?? string.Empty;
+                if (IsShiftDown())
+                {
+                    OpenFolder(GetManagedAppDataSymlinkTarget(config, property.Name, currentValue));
+                    return;
+                }
+
+                var picked = await PickSymlinkPathAsync(GetAppDataRootForProperty(property.Name), currentValue);
+                if (picked is null)
+                    return;
+
+                list[index] = picked;
+                if (box is not null)
+                    box.Text = picked;
+                if (iconButton is not null)
+                    iconButton.Content = new FontIcon { Glyph = GetPathGlyph(picked), FontSize = 16 };
+                SaveConfiguration();
+            });
         row.Children.Add(iconButton);
 
-        var box = new TextBox
+        box = new TextBox
         {
             Text = value,
             PlaceholderText = placeholder,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             MinWidth = 0
         };
-        box.LostFocus += (_, _) =>
+        void SaveBox()
         {
             list[index] = box.Text.Trim();
             iconButton.Content = new FontIcon { Glyph = GetPathGlyph(box.Text), FontSize = 16 };
             SaveConfiguration();
+            DefocusTextBox(box);
+        }
+        box.LostFocus += (_, _) => SaveBox();
+        box.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Enter)
+            {
+                SaveBox();
+                args.Handled = true;
+            }
         };
         Grid.SetColumn(box, 1);
         row.Children.Add(box);
@@ -1186,36 +1218,86 @@ public sealed partial class MainWindow : Window
     private FrameworkElement BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, int index, Action refresh)
     {
         var symlink = (SpecialSymlink)list[index]!;
-        var outer = new Grid { ColumnSpacing = 8 };
+        var outer = new Grid { ColumnSpacing = 6 };
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var iconButton = SymlinkOpenButton(
+        Button? sourceButton = null;
+        Button? targetButton = null;
+        TextBox? sourceBox = null;
+        TextBox? targetBox = null;
+        ToggleSwitch? typeToggle = null;
+
+        sourceButton = SymlinkOpenButton(
             GetSpecialSymlinkGlyph(symlink),
-            () => OpenFolder(GetSpecialSymlinkTarget(config, symlink)));
-        outer.Children.Add(iconButton);
+            async () =>
+            {
+                if (IsShiftDown())
+                {
+                    OpenFolder(ExpandConfigPath(symlink.Source));
+                    return;
+                }
+
+                var picked = await PickAnyPathAsync(symlink.Source);
+                if (picked is null)
+                    return;
+
+                symlink.Source = picked;
+                symlink.IsDirectory = !LooksLikeFilePath(picked);
+                if (sourceBox is not null)
+                    sourceBox.Text = picked;
+                if (sourceButton is not null)
+                    sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+                if (targetButton is not null)
+                    targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+                if (typeToggle is not null)
+                    typeToggle.IsOn = symlink.IsDirectory;
+                SaveConfiguration();
+            });
+        outer.Children.Add(sourceButton);
+
+        targetButton = SymlinkOpenButton(
+            GetPathGlyph(string.IsNullOrWhiteSpace(symlink.Target) ? symlink.Source : symlink.Target),
+            async () =>
+            {
+                if (IsShiftDown())
+                {
+                    OpenFolder(GetSpecialSymlinkTarget(config, symlink));
+                    return;
+                }
+
+                var picked = await PickAnyPathAsync(symlink.Target);
+                if (picked is null)
+                    return;
+
+                symlink.Target = picked;
+                if (targetBox is not null)
+                    targetBox.Text = picked;
+                if (targetButton is not null)
+                    targetButton.Content = new FontIcon { Glyph = GetPathGlyph(picked), FontSize = 16 };
+                SaveConfiguration();
+            });
+        Grid.SetColumn(targetButton, 1);
+        outer.Children.Add(targetButton);
 
         var fields = new StackPanel { Spacing = 6 };
-        var descriptionBox = CompactTextBox(symlink.Description, "Description", value =>
-        {
-            symlink.Description = value;
-            SaveConfiguration();
-        });
-        var sourceBox = CompactTextBox(symlink.Source, "Source", value =>
+        sourceBox = CompactTextBox(symlink.Source, "Source", value =>
         {
             symlink.Source = value;
             symlink.IsDirectory = !LooksLikeFilePath(value);
-            iconButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            targetButton.Content = new FontIcon { Glyph = GetPathGlyph(string.IsNullOrWhiteSpace(symlink.Target) ? symlink.Source : symlink.Target), FontSize = 16 };
             SaveConfiguration();
         });
-        var targetBox = CompactTextBox(symlink.Target, "Target override", value =>
+        targetBox = CompactTextBox(symlink.Target, "Target override", value =>
         {
             symlink.Target = value;
-            iconButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            targetButton.Content = new FontIcon { Glyph = GetPathGlyph(value), FontSize = 16 };
             SaveConfiguration();
         });
-        var typeToggle = new ToggleSwitch
+        typeToggle = new ToggleSwitch
         {
             IsOn = symlink.IsDirectory,
             OnContent = "Directory",
@@ -1225,14 +1307,13 @@ public sealed partial class MainWindow : Window
         typeToggle.Toggled += (_, _) =>
         {
             symlink.IsDirectory = typeToggle.IsOn;
-            iconButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
             SaveConfiguration();
         };
-        fields.Children.Add(descriptionBox);
         fields.Children.Add(sourceBox);
         fields.Children.Add(targetBox);
         fields.Children.Add(typeToggle);
-        Grid.SetColumn(fields, 1);
+        Grid.SetColumn(fields, 2);
         outer.Children.Add(fields);
 
         var removeButton = CompactRemoveButton(() =>
@@ -1241,7 +1322,7 @@ public sealed partial class MainWindow : Window
             SaveConfiguration();
             refresh();
         });
-        Grid.SetColumn(removeButton, 2);
+        Grid.SetColumn(removeButton, 3);
         outer.Children.Add(removeButton);
 
         return outer;
@@ -1259,11 +1340,21 @@ public sealed partial class MainWindow : Window
         box.LostFocus += (_, _) =>
         {
             save(box.Text.Trim());
+            DefocusTextBox(box);
+        };
+        box.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Enter)
+            {
+                save(box.Text.Trim());
+                DefocusTextBox(box);
+                args.Handled = true;
+            }
         };
         return box;
     }
 
-    private Button SymlinkOpenButton(string glyph, Action open)
+    private Button SymlinkOpenButton(string glyph, Func<Task> open)
     {
         var button = new Button
         {
@@ -1275,8 +1366,8 @@ public sealed partial class MainWindow : Window
             CornerRadius = new CornerRadius(4),
             VerticalAlignment = VerticalAlignment.Center
         };
-        ToolTipService.SetToolTip(button, "Open managed data folder");
-        button.Click += (_, _) => open();
+        ToolTipService.SetToolTip(button, "Select location. Shift-click opens location.");
+        button.Click += async (_, _) => await open();
         return button;
     }
 
@@ -2289,6 +2380,78 @@ public sealed partial class MainWindow : Window
         {
             AppendOutput($"Open folder failed: {ex.Message}");
         }
+    }
+
+    private async Task<string?> PickSymlinkPathAsync(string rootPath, string currentValue)
+    {
+        var picked = await PickAnyPathAsync(currentValue);
+        if (picked is null)
+            return null;
+
+        var expandedRoot = ExpandConfigPath(rootPath);
+        if (!picked.StartsWith(expandedRoot.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase) &&
+            !picked.Equals(expandedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync("Invalid location", $"Pick a path under {expandedRoot}.");
+            return null;
+        }
+
+        return Path.GetRelativePath(expandedRoot, picked);
+    }
+
+    private async Task<string?> PickAnyPathAsync(string currentValue)
+    {
+        return LooksLikeFilePath(currentValue)
+            ? await PickFilePathAsync()
+            : await PickFolderPathAsync();
+    }
+
+    private async Task<string?> PickFolderPathAsync()
+    {
+        var picker = new FolderPicker
+        {
+            SuggestedStartLocation = PickerLocationId.ComputerFolder
+        };
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        var folder = await picker.PickSingleFolderAsync();
+        return folder?.Path;
+    }
+
+    private async Task<string?> PickFilePathAsync()
+    {
+        var picker = new FileOpenPicker
+        {
+            SuggestedStartLocation = PickerLocationId.ComputerFolder
+        };
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        var file = await picker.PickSingleFileAsync();
+        return file?.Path;
+    }
+
+    private static string GetAppDataRootForProperty(string propertyName)
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return propertyName switch
+        {
+            nameof(SymlinksConfig.RoamingDirectories) => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            nameof(SymlinksConfig.LocalDirectories) => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            nameof(SymlinksConfig.LocalLowDirectories) => Path.Combine(profile, "AppData", "LocalLow"),
+            _ => profile
+        };
+    }
+
+    private static bool IsShiftDown()
+    {
+        return Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+    }
+
+    private static void DefocusTextBox(TextBox box)
+    {
+        box.SelectionLength = 0;
+        FocusManager.TryMoveFocus(FocusNavigationDirection.Next);
     }
 
     private static string GetManagedAppDataSymlinkTarget(SymlinksConfig config, string propertyName, string relativePath)
