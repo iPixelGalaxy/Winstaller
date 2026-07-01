@@ -1542,23 +1542,30 @@ public sealed partial class MainWindow : Window
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        var dialogContent = new StackPanel
+        {
+            Spacing = 14,
+            Width = 1080,
+            MaxWidth = 1080,
+            Children =
+            {
+                new ScrollViewer { Content = panel, MaxHeight = 600, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
+                footer
+            }
+        };
 
         dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = "Import 0 symlink item(s)?",
             FullSizeDesired = true,
-            Content = new StackPanel
-            {
-                Spacing = 14,
-                Children =
-                {
-                    new ScrollViewer { Content = panel, MaxHeight = 600, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
-                    footer
-                }
-            },
+            MinWidth = 1080,
+            MaxWidth = 1160,
+            Content = dialogContent,
             DefaultButton = ContentDialogButton.None
         };
+        dialog.Resources["ContentDialogMinWidth"] = 1080.0;
+        dialog.Resources["ContentDialogMaxWidth"] = 1160.0;
         UpdateSelectedCount();
 
         footer.Children.Add(ActionButton("Copy (Safe, but slower)", () =>
