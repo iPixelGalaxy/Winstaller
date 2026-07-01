@@ -1375,12 +1375,18 @@ public sealed partial class MainWindow : Window
         {
             try
             {
+                WriteDiagnosticLog("Symlink picker clicked.");
                 await open();
+                WriteDiagnosticLog("Symlink picker completed.");
             }
             catch (Exception ex)
             {
-                AppendOutput($"Picker failed: {ex.Message}");
-                await ShowMessageAsync("Picker failed", ex.Message);
+                WriteDiagnosticLog($"Symlink picker failed:{Environment.NewLine}{ex}");
+                await RunOnUiThreadAsync(async () =>
+                {
+                    AppendOutput($"Picker failed: {ex.Message}");
+                    await ShowMessageAsync("Picker failed", ex.Message);
+                });
             }
         };
         return button;
@@ -2421,25 +2427,35 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> PickFolderPathAsync()
     {
+        WriteDiagnosticLog("Folder picker create.");
         var picker = new FolderPicker
         {
             SuggestedStartLocation = PickerLocationId.ComputerFolder
         };
         picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        var hwnd = WindowNative.GetWindowHandle(this);
+        WriteDiagnosticLog($"Folder picker initialize hwnd={hwnd}.");
+        InitializeWithWindow.Initialize(picker, hwnd);
+        WriteDiagnosticLog("Folder picker show.");
         var folder = await picker.PickSingleFolderAsync();
+        WriteDiagnosticLog(folder is null ? "Folder picker canceled." : $"Folder picker picked: {folder.Path}");
         return folder?.Path;
     }
 
     private async Task<string?> PickFilePathAsync()
     {
+        WriteDiagnosticLog("File picker create.");
         var picker = new FileOpenPicker
         {
             SuggestedStartLocation = PickerLocationId.ComputerFolder
         };
         AddFilePickerFilters(picker);
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        var hwnd = WindowNative.GetWindowHandle(this);
+        WriteDiagnosticLog($"File picker initialize hwnd={hwnd}.");
+        InitializeWithWindow.Initialize(picker, hwnd);
+        WriteDiagnosticLog("File picker show.");
         var file = await picker.PickSingleFileAsync();
+        WriteDiagnosticLog(file is null ? "File picker canceled." : $"File picker picked: {file.Path}");
         return file?.Path;
     }
 
@@ -2534,6 +2550,9 @@ public sealed partial class MainWindow : Window
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+            return await RunOnUiThreadAsync(() => ConfirmAsync(title, message, primaryText));
+
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
@@ -2553,6 +2572,12 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowMessageAsync(string title, string message)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            await RunOnUiThreadAsync(() => ShowMessageAsync(title, message));
+            return;
+        }
+
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
@@ -2845,6 +2870,65 @@ public sealed partial class MainWindow : Window
         return completion.Task;
     }
 
+    private Task<T> RunOnUiThreadAsync<T>(Func<Task<T>> action)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            return action();
+
+        var completion = new TaskCompletionSource<T>();
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                completion.SetResult(await action());
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        });
+
+        return completion.Task;
+    }
+
+    private Task RunOnUiThreadAsync(Func<Task> action)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            return action();
+
+        var completion = new TaskCompletionSource();
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                await action();
+                completion.SetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        });
+
+        return completion.Task;
+    }
+
+    private static void WriteDiagnosticLog(string message)
+    {
+        try
+        {
+            var logDirectory = BootstrapManager.DataRoot is null
+                ? Path.Combine(BootstrapManager.BootstrapDirectory, "logs")
+                : BootstrapManager.LogsDirectory;
+            Directory.CreateDirectory(logDirectory);
+            var logPath = Path.Combine(logDirectory, $"debug-{DateTime.Now:yyyyMMdd}.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
+    }
+
     private static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];
@@ -3002,6 +3086,12 @@ public sealed partial class MainWindow : Window
 
     private void AppendOutputText(string text)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => AppendOutputText(text));
+            return;
+        }
+
         if (_activeOutputBox is null)
         {
             return;
