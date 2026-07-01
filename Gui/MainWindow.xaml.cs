@@ -1370,8 +1370,11 @@ public sealed partial class MainWindow : Window
         });
         copyLogButton.HorizontalAlignment = HorizontalAlignment.Right;
         copyLogButton.IsEnabled = false;
+        Button? retryButton = null;
         var footer = new StackPanel
         {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
             Width = logDialogWidth,
             HorizontalAlignment = HorizontalAlignment.Right,
             Children = { copyLogButton }
@@ -1424,12 +1427,12 @@ public sealed partial class MainWindow : Window
             foreach (var candidate in ignored)
                 Log($"Ignored: {candidate.Title}: {candidate.Detail}");
 
-            var added = await Task.Run(() =>
+            SystemInfoImportResult ApplyImport(IReadOnlyList<SystemInfoImportCandidate> importSelection)
             {
                 SystemInfoImportService.IgnoreCandidates(_config, ignored);
-                return SystemInfoImportService.ApplyCandidates(
+                return SystemInfoImportService.ApplyCandidatesWithResult(
                     _config,
-                    selected,
+                    importSelection,
                     symlinkMode,
                     Log,
                     scope == SystemInfoImportScope.Symlinks
@@ -1439,7 +1442,9 @@ public sealed partial class MainWindow : Window
                             Log($"Saved successful symlink config: {candidate.Title}");
                         }
                         : null);
-            });
+            }
+
+            var result = await Task.Run(() => ApplyImport(selected));
 
             SaveConfiguration();
             LoadConfiguration();
@@ -1454,10 +1459,97 @@ public sealed partial class MainWindow : Window
                 RenderModule(refreshedModule ?? module);
             }
 
-            Log($"Imported {added} item(s).");
-            Log($"Skipped or failed {Math.Max(0, selected.Count - added)} selected item(s).");
+            Log($"Imported {result.Added} item(s).");
+            Log($"Skipped or failed {Math.Max(0, selected.Count - result.Added)} selected item(s).");
+            if (result.SymlinkFailures.Count > 0)
+            {
+                Log("Failed symlink folders:");
+                foreach (var failure in result.SymlinkFailures)
+                {
+                    Log($"- {failure.Title}: {failure.Message}");
+                    foreach (var path in failure.FailedPaths.Take(8))
+                        Log($"  {path}");
+                }
+
+                var lockingProcesses = SystemInfoImportService.FindLockingProcesses(
+                    result.SymlinkFailures.SelectMany(failure => failure.FailedPaths));
+                if (lockingProcesses.Count > 0)
+                {
+                    Log("Apps possibly causing copy issues:");
+                    foreach (var process in lockingProcesses)
+                        Log($"- {process.ProcessName} (PID {process.ProcessId}) locking {process.Path}");
+
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        var retryConfirmArmed = false;
+                        retryButton = ActionButton("Kill Apps and Retry", async () =>
+                        {
+                            if (!retryConfirmArmed)
+                            {
+                                retryConfirmArmed = true;
+                                retryButton.Content = "Confirm Kill and Retry";
+                                Log($"Confirm kill and retry: this will kill {lockingProcesses.Count} detected app process(es), then retry {result.SymlinkFailures.Count} failed symlink item(s).");
+                                return;
+                            }
+
+                            retryButton.IsEnabled = false;
+                            progress.IsIndeterminate = true;
+                            Log("Killing detected locking apps...");
+                            foreach (var processInfo in lockingProcesses)
+                            {
+                                try
+                                {
+                                    var process = Process.GetProcessById(processInfo.ProcessId);
+                                    Log($"Killing {processInfo.ProcessName} (PID {processInfo.ProcessId})");
+                                    process.Kill(true);
+                                    await process.WaitForExitAsync();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log($"Failed to kill {processInfo.ProcessName} (PID {processInfo.ProcessId}): {ex.Message}");
+                                }
+                            }
+
+                            Log("Retrying failed symlink item(s)...");
+                            var retrySelection = result.SymlinkFailures.Select(failure => failure.Candidate).ToList();
+                            var retryResult = await Task.Run(() => ApplyImport(retrySelection));
+                            SaveConfiguration();
+                            LoadConfiguration();
+                            RebuildNavigation();
+                            if (module is null)
+                            {
+                                RenderDashboard();
+                            }
+                            else
+                            {
+                                var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
+                                RenderModule(refreshedModule ?? module);
+                            }
+
+                            Log($"Retry imported {retryResult.Added} item(s).");
+                            if (retryResult.SymlinkFailures.Count > 0)
+                            {
+                                Log($"Retry still failed {retryResult.SymlinkFailures.Count} symlink item(s).");
+                                foreach (var failure in retryResult.SymlinkFailures)
+                                    Log($"- {failure.Title}: {failure.Message}");
+                            }
+                            else
+                            {
+                                Log("Retry completed without symlink copy failures.");
+                            }
+
+                            progress.IsIndeterminate = false;
+                        }, primary: true);
+                        footer.Children.Insert(0, retryButton);
+                    });
+                }
+                else
+                {
+                    Log("No locking app process could be detected. Close related apps and retry import.");
+                }
+            }
             Log($"Log path: {logPath}");
-            AppendOutput($"Imported {added} item(s). Log: {logPath}");
+            AppendOutput($"Imported {result.Added} item(s). Log: {logPath}");
         }
         catch (Exception ex)
         {

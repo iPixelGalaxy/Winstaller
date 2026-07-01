@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Winstaller.Configuration;
 using Winstaller.Models;
@@ -29,6 +30,10 @@ public enum SymlinkImportMode
     Copy,
     Move
 }
+
+public sealed record SystemInfoImportResult(int Added, IReadOnlyList<SymlinkImportFailure> SymlinkFailures);
+public sealed record SymlinkImportFailure(SystemInfoImportCandidate Candidate, string Title, IReadOnlyList<string> FailedPaths, string Message);
+public sealed record LockingProcessInfo(int ProcessId, string ProcessName, string Path);
 
 public static class SystemInfoImportService
 {
@@ -78,7 +83,18 @@ public static class SystemInfoImportService
         Action<string>? log = null,
         Action<SystemInfoImportCandidate>? applied = null)
     {
+        return ApplyCandidatesWithResult(config, candidates, symlinkMode, log, applied).Added;
+    }
+
+    public static SystemInfoImportResult ApplyCandidatesWithResult(
+        WinstallerConfig config,
+        IEnumerable<SystemInfoImportCandidate> candidates,
+        SymlinkImportMode symlinkMode = SymlinkImportMode.Copy,
+        Action<string>? log = null,
+        Action<SystemInfoImportCandidate>? applied = null)
+    {
         var added = 0;
+        var failures = new List<SymlinkImportFailure>();
         foreach (var candidate in candidates)
         {
             log?.Invoke($"Applying {candidate.Scope}: {candidate.Title}");
@@ -144,18 +160,27 @@ public static class SystemInfoImportService
 
                     if (list is not null && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
                     {
-                        if (MigrateSymlinkData(config, symlink, symlinkMode, log))
+                        var result = MigrateSymlinkData(config, symlink, symlinkMode, log);
+                        if (result.Success)
                         {
                             list.Add(symlink.Name);
                             added++;
                             applied?.Invoke(candidate);
+                        }
+                        else
+                        {
+                            failures.Add(new SymlinkImportFailure(
+                                candidate,
+                                candidate.Title,
+                                result.FailedPaths.Count == 0 ? [symlink.SourcePath] : result.FailedPaths,
+                                result.Message));
                         }
                     }
                     break;
             }
         }
 
-        return added;
+        return new SystemInfoImportResult(added, failures);
     }
 
     public static void IgnoreCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates)
@@ -480,7 +505,21 @@ public static class SystemInfoImportService
                path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
+    public static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(IEnumerable<string> paths)
+    {
+        var found = new Dictionary<int, LockingProcessInfo>();
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var process in FindLockingProcesses(path))
+            {
+                found.TryAdd(process.ProcessId, process);
+            }
+        }
+
+        return found.Values.OrderBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static SymlinkMigrationResult MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
         var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
             ? symlink.ExistingTargetPath
@@ -488,19 +527,27 @@ public static class SystemInfoImportService
         if (!Directory.Exists(dataSource))
         {
             log?.Invoke($"Skipped missing source: {dataSource}");
-            return false;
+            return SymlinkMigrationResult.Fail($"Missing source: {dataSource}", [dataSource]);
         }
 
         var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
             .Replace("{USERNAME}", Environment.UserName);
         var destination = Path.Combine(baseDir, "AppData", symlink.Section, symlink.Name);
         log?.Invoke($"{mode} {dataSource} -> {destination}");
-        Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? baseDir);
-
-        if (Directory.Exists(destination))
+        try
         {
-            log?.Invoke($"Removing existing destination: {destination}");
-            Directory.Delete(destination, true);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? baseDir);
+
+            if (Directory.Exists(destination))
+            {
+                log?.Invoke($"Removing existing destination: {destination}");
+                Directory.Delete(destination, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Failed preparing destination: {destination} ({ex.Message})");
+            return SymlinkMigrationResult.Fail($"Failed preparing destination: {ex.Message}", [destination]);
         }
 
         if (mode == SymlinkImportMode.Move)
@@ -509,16 +556,27 @@ public static class SystemInfoImportService
             {
                 Directory.Move(dataSource, destination);
             }
-            catch
+            catch (Exception ex)
             {
-                log?.Invoke("Move failed, falling back to copy/delete.");
+                log?.Invoke($"Move failed, falling back to copy/delete. ({ex.Message})");
                 var copyResult = CopyDirectory(dataSource, destination, log);
                 if (!copyResult.Success)
                 {
                     log?.Invoke($"Skipped symlink item because copy was incomplete: {symlink.Name}");
-                    return false;
+                    CleanupFailedDestination(destination, log);
+                    return SymlinkMigrationResult.Fail($"Copy incomplete: {copyResult.Message}", copyResult.FailedPaths);
                 }
-                Directory.Delete(dataSource, true);
+
+                try
+                {
+                    Directory.Delete(dataSource, true);
+                }
+                catch (Exception deleteEx)
+                {
+                    log?.Invoke($"Skipped symlink item because source delete failed: {dataSource} ({deleteEx.Message})");
+                    CleanupFailedDestination(destination, log);
+                    return SymlinkMigrationResult.Fail($"Source delete failed: {deleteEx.Message}", [dataSource]);
+                }
             }
         }
         else
@@ -527,41 +585,60 @@ public static class SystemInfoImportService
             if (!copyResult.Success)
             {
                 log?.Invoke($"Skipped symlink item because copy was incomplete: {symlink.Name}");
-                return false;
+                CleanupFailedDestination(destination, log);
+                return SymlinkMigrationResult.Fail($"Copy incomplete: {copyResult.Message}", copyResult.FailedPaths);
             }
         }
 
-        if (Directory.Exists(symlink.SourcePath))
+        try
         {
-            if (symlink.IsExistingSymlink)
+            if (Directory.Exists(symlink.SourcePath))
             {
-                Directory.Delete(symlink.SourcePath);
+                if (symlink.IsExistingSymlink)
+                {
+                    Directory.Delete(symlink.SourcePath);
+                }
+                else if (mode == SymlinkImportMode.Copy)
+                {
+                    var backup = symlink.SourcePath + ".winstaller-backup";
+                    if (Directory.Exists(backup))
+                        Directory.Delete(backup, true);
+                    log?.Invoke($"Moving original to backup: {backup}");
+                    Directory.Move(symlink.SourcePath, backup);
+                }
             }
-            else if (mode == SymlinkImportMode.Copy)
-            {
-                var backup = symlink.SourcePath + ".winstaller-backup";
-                if (Directory.Exists(backup))
-                    Directory.Delete(backup, true);
-                log?.Invoke($"Moving original to backup: {backup}");
-                Directory.Move(symlink.SourcePath, backup);
-            }
-        }
 
-        log?.Invoke($"Creating symlink: {symlink.SourcePath} -> {destination}");
-        CreateDirectorySymlink(symlink.SourcePath, destination);
-        return true;
+            log?.Invoke($"Creating symlink: {symlink.SourcePath} -> {destination}");
+            CreateDirectorySymlink(symlink.SourcePath, destination);
+            return SymlinkMigrationResult.Ok();
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Failed finalizing symlink item: {symlink.Name} ({ex.Message})");
+            CleanupFailedDestination(destination, log);
+            return SymlinkMigrationResult.Fail($"Finalize failed: {ex.Message}", [symlink.SourcePath]);
+        }
     }
 
     private static CopyDirectoryResult CopyDirectory(string source, string destination, Action<string>? log)
     {
-        var skipped = 0;
+        var failedPaths = new List<string>();
         if (IsReparseDirectory(source))
         {
             log?.Invoke($"Skipped reparse directory: {source}");
-            return new CopyDirectoryResult(1);
+            return CopyDirectoryResult.Fail([source], "Source is a reparse directory.");
         }
 
-        Directory.CreateDirectory(destination);
+        try
+        {
+            Directory.CreateDirectory(destination);
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Failed creating directory: {destination} ({ex.Message})");
+            return CopyDirectoryResult.Fail([destination], ex.Message);
+        }
+
         try
         {
             foreach (var file in Directory.GetFiles(source))
@@ -572,14 +649,14 @@ public static class SystemInfoImportService
                 }
                 catch (Exception ex)
                 {
-                    skipped++;
+                    failedPaths.Add(file);
                     log?.Invoke($"Skipped locked or unavailable file: {file} ({ex.Message})");
                 }
             }
         }
         catch (Exception ex)
         {
-            skipped++;
+            failedPaths.Add(source);
             log?.Invoke($"Skipped locked or unavailable directory: {source} ({ex.Message})");
         }
 
@@ -589,22 +666,39 @@ public static class SystemInfoImportService
             {
                 if (IsReparseDirectory(directory))
                 {
-                    skipped++;
                     log?.Invoke($"Skipped reparse directory: {directory}");
                     continue;
                 }
 
                 var target = Path.Combine(destination, Path.GetFileName(directory));
-                skipped += CopyDirectory(directory, target, log).SkippedCount;
+                failedPaths.AddRange(CopyDirectory(directory, target, log).FailedPaths);
             }
         }
         catch (Exception ex)
         {
-            skipped++;
+            failedPaths.Add(source);
             log?.Invoke($"Skipped locked or unavailable directory children: {source} ({ex.Message})");
         }
 
-        return new CopyDirectoryResult(skipped);
+        return failedPaths.Count == 0
+            ? CopyDirectoryResult.Ok()
+            : CopyDirectoryResult.Fail(failedPaths, $"{failedPaths.Count} path(s) failed.");
+    }
+
+    private static void CleanupFailedDestination(string destination, Action<string>? log)
+    {
+        try
+        {
+            if (Directory.Exists(destination))
+            {
+                log?.Invoke($"Cleaning incomplete destination: {destination}");
+                Directory.Delete(destination, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Failed cleaning incomplete destination: {destination} ({ex.Message})");
+        }
     }
 
     private static bool IsWindowsShellJunction(DirectoryInfo info)
@@ -641,6 +735,72 @@ public static class SystemInfoImportService
         });
         process?.WaitForExit();
     }
+
+    private static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(string path)
+    {
+        var sessionHandle = 0u;
+        var sessionKey = Guid.NewGuid().ToString("N");
+        if (RmStartSession(out sessionHandle, 0, sessionKey) != 0)
+            return [];
+
+        try
+        {
+            var resources = new[] { path };
+            if (RmRegisterResources(sessionHandle, (uint)resources.Length, resources, 0, null, 0, null) != 0)
+                return [];
+
+            uint needed = 0;
+            uint count = 0;
+            uint reason;
+            var result = RmGetList(sessionHandle, out needed, ref count, null, out reason);
+            if (result != ErrorMoreData || needed == 0)
+                return [];
+
+            var processInfo = new RmProcessInfo[needed];
+            count = needed;
+            result = RmGetList(sessionHandle, out needed, ref count, processInfo, out reason);
+            if (result != 0)
+                return [];
+
+            return processInfo
+                .Take((int)count)
+                .Select(info => new LockingProcessInfo(
+                    info.Process.dwProcessId,
+                    string.IsNullOrWhiteSpace(info.strAppName) ? $"PID {info.Process.dwProcessId}" : info.strAppName,
+                    path))
+                .ToList();
+        }
+        finally
+        {
+            RmEndSession(sessionHandle);
+        }
+    }
+
+    private const int ErrorMoreData = 234;
+
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+    private static extern int RmStartSession(out uint pSessionHandle, int dwSessionFlags, string strSessionKey);
+
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+    private static extern int RmRegisterResources(
+        uint pSessionHandle,
+        uint nFiles,
+        string[]? rgsFilenames,
+        uint nApplications,
+        RmUniqueProcess[]? rgApplications,
+        uint nServices,
+        string[]? rgsServiceNames);
+
+    [DllImport("rstrtmgr.dll")]
+    private static extern int RmGetList(
+        uint dwSessionHandle,
+        out uint pnProcInfoNeeded,
+        ref uint pnProcInfo,
+        [In, Out] RmProcessInfo[]? rgAffectedApps,
+        out uint lpdwRebootReasons);
+
+    [DllImport("rstrtmgr.dll")]
+    private static extern int RmEndSession(uint pSessionHandle);
 
     private static IEnumerable<StartupProgram> ReadStartupKey(RegistryKey root, string path, bool machineLevel)
     {
@@ -877,8 +1037,38 @@ public static class SystemInfoImportService
 
     private sealed record WingetInstalledPackage(string Name, string Id, string Version);
     private sealed record SymlinkImport(string Section, string Name, string SourcePath, bool IsExistingSymlink, string ExistingTargetPath);
-    private sealed record CopyDirectoryResult(int SkippedCount)
+    private sealed record SymlinkMigrationResult(bool Success, IReadOnlyList<string> FailedPaths, string Message)
     {
-        public bool Success => SkippedCount == 0;
+        public static SymlinkMigrationResult Ok() => new(true, [], string.Empty);
+        public static SymlinkMigrationResult Fail(IReadOnlyList<string> failedPaths, string message) => new(false, failedPaths, message);
+        public static SymlinkMigrationResult Fail(string message, IReadOnlyList<string> failedPaths) => new(false, failedPaths, message);
+    }
+
+    private sealed record CopyDirectoryResult(bool Success, IReadOnlyList<string> FailedPaths, string Message)
+    {
+        public static CopyDirectoryResult Ok() => new(true, [], string.Empty);
+        public static CopyDirectoryResult Fail(IReadOnlyList<string> failedPaths, string message) => new(false, failedPaths, message);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RmUniqueProcess
+    {
+        public int dwProcessId;
+        public System.Runtime.InteropServices.ComTypes.FILETIME ProcessStartTime;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct RmProcessInfo
+    {
+        public RmUniqueProcess Process;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string strAppName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string strServiceShortName;
+        public uint ApplicationType;
+        public uint AppStatus;
+        public uint TSSessionId;
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool bRestartable;
     }
 }
