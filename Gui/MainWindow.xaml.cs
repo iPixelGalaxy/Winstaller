@@ -1474,7 +1474,13 @@ public sealed partial class MainWindow : Window
         var resultMode = SymlinkImportMode.Copy;
         var accepted = false;
         ContentDialog? dialog = null;
-        var panel = new StackPanel { Spacing = 12, MaxWidth = 1040 };
+        var dialogWidth = Math.Min(1080, Math.Max(720, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1180) - 160));
+        var panel = new StackPanel
+        {
+            Spacing = 12,
+            MaxWidth = dialogWidth - 24,
+            Margin = new Thickness(0, 0, 18, 0)
+        };
 
         var checkBoxes = new List<CheckBox>();
         void UpdateSelectedCount()
@@ -1498,40 +1504,46 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
-                var itemPanel = new StackPanel
-                {
-                    Spacing = 8
-                };
+                var itemGrid = new Grid { ColumnSpacing = 10 };
+                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 var checkBox = new CheckBox
                 {
                     IsChecked = group.Key == "Existing Symlinks",
                     Tag = candidate,
-                    Content = new StackPanel
-                    {
-                        Spacing = 2,
-                        Children =
-                        {
-                            new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
-                            new TextBlock { Text = candidate.Detail, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
-                        }
-                    }
+                    VerticalAlignment = VerticalAlignment.Center
                 };
                 checkBox.Checked += (_, _) => UpdateSelectedCount();
                 checkBox.Unchecked += (_, _) => UpdateSelectedCount();
                 checkBoxes.Add(checkBox);
-                itemPanel.Children.Add(checkBox);
+                itemGrid.Children.Add(checkBox);
+
+                var textPanel = new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
+                        new TextBlock { Text = candidate.Detail, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
+                    }
+                };
+                Grid.SetColumn(textPanel, 1);
+                itemGrid.Children.Add(textPanel);
 
                 var openButton = ActionButton("Open Folder", () => OpenFolder(candidate.Detail));
-                openButton.HorizontalAlignment = HorizontalAlignment.Left;
-                itemPanel.Children.Add(openButton);
+                openButton.HorizontalAlignment = HorizontalAlignment.Right;
+                openButton.VerticalAlignment = VerticalAlignment.Center;
+                Grid.SetColumn(openButton, 2);
+                itemGrid.Children.Add(openButton);
 
                 panel.Children.Add(new Border
                 {
                     Background = ResourceBrush("WinstallerCardBrush"),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12),
-                    Child = itemPanel
+                    Child = itemGrid
                 });
             }
         }
@@ -1545,11 +1557,17 @@ public sealed partial class MainWindow : Window
         var dialogContent = new StackPanel
         {
             Spacing = 14,
-            Width = 1080,
-            MaxWidth = 1080,
+            Width = dialogWidth,
+            MaxWidth = dialogWidth,
             Children =
             {
-                new ScrollViewer { Content = panel, MaxHeight = 600, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
+                new ScrollViewer
+                {
+                    Content = panel,
+                    MaxHeight = 600,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                },
                 footer
             }
         };
@@ -1559,13 +1577,11 @@ public sealed partial class MainWindow : Window
             XamlRoot = RootGrid.XamlRoot,
             Title = "Import 0 symlink item(s)?",
             FullSizeDesired = true,
-            MinWidth = 1080,
-            MaxWidth = 1160,
             Content = dialogContent,
             DefaultButton = ContentDialogButton.None
         };
-        dialog.Resources["ContentDialogMinWidth"] = 1080.0;
-        dialog.Resources["ContentDialogMaxWidth"] = 1160.0;
+        dialog.Resources["ContentDialogMinWidth"] = dialogWidth;
+        dialog.Resources["ContentDialogMaxWidth"] = dialogWidth + 80;
         UpdateSelectedCount();
 
         footer.Children.Add(ActionButton("Copy (Safe, but slower)", () =>
