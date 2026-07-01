@@ -1475,14 +1475,17 @@ public sealed partial class MainWindow : Window
         var accepted = false;
         ContentDialog? dialog = null;
         var dialogWidth = Math.Min(1080, Math.Max(720, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1180) - 160));
+        var scrollbarGutter = 36;
+        var cardWidth = dialogWidth - scrollbarGutter;
+        var innerWidth = cardWidth - 24;
         var panel = new StackPanel
         {
             Spacing = 12,
-            MaxWidth = dialogWidth - 24,
-            Margin = new Thickness(0, 0, 44, 0)
+            Width = cardWidth,
+            MaxWidth = cardWidth,
+            Margin = new Thickness(0, 0, scrollbarGutter, 0)
         };
-        var rowWidth = dialogWidth - 68;
-        var textWidth = Math.Max(360, rowWidth - 166);
+        var textWidth = Math.Max(360, innerWidth - 196);
 
         var checkBoxes = new List<CheckBox>();
         void UpdateSelectedCount()
@@ -1509,11 +1512,11 @@ public sealed partial class MainWindow : Window
                 var itemGrid = new Grid
                 {
                     ColumnSpacing = 10,
-                    Width = rowWidth
+                    Width = innerWidth
                 };
                 itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
                 itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(128) });
 
                 var checkBox = new CheckBox
                 {
@@ -1557,7 +1560,7 @@ public sealed partial class MainWindow : Window
                     Background = ResourceBrush("WinstallerCardBrush"),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12),
-                    Width = rowWidth,
+                    Width = cardWidth,
                     Child = itemGrid
                 });
             }
