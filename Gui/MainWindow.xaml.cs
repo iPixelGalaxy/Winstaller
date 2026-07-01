@@ -1218,9 +1218,7 @@ public sealed partial class MainWindow : Window
     private FrameworkElement BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, int index, Action refresh)
     {
         var symlink = (SpecialSymlink)list[index]!;
-        var outer = new Grid { ColumnSpacing = 6 };
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var outer = new Grid { ColumnSpacing = 8 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -1256,8 +1254,6 @@ public sealed partial class MainWindow : Window
                     typeToggle.IsOn = symlink.IsDirectory;
                 SaveConfiguration();
             });
-        outer.Children.Add(sourceButton);
-
         targetButton = SymlinkOpenButton(
             GetPathGlyph(string.IsNullOrWhiteSpace(symlink.Target) ? symlink.Source : symlink.Target),
             async () =>
@@ -1279,10 +1275,11 @@ public sealed partial class MainWindow : Window
                     targetButton.Content = new FontIcon { Glyph = GetPathGlyph(picked), FontSize = 16 };
                 SaveConfiguration();
             });
-        Grid.SetColumn(targetButton, 1);
-        outer.Children.Add(targetButton);
-
         var fields = new StackPanel { Spacing = 6 };
+        var sourceRow = new Grid { ColumnSpacing = 6 };
+        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sourceRow.Children.Add(sourceButton);
         sourceBox = CompactTextBox(symlink.Source, "Source", value =>
         {
             symlink.Source = value;
@@ -1291,12 +1288,22 @@ public sealed partial class MainWindow : Window
             targetButton.Content = new FontIcon { Glyph = GetPathGlyph(string.IsNullOrWhiteSpace(symlink.Target) ? symlink.Source : symlink.Target), FontSize = 16 };
             SaveConfiguration();
         });
+        Grid.SetColumn(sourceBox, 1);
+        sourceRow.Children.Add(sourceBox);
+
+        var targetRow = new Grid { ColumnSpacing = 6 };
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        targetRow.Children.Add(targetButton);
         targetBox = CompactTextBox(symlink.Target, "Target override", value =>
         {
             symlink.Target = value;
             targetButton.Content = new FontIcon { Glyph = GetPathGlyph(value), FontSize = 16 };
             SaveConfiguration();
         });
+        Grid.SetColumn(targetBox, 1);
+        targetRow.Children.Add(targetBox);
+
         typeToggle = new ToggleSwitch
         {
             IsOn = symlink.IsDirectory,
@@ -1310,10 +1317,9 @@ public sealed partial class MainWindow : Window
             sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
             SaveConfiguration();
         };
-        fields.Children.Add(sourceBox);
-        fields.Children.Add(targetBox);
+        fields.Children.Add(sourceRow);
+        fields.Children.Add(targetRow);
         fields.Children.Add(typeToggle);
-        Grid.SetColumn(fields, 2);
         outer.Children.Add(fields);
 
         var removeButton = CompactRemoveButton(() =>
@@ -1322,7 +1328,7 @@ public sealed partial class MainWindow : Window
             SaveConfiguration();
             refresh();
         });
-        Grid.SetColumn(removeButton, 3);
+        Grid.SetColumn(removeButton, 1);
         outer.Children.Add(removeButton);
 
         return outer;
@@ -1367,7 +1373,18 @@ public sealed partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
         ToolTipService.SetToolTip(button, "Select location. Shift-click opens location.");
-        button.Click += async (_, _) => await open();
+        button.Click += async (_, _) =>
+        {
+            try
+            {
+                await open();
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"Picker failed: {ex.Message}");
+                await ShowMessageAsync("Picker failed", ex.Message);
+            }
+        };
         return button;
     }
 
@@ -2451,6 +2468,12 @@ public sealed partial class MainWindow : Window
     private static void DefocusTextBox(TextBox box)
     {
         box.SelectionLength = 0;
+        if (box.XamlRoot?.Content is Control control)
+        {
+            control.Focus(FocusState.Programmatic);
+            return;
+        }
+
         FocusManager.TryMoveFocus(FocusNavigationDirection.Next);
     }
 
