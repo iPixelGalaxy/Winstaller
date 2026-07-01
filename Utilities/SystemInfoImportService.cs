@@ -12,6 +12,7 @@ public enum SystemInfoImportScope
     NetworkDrives,
     ShellFolders,
     AppInstaller,
+    Fonts,
     Startup,
     Symlinks
 }
@@ -44,6 +45,9 @@ public static class SystemInfoImportService
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.AppInstaller)
             candidates.AddRange(await FindWingetCandidatesAsync(config));
+
+        if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Fonts)
+            candidates.AddRange(FindFontCandidates(config));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Startup)
             candidates.AddRange(FindStartupCandidates(config));
@@ -95,6 +99,11 @@ public static class SystemInfoImportService
                     }
                     break;
 
+                case string fontFile when candidate.Scope == SystemInfoImportScope.Fonts:
+                    if (CopyFontToBackup(config, fontFile))
+                        added++;
+                    break;
+
                 case StartupProgram startup:
                     if (!config.Startup.Programs.Any(existing =>
                             existing.Name.Equals(startup.Name, StringComparison.OrdinalIgnoreCase) &&
@@ -116,6 +125,7 @@ public static class SystemInfoImportService
 
                     if (list is not null && !list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
                     {
+                        CopySymlinkDataToBackup(config, symlink);
                         list.Add(symlink.Name);
                         added++;
                     }
@@ -124,6 +134,34 @@ public static class SystemInfoImportService
         }
 
         return added;
+    }
+
+    public static void IgnoreCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            switch (candidate.Value)
+            {
+                case string fontFile when candidate.Scope == SystemInfoImportScope.Fonts:
+                    var fontName = Path.GetFileName(fontFile);
+                    if (!config.Fonts.IgnoredFonts.Contains(fontName, StringComparer.OrdinalIgnoreCase))
+                        config.Fonts.IgnoredFonts.Add(fontName);
+                    break;
+
+                case SymlinkImport symlink:
+                    var ignored = symlink.Section switch
+                    {
+                        "Roaming" => config.Symlinks.IgnoredRoamingDirectories,
+                        "Local" => config.Symlinks.IgnoredLocalDirectories,
+                        "LocalLow" => config.Symlinks.IgnoredLocalLowDirectories,
+                        _ => null
+                    };
+
+                    if (ignored is not null && !ignored.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase))
+                        ignored.Add(symlink.Name);
+                    break;
+            }
+        }
     }
 
     private static IEnumerable<SystemInfoImportCandidate> FindPathCandidates(WinstallerConfig config)
@@ -245,6 +283,40 @@ public static class SystemInfoImportService
             .ToList();
     }
 
+    private static IEnumerable<SystemInfoImportCandidate> FindFontCandidates(WinstallerConfig config)
+    {
+        var windowsFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
+        if (!Directory.Exists(windowsFonts))
+            yield break;
+
+        var backupDir = Environment.ExpandEnvironmentVariables(config.Fonts.FontsDirectory)
+            .Replace("{USERNAME}", Environment.UserName);
+        var backedUp = Directory.Exists(backupDir)
+            ? Directory.GetFiles(backupDir, "*.*")
+                .Where(IsFontFile)
+                .Select(Path.GetFileName)
+                .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+                .Select(fileName => fileName!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var font in Directory.GetFiles(windowsFonts, "*.*").Where(IsFontFile))
+        {
+            var fileName = Path.GetFileName(font);
+            if (backedUp.Contains(fileName) ||
+                config.Fonts.IgnoredFonts.Contains(fileName, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            yield return new SystemInfoImportCandidate(
+                SystemInfoImportScope.Fonts,
+                Path.GetFileNameWithoutExtension(font),
+                fileName,
+                font);
+        }
+    }
+
     private static IEnumerable<SystemInfoImportCandidate> FindStartupCandidates(WinstallerConfig config)
     {
         foreach (var candidate in ReadStartupKey(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Run", false))
@@ -274,13 +346,13 @@ public static class SystemInfoImportService
 
     private static IEnumerable<SystemInfoImportCandidate> FindSymlinkCandidates(WinstallerConfig config)
     {
-        foreach (var symlink in FindSymlinks(AppDataRoaming, "Roaming", config.Symlinks.RoamingDirectories, config))
+        foreach (var symlink in FindSymlinks(AppDataRoaming, "Roaming", config.Symlinks.RoamingDirectories, config.Symlinks.IgnoredRoamingDirectories, config))
             yield return symlink;
 
-        foreach (var symlink in FindSymlinks(AppDataLocal, "Local", config.Symlinks.LocalDirectories, config))
+        foreach (var symlink in FindSymlinks(AppDataLocal, "Local", config.Symlinks.LocalDirectories, config.Symlinks.IgnoredLocalDirectories, config))
             yield return symlink;
 
-        foreach (var symlink in FindSymlinks(AppDataLocalLow, "LocalLow", config.Symlinks.LocalLowDirectories, config))
+        foreach (var symlink in FindSymlinks(AppDataLocalLow, "LocalLow", config.Symlinks.LocalLowDirectories, config.Symlinks.IgnoredLocalLowDirectories, config))
             yield return symlink;
     }
 
@@ -288,6 +360,7 @@ public static class SystemInfoImportService
         string appDataPath,
         string section,
         List<string> configured,
+        List<string> ignored,
         WinstallerConfig config)
     {
         if (!Directory.Exists(appDataPath))
@@ -297,21 +370,65 @@ public static class SystemInfoImportService
         {
             var name = Path.GetFileName(dir);
             if (config.AppDataUtility.ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase) ||
-                configured.Contains(name, StringComparer.OrdinalIgnoreCase))
+                configured.Contains(name, StringComparer.OrdinalIgnoreCase) ||
+                ignored.Contains(name, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
 
             var info = new DirectoryInfo(dir);
-            if (!info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                continue;
-
-            var target = info.LinkTarget ?? "(unknown target)";
+            var target = info.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                ? info.LinkTarget ?? "(unknown target)"
+                : dir;
             yield return new SystemInfoImportCandidate(
                 SystemInfoImportScope.Symlinks,
                 $"[{section}] {name}",
                 target,
-                new SymlinkImport(section, name));
+                new SymlinkImport(section, name, dir));
+        }
+    }
+
+    private static bool CopyFontToBackup(WinstallerConfig config, string fontFile)
+    {
+        if (!File.Exists(fontFile))
+            return false;
+
+        var backupDir = Environment.ExpandEnvironmentVariables(config.Fonts.FontsDirectory)
+            .Replace("{USERNAME}", Environment.UserName);
+        Directory.CreateDirectory(backupDir);
+        File.Copy(fontFile, Path.Combine(backupDir, Path.GetFileName(fontFile)), overwrite: true);
+        return true;
+    }
+
+    private static bool IsFontFile(string path)
+    {
+        return path.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
+               path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void CopySymlinkDataToBackup(WinstallerConfig config, SymlinkImport symlink)
+    {
+        if (!Directory.Exists(symlink.SourcePath))
+            return;
+
+        var baseDir = Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory)
+            .Replace("{USERNAME}", Environment.UserName);
+        var destination = Path.Combine(baseDir, "AppData", symlink.Section, symlink.Name);
+        CopyDirectory(symlink.SourcePath, destination);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.GetFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
+        }
+
+        foreach (var directory in Directory.GetDirectories(source))
+        {
+            var target = Path.Combine(destination, Path.GetFileName(directory));
+            CopyDirectory(directory, target);
         }
     }
 
@@ -508,5 +625,5 @@ public static class SystemInfoImportService
     }
 
     private sealed record WingetInstalledPackage(string Name, string Id, string Version);
-    private sealed record SymlinkImport(string Section, string Name);
+    private sealed record SymlinkImport(string Section, string Name, string SourcePath);
 }

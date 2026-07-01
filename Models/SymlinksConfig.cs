@@ -10,5 +10,8 @@ public class SymlinksConfig
     public List<string> RoamingDirectories { get; set; } = [];
     public List<string> LocalDirectories { get; set; } = [];
     public List<string> LocalLowDirectories { get; set; } = [];
+    public List<string> IgnoredRoamingDirectories { get; set; } = [];
+    public List<string> IgnoredLocalDirectories { get; set; } = [];
+    public List<string> IgnoredLocalLowDirectories { get; set; } = [];
     public List<SpecialSymlink> SpecialSymlinks { get; set; } = [];
 }

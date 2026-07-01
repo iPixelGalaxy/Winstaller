@@ -7,4 +7,5 @@ public class FontsConfig
 {
     public bool Enabled { get; set; } = true;
     public string FontsDirectory { get; set; } = @"D:\ReinstallFiles\Fonts";
+    public List<string> IgnoredFonts { get; set; } = [];
 }

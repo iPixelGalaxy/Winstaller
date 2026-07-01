@@ -217,7 +217,7 @@ public sealed partial class MainWindow : Window
             new("Network Drives", "Map configured network drives", "\uE839", _config.NetworkDrives, () => new NetworkDrivesModule(_config), SystemInfoImportScope.NetworkDrives),
             new("Symlinks", "Restore configured profile symlinks", "\uE71B", _config.Symlinks, () => new SymlinksModule(_config), SystemInfoImportScope.Symlinks),
             new("App Installer", "Install configured applications", "\uE896", _config.AppInstaller, () => new AppInstallerModule(_config), SystemInfoImportScope.AppInstaller),
-            new("Fonts", "Install configured fonts", "\uE8D2", _config.Fonts, () => new FontsModule(_config), null),
+            new("Fonts", "Install configured fonts", "\uE8D2", _config.Fonts, () => new FontsModule(_config), SystemInfoImportScope.Fonts),
             new("Shell Folders", "Configure user shell folders", "\uE8B7", _config.ShellFolders, () => new ShellFoldersModule(_config), SystemInfoImportScope.ShellFolders),
             new("Registry", "Apply registry files and changes", "\uE7B8", _config.Registry, () => new RegistryModule(_config), null),
             new("File Copy", "Run configured copy operations", "\uE8C8", _config.FileCopy, () => new FileCopyModule(_config), null),
@@ -339,7 +339,7 @@ public sealed partial class MainWindow : Window
         _content.Children.Clear();
         _content.Children.Add(ModulePageHeader(module));
 
-        _content.Children.Add(BuildConfigEditor(module.Config));
+        _content.Children.Add(BuildModuleContent(module));
         _isLoadingUi = false;
     }
 
@@ -348,7 +348,6 @@ public sealed partial class MainWindow : Window
         _topBarActions.Children.Clear();
         _topBarActionLabels.Clear();
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run All Enabled", async () => await ConfirmAndRunModulesAsync(_modules.Where(m => m.IsEnabled).ToList()), primary: true));
-        _topBarActions.Children.Add(TopBarActionButton(Symbol.Download, "Import System Info", async () => await ImportSystemInfoAsync(SystemInfoImportScope.All)));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Refresh, "Reload All Configs", () =>
         {
             LoadConfiguration();
@@ -367,9 +366,9 @@ public sealed partial class MainWindow : Window
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run This Module", async () => await ConfirmAndRunModulesAsync([module]), primary: true));
         if (module.ImportScope is { } importScope)
         {
-            _topBarActions.Children.Add(TopBarActionButton(Symbol.Download, "Import System Info", async () => await ImportSystemInfoAsync(importScope, module)));
+            _topBarActions.Children.Add(TopBarActionButton(Symbol.Download, GetImportLabel(module), async () => await ImportSystemInfoAsync(importScope, module)));
         }
-        _topBarActions.Children.Add(TopBarActionButton(Symbol.Save, "Save Config", SaveConfiguration));
+        _topBarActions.Children.Add(TopBarActionButton(Symbol.Setting, "Module Settings", async () => await ShowModuleSettingsAsync(module)));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Folder, "Open Config Directory", OpenConfig));
         UpdateTopBarActionLabelVisibility();
     }
@@ -494,12 +493,131 @@ public sealed partial class MainWindow : Window
         return card;
     }
 
-    private FrameworkElement BuildConfigEditor(object config)
+    private FrameworkElement BuildModuleContent(ModuleDescriptor module)
+    {
+        if (module.Config is AppInstallerConfig appInstaller)
+        {
+            return BuildAppInstallerTiles(appInstaller);
+        }
+
+        return BuildConfigEditor(module.Config, includeScalarSettings: false);
+    }
+
+    private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(BuildAppTileSection("Default Installs", config.DefaultInstalls));
+        panel.Children.Add(BuildAppTileSection("Prepared Installers", config.PreparedInstallers));
+        panel.Children.Add(BuildAppTileSection("Manual Installs", config.ManualInstalls));
+        panel.Children.Add(BuildListSection(config, typeof(AppInstallerConfig).GetProperty(nameof(AppInstallerConfig.CustomScripts))!));
+        return panel;
+    }
+
+    private FrameworkElement BuildAppTileSection(string title, List<string> apps)
+    {
+        var grid = new VariableSizedWrapGrid
+        {
+            Orientation = Orientation.Horizontal,
+            MaximumRowsOrColumns = 4,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+
+        void Refresh()
+        {
+            grid.Children.Clear();
+            foreach (var app in apps.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            {
+                grid.Children.Add(BuildAppTile(app, apps, Refresh));
+            }
+        }
+
+        Refresh();
+
+        return Card(new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = title,
+                    FontSize = 18,
+                    FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+                },
+                grid,
+                ActionButton($"+ Add {Singularize(title)}", () =>
+                {
+                    apps.Add(string.Empty);
+                    SaveConfiguration();
+                    Refresh();
+                })
+            }
+        });
+    }
+
+    private FrameworkElement BuildAppTile(string packageId, List<string> apps, Action refresh)
+    {
+        var title = GetKnownPackageName(packageId);
+        var box = new TextBox
+        {
+            Text = packageId,
+            PlaceholderText = "Winget ID",
+            MinWidth = 190
+        };
+        box.LostFocus += (_, _) =>
+        {
+            var index = apps.IndexOf(packageId);
+            if (index >= 0)
+            {
+                apps[index] = box.Text.Trim();
+                SaveConfiguration();
+                refresh();
+            }
+        };
+
+        return new Border
+        {
+            Width = 230,
+            MinHeight = 116,
+            Margin = new Thickness(0, 0, 8, 8),
+            Background = ResourceBrush("WinstallerDashboardCardBrush"),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12),
+            Child = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    new FontIcon { Glyph = "\uE896", FontSize = 22, HorizontalAlignment = HorizontalAlignment.Left },
+                    new TextBlock
+                    {
+                        Text = title,
+                        FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    box,
+                    ActionButton("Remove", () =>
+                    {
+                        apps.Remove(packageId);
+                        SaveConfiguration();
+                        refresh();
+                    })
+                }
+            }
+        };
+    }
+
+    private FrameworkElement BuildConfigEditor(object config, bool includeScalarSettings = true)
     {
         var panel = new StackPanel { Spacing = 12 };
         foreach (var property in config.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (!property.CanRead || !property.CanWrite || property.Name == "Enabled")
+            {
+                continue;
+            }
+
+            if (!includeScalarSettings && !IsSupportedList(property.PropertyType))
             {
                 continue;
             }
@@ -724,7 +842,7 @@ public sealed partial class MainWindow : Window
 
             for (var index = 0; index < list.Count; index++)
             {
-                panel.Children.Add(BuildListItemEditor(list, itemType, index, Refresh));
+                panel.Children.Add(BuildListItemEditor(list, itemType, index, Refresh, property));
             }
 
             panel.Children.Add(ActionButton($"+ Add {Singularize(SplitName(property.Name))}", () =>
@@ -739,10 +857,14 @@ public sealed partial class MainWindow : Window
         return panel;
     }
 
-    private FrameworkElement BuildListItemEditor(IList list, Type itemType, int index, Action refresh)
+    private FrameworkElement BuildListItemEditor(IList list, Type itemType, int index, Action refresh, PropertyInfo? listProperty = null)
     {
         var item = list[index]!;
         var header = GetItemTitle(item, itemType, index);
+        if (listProperty?.Name.Contains("Ignored", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            header += " (Ignored)";
+        }
 
         var body = new StackPanel { Spacing = 8 };
         if (itemType == typeof(string))
@@ -1122,6 +1244,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (scope == SystemInfoImportScope.NetworkDrives)
+        {
+            await FillNetworkDriveCredentialsAsync(selected);
+        }
+
+        SystemInfoImportService.IgnoreCandidates(_config, candidates.Except(selected));
         var added = SystemInfoImportService.ApplyCandidates(_config, selected);
         SaveConfiguration();
         LoadConfiguration();
@@ -1137,6 +1265,51 @@ public sealed partial class MainWindow : Window
         }
 
         AppendOutput($"Imported {added} item(s).");
+    }
+
+    private async Task FillNetworkDriveCredentialsAsync(IEnumerable<SystemInfoImportCandidate> selected)
+    {
+        foreach (var candidate in selected)
+        {
+            if (candidate.Value is not NetworkDriveMapping drive)
+            {
+                continue;
+            }
+
+            var username = new TextBox { PlaceholderText = "Username", Text = drive.Username };
+            var password = new PasswordBox { PlaceholderText = "Password" };
+            var panel = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = $"{drive.DriveLetter}: {drive.NetworkPath}", TextWrapping = TextWrapping.Wrap },
+                    username,
+                    password
+                }
+            };
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootGrid.XamlRoot,
+                Title = "Network drive credentials",
+                Content = panel,
+                PrimaryButtonText = "Save",
+                SecondaryButtonText = "Skip",
+                CloseButtonText = "Cancel"
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary)
+            {
+                drive.Username = username.Text.Trim();
+                drive.Password = password.Password;
+            }
+            else if (result == ContentDialogResult.None)
+            {
+                break;
+            }
+        }
     }
 
     private async Task<List<SystemInfoImportCandidate>> ShowImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
@@ -1238,6 +1411,43 @@ public sealed partial class MainWindow : Window
         };
 
         await dialog.ShowAsync();
+    }
+
+    private async Task ShowModuleSettingsAsync(ModuleDescriptor module)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        foreach (var property in module.Config.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (!property.CanRead ||
+                !property.CanWrite ||
+                property.Name == "Enabled" ||
+                IsSupportedList(property.PropertyType))
+            {
+                continue;
+            }
+
+            panel.Children.Add(BuildSettingRow(module.Config, property));
+        }
+
+        if (panel.Children.Count == 0)
+        {
+            panel.Children.Add(new TextBlock { Text = "No module settings available." });
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = $"{module.Name} Settings",
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = 540
+            },
+            CloseButtonText = "Done"
+        };
+
+        await dialog.ShowAsync();
+        RenderModule(module);
     }
 
     private async Task RunModulesWithOutputDialogAsync(IReadOnlyList<ModuleDescriptor> modules)
@@ -1531,6 +1741,35 @@ public sealed partial class MainWindow : Window
 
         var nullableType = Nullable.GetUnderlyingType(property.PropertyType);
         return SplitName((nullableType ?? property.PropertyType).Name);
+    }
+
+    private static string GetImportLabel(ModuleDescriptor module)
+    {
+        return module.ImportScope switch
+        {
+            SystemInfoImportScope.AppInstaller => "Import Installed Apps",
+            SystemInfoImportScope.Fonts => "Import Installed Fonts",
+            SystemInfoImportScope.NetworkDrives => "Import Network Drives",
+            SystemInfoImportScope.Symlinks => "Import Symlinks",
+            SystemInfoImportScope.ShellFolders => "Import Shell Folders",
+            SystemInfoImportScope.Path => "Import PATH Entries",
+            SystemInfoImportScope.Startup => "Import Startup Items",
+            _ => "Import System Info"
+        };
+    }
+
+    private static string GetKnownPackageName(string packageId)
+    {
+        return packageId.ToLowerInvariant() switch
+        {
+            "discord.discord" => "Discord",
+            "spotify.spotify" => "Spotify",
+            "git.git" => "Git",
+            "github.gitlfs" => "Git LFS",
+            "microsoft.visualstudiocode" => "Visual Studio Code",
+            "" => "New app",
+            _ => packageId
+        };
     }
 
     private static string GetItemTitle(object item, Type itemType, int index)

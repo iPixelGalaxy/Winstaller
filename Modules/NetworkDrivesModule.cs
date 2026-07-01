@@ -50,7 +50,8 @@ public class NetworkDrivesModule : ModuleBase
             // Create new mapping
             Console.WriteLine($"  Mapping {drive.DriveLetter}: to {drive.NetworkPath}...");
             var persistentFlag = drive.Persistent ? "/persistent:yes" : "/persistent:no";
-            var result = await RunCmdAsync($"net use {drive.DriveLetter}: {drive.NetworkPath} {persistentFlag}", 30000);
+            var credentialArgs = BuildCredentialArgs(drive);
+            var result = await RunCmdAsync($"net use {drive.DriveLetter}: {drive.NetworkPath} {credentialArgs} {persistentFlag}", 30000);
 
             if (result != 0)
             {
@@ -149,7 +150,8 @@ public class NetworkDrivesModule : ModuleBase
         }
 
         var persistentFlag = drive.Persistent ? "/persistent:yes" : "/persistent:no";
-        var result = await RunCmdAsync($"net use {drive.DriveLetter}: {drive.NetworkPath} {persistentFlag}", 30000);
+        var credentialArgs = BuildCredentialArgs(drive);
+        var result = await RunCmdAsync($"net use {drive.DriveLetter}: {drive.NetworkPath} {credentialArgs} {persistentFlag}", 30000);
 
         if (result == 0 && !string.IsNullOrEmpty(drive.Label))
         {
@@ -178,5 +180,14 @@ public class NetworkDrivesModule : ModuleBase
         }
 
         ConsoleHelper.WriteSuccess("All configured drives disconnected");
+    }
+
+    private static string BuildCredentialArgs(NetworkDriveMapping drive)
+    {
+        if (string.IsNullOrWhiteSpace(drive.Username))
+            return string.Empty;
+
+        var password = string.IsNullOrWhiteSpace(drive.Password) ? "*" : $"\"{drive.Password}\"";
+        return $"{password} /user:\"{drive.Username}\"";
     }
 }

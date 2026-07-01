@@ -120,6 +120,9 @@ public static class ConfigurationManager
                 RoamingDirectories = [],
                 LocalDirectories = [],
                 LocalLowDirectories = [],
+                IgnoredRoamingDirectories = ["Microsoft", "Temp", "cache", "Cache", "CrashDumps", "D3DSCache", "Packages", "NVIDIA"],
+                IgnoredLocalDirectories = ["Microsoft", "Temp", "cache", "Cache", "CrashDumps", "D3DSCache", "Packages", "NVIDIA"],
+                IgnoredLocalLowDirectories = ["Microsoft", "Temp", "cache", "Cache", "CrashDumps", "D3DSCache", "Packages", "NVIDIA"],
                 SpecialSymlinks = []
             },
             AppInstaller = new AppInstallerConfig
@@ -148,7 +151,8 @@ public static class ConfigurationManager
             Fonts = new FontsConfig
             {
                 Enabled = false,
-                FontsDirectory = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "Fonts")
+                FontsDirectory = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "Fonts"),
+                IgnoredFonts = []
             },
             ShellFolders = new ShellFoldersConfig
             {

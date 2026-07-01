@@ -8,6 +8,8 @@ public class NetworkDriveMapping
     public string DriveLetter { get; set; } = string.Empty;
     public string NetworkPath { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
     public bool Persistent { get; set; } = true;
     public bool DeleteFirst { get; set; } = true;
 }
