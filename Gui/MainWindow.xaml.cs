@@ -921,7 +921,17 @@ public sealed partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
         ToolTipService.SetToolTip(button, text);
-        button.Click += async (_, _) => await action();
+        button.Click += async (_, _) =>
+        {
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"{text} failed: {ex.Message}");
+            }
+        };
         return button;
     }
 

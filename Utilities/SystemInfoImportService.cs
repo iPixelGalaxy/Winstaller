@@ -191,10 +191,7 @@ public static class SystemInfoImportService
             { "Documents", ("Personal", "Documents") },
             { "Pictures", ("My Pictures", "Pictures") },
             { "Music", ("My Music", "Music") },
-            { "Videos", ("My Video", "Videos") },
-            { "Favorites", ("Favorites", "Favorites") },
-            { "AppData", ("AppData", "AppData (Roaming)") },
-            { "Local AppData", ("Local AppData", "Local AppData") }
+            { "Videos", ("My Video", "Videos") }
         };
 
         var configured = config.ShellFolders.Folders
