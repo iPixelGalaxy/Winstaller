@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Collections;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -19,8 +20,6 @@ using Winstaller.Modules;
 using Winstaller.Utilities;
 using WinRT.Interop;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
-using Windows.Storage.Pickers;
 
 namespace Winstaller.Gui;
 
@@ -2400,7 +2399,7 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> PickSymlinkPathAsync(string rootPath, string currentValue)
     {
-        var picked = await PickFolderPathAsync();
+        var picked = PickFolderPath();
         if (picked is null)
             return null;
 
@@ -2415,33 +2414,45 @@ public sealed partial class MainWindow : Window
         return Path.GetRelativePath(expandedRoot, picked);
     }
 
-    private async Task<string?> PickPathForTypeAsync(bool isDirectory)
+    private Task<string?> PickPathForTypeAsync(bool isDirectory)
     {
-        return isDirectory ? await PickFolderPathAsync() : await PickFilePathAsync();
+        return Task.FromResult(isDirectory ? PickFolderPath() : PickFilePath());
     }
 
-    private async Task<string?> PickFolderPathAsync()
+    private string? PickFolderPath()
     {
-        var picker = new FolderPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder
-        };
-        picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-        var folder = await picker.PickSingleFolderAsync();
-        return folder?.Path;
+        return PickFileDialogPath(pickFolders: true, "Select folder");
     }
 
-    private async Task<string?> PickFilePathAsync()
+    private string? PickFilePath()
     {
-        var picker = new FileOpenPicker
+        return PickFileDialogPath(pickFolders: false, "Select file");
+    }
+
+    private string? PickFileDialogPath(bool pickFolders, string title)
+    {
+        var dialog = (IFileOpenDialog)new FileOpenDialog();
+        dialog.GetOptions(out var options);
+        options |= FileOpenOptions.ForceFileSystem | FileOpenOptions.PathMustExist;
+        options |= pickFolders ? FileOpenOptions.PickFolders : FileOpenOptions.FileMustExist;
+        dialog.SetOptions(options);
+        dialog.SetTitle(title);
+
+        var hr = dialog.Show(WindowNative.GetWindowHandle(this));
+        if (hr == HResultCancelled)
+            return null;
+        Marshal.ThrowExceptionForHR(hr);
+
+        dialog.GetResult(out var item);
+        item.GetDisplayName(Sigdn.FileSysPath, out var pathPtr);
+        try
         {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder
-        };
-        picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-        var file = await picker.PickSingleFileAsync();
-        return file?.Path;
+            return Marshal.PtrToStringUni(pathPtr);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(pathPtr);
+        }
     }
 
     private static string GetAppDataRootForProperty(string propertyName)
@@ -3178,6 +3189,74 @@ public sealed partial class MainWindow : Window
         List<SystemInfoImportCandidate> Selected,
         List<SystemInfoImportCandidate> Ignored,
         SymlinkImportMode Mode);
+
+    private const int HResultCancelled = unchecked((int)0x800704C7);
+
+    [Flags]
+    private enum FileOpenOptions : uint
+    {
+        PickFolders = 0x00000020,
+        ForceFileSystem = 0x00000040,
+        PathMustExist = 0x00000800,
+        FileMustExist = 0x00001000
+    }
+
+    private enum Sigdn : uint
+    {
+        FileSysPath = 0x80058000
+    }
+
+    [ComImport]
+    [Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
+    private class FileOpenDialog
+    {
+    }
+
+    [ComImport]
+    [Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellItem
+    {
+        void BindToHandler(IntPtr pbc, [MarshalAs(UnmanagedType.LPStruct)] Guid bhid, [MarshalAs(UnmanagedType.LPStruct)] Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(Sigdn sigdnName, out IntPtr ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
+    }
+
+    [ComImport]
+    [Guid("D57C7288-D4AD-4768-BE02-9D969532D960")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IFileOpenDialog
+    {
+        [PreserveSig]
+        int Show(IntPtr parent);
+        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+        void SetFileTypeIndex(uint iFileType);
+        void GetFileTypeIndex(out uint piFileType);
+        void Advise(IntPtr pfde, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOptions(FileOpenOptions fos);
+        void GetOptions(out FileOpenOptions pfos);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
+        void GetFolder(out IShellItem ppsi);
+        void GetCurrentSelection(out IShellItem ppsi);
+        void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+        void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+        void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+        void GetResult(out IShellItem ppsi);
+        void AddPlace(IShellItem psi, uint fdap);
+        void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+        void Close(int hr);
+        void SetClientGuid([MarshalAs(UnmanagedType.LPStruct)] Guid guid);
+        void ClearClientData();
+        void SetFilter(IntPtr pFilter);
+        void GetResults(out IntPtr ppenum);
+        void GetSelectedItems(out IntPtr ppsai);
+    }
 
     private sealed record ModuleDescriptor(
         string Name,
