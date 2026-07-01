@@ -159,9 +159,16 @@ public static class SystemInfoImportService
                         _ => null
                     };
 
+                    if (string.IsNullOrWhiteSpace(symlink.Name))
+                    {
+                        log?.Invoke("Skipped blank symlink entry.");
+                        break;
+                    }
+
                     if (list is not null &&
                         (!list.Contains(symlink.Name, StringComparer.OrdinalIgnoreCase) ||
-                         symlink.Kind is SymlinkImportKind.BackupRecovery or SymlinkImportKind.BackupRollback))
+                         symlink.Kind is SymlinkImportKind.BackupRecovery or SymlinkImportKind.BackupRollback ||
+                         symlink.Kind is SymlinkImportKind.MissingConfiguredSymlink))
                     {
                         var result = MigrateSymlinkData(config, symlink, symlinkMode, log);
                         if (result.Success)
@@ -550,6 +557,30 @@ public static class SystemInfoImportService
                     yield return child;
             }
         }
+
+        foreach (var configuredName in configured.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var sourcePath = Path.Combine(rootPath, configuredName);
+            if (Directory.Exists(sourcePath))
+                continue;
+
+            var destination = GetSymlinkDestination(config, section, configuredName);
+            if (!Directory.Exists(destination))
+                continue;
+
+            yield return new SystemInfoImportCandidate(
+                SystemInfoImportScope.Symlinks,
+                $"[{section}] {configuredName}",
+                $"Repair missing configured symlink to {destination}",
+                new SymlinkImport(
+                    section,
+                    configuredName,
+                    sourcePath,
+                    false,
+                    destination,
+                    SymlinkImportKind.MissingConfiguredSymlink),
+                "Recovery Needed");
+        }
     }
 
     private static bool CopyFontToBackup(WinstallerConfig config, string fontFile)
@@ -592,6 +623,28 @@ public static class SystemInfoImportService
         var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
             ? symlink.ExistingTargetPath
             : symlink.SourcePath;
+        if (symlink.Kind is SymlinkImportKind.MissingConfiguredSymlink)
+        {
+            var repairDestination = GetSymlinkDestination(config, symlink.Section, symlink.Name);
+            if (!Directory.Exists(repairDestination))
+            {
+                log?.Invoke($"Skipped missing symlink repair because target is missing: {repairDestination}");
+                return SymlinkMigrationResult.Fail($"Target missing: {repairDestination}", [repairDestination]);
+            }
+
+            try
+            {
+                log?.Invoke($"Repairing missing symlink: {symlink.SourcePath} -> {repairDestination}");
+                CreateDirectorySymlink(symlink.SourcePath, repairDestination, log);
+                return SymlinkMigrationResult.Ok(addToConfig: false);
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"Failed repairing missing symlink: {symlink.SourcePath} ({ex.Message})");
+                return SymlinkMigrationResult.Fail($"Symlink repair failed: {ex.Message}", [symlink.SourcePath, repairDestination]);
+            }
+        }
+
         if (!Directory.Exists(dataSource))
         {
             log?.Invoke($"Skipped missing source: {dataSource}");
@@ -675,7 +728,7 @@ public static class SystemInfoImportService
             }
 
             log?.Invoke($"Creating symlink: {symlink.SourcePath} -> {destination}");
-            CreateDirectorySymlink(symlink.SourcePath, destination);
+            CreateDirectorySymlink(symlink.SourcePath, destination, log);
             return SymlinkMigrationResult.Ok();
         }
         catch (Exception ex)
@@ -721,7 +774,7 @@ public static class SystemInfoImportService
         try
         {
             log?.Invoke($"Recovering missing symlink: {symlink.SourcePath} -> {destination}");
-            CreateDirectorySymlink(symlink.SourcePath, destination);
+            CreateDirectorySymlink(symlink.SourcePath, destination, log);
         }
         catch (Exception ex)
         {
@@ -852,7 +905,7 @@ public static class SystemInfoImportService
         }
     }
 
-    private static void CreateDirectorySymlink(string source, string target)
+    private static void CreateDirectorySymlink(string source, string target, Action<string>? log)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(source) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         using var process = Process.Start(new ProcessStartInfo
@@ -860,14 +913,48 @@ public static class SystemInfoImportService
             FileName = "cmd.exe",
             Arguments = $"/c mklink /D \"{source}\" \"{target}\"",
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         });
         if (process is null)
             throw new InvalidOperationException("Failed to start mklink.");
 
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
         process.WaitForExit();
+        if (!string.IsNullOrWhiteSpace(output))
+            log?.Invoke($"mklink output: {output.Trim()}");
+        if (!string.IsNullOrWhiteSpace(error))
+            log?.Invoke($"mklink error: {error.Trim()}");
         if (process.ExitCode != 0)
             throw new IOException($"mklink failed with exit code {process.ExitCode}.");
+
+        VerifyDirectorySymlink(source, target);
+    }
+
+    private static void VerifyDirectorySymlink(string source, string target)
+    {
+        var info = new DirectoryInfo(source);
+        if (!info.Exists)
+            throw new IOException($"Symlink source was not created: {source}");
+
+        if (!info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new IOException($"Symlink source is not a reparse point: {source}");
+
+        if (!Directory.Exists(target))
+            throw new IOException($"Symlink target is missing: {target}");
+
+        var linkTarget = info.LinkTarget;
+        if (string.IsNullOrWhiteSpace(linkTarget))
+            throw new IOException($"Could not read symlink target for: {source}");
+
+        var normalizedLinkTarget = Path.GetFullPath(linkTarget, Path.GetDirectoryName(source) ?? Environment.CurrentDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedTarget = Path.GetFullPath(target)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!normalizedLinkTarget.Equals(normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            throw new IOException($"Symlink target mismatch: {source} -> {linkTarget}, expected {target}");
     }
 
     private static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(string path)
@@ -1176,7 +1263,8 @@ public static class SystemInfoImportService
         Normal,
         ExistingSymlink,
         BackupRecovery,
-        BackupRollback
+        BackupRollback,
+        MissingConfiguredSymlink
     }
 
     private sealed record SymlinkMigrationResult(bool Success, IReadOnlyList<string> FailedPaths, string Message, bool AddToConfig)

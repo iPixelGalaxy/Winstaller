@@ -69,11 +69,14 @@ public static class ConfigurationManager
             }
         }
 
+        SanitizeSymlinkConfig(config.Symlinks);
         return config;
     }
 
     public static void SaveConfiguration(WinstallerConfig config, string? path = null)
     {
+        SanitizeSymlinkConfig(config.Symlinks);
+
         if (!string.IsNullOrWhiteSpace(path))
         {
             SaveMonolithicConfiguration(config, path);
@@ -216,6 +219,23 @@ public static class ConfigurationManager
         };
     }
 
+    private static void SanitizeSymlinkConfig(SymlinksConfig config)
+    {
+        RemoveBlankEntries(config.RoamingDirectories);
+        RemoveBlankEntries(config.LocalDirectories);
+        RemoveBlankEntries(config.LocalLowDirectories);
+        RemoveBlankEntries(config.IgnoredRoamingDirectories);
+        RemoveBlankEntries(config.IgnoredLocalDirectories);
+        RemoveBlankEntries(config.IgnoredLocalLowDirectories);
+        config.SpecialSymlinks.RemoveAll(item =>
+            string.IsNullOrWhiteSpace(item.Source) ||
+            string.IsNullOrWhiteSpace(item.Target));
+    }
+
+    private static void RemoveBlankEntries(List<string> values)
+    {
+        values.RemoveAll(string.IsNullOrWhiteSpace);
+    }
     private static void EnsureSplitConfiguration()
     {
         Directory.CreateDirectory(ConfigDirectory);

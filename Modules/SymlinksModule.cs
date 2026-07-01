@@ -39,7 +39,7 @@ public class SymlinksModule : ModuleBase
         if (Config.Symlinks.RoamingDirectories.Count > 0)
         {
             ConsoleHelper.WriteSubHeader("Roaming AppData Symlinks");
-            foreach (var dir in Config.Symlinks.RoamingDirectories)
+            foreach (var dir in Config.Symlinks.RoamingDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
             {
                 var result = await CreateAppDataSymlink("Roaming", dir, AppDataRoaming, Path.Combine(baseDir, "AppData", "Roaming"));
                 if (!result) success = false;
@@ -50,7 +50,7 @@ public class SymlinksModule : ModuleBase
         if (Config.Symlinks.LocalDirectories.Count > 0)
         {
             ConsoleHelper.WriteSubHeader("Local AppData Symlinks");
-            foreach (var dir in Config.Symlinks.LocalDirectories)
+            foreach (var dir in Config.Symlinks.LocalDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
             {
                 var result = await CreateAppDataSymlink("Local", dir, AppDataLocal, Path.Combine(baseDir, "AppData", "Local"));
                 if (!result) success = false;
@@ -61,7 +61,7 @@ public class SymlinksModule : ModuleBase
         if (Config.Symlinks.LocalLowDirectories.Count > 0)
         {
             ConsoleHelper.WriteSubHeader("LocalLow AppData Symlinks");
-            foreach (var dir in Config.Symlinks.LocalLowDirectories)
+            foreach (var dir in Config.Symlinks.LocalLowDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
             {
                 var result = await CreateAppDataSymlink("LocalLow", dir, AppDataLocalLow, Path.Combine(baseDir, "AppData", "LocalLow"));
                 if (!result) success = false;
@@ -102,7 +102,12 @@ public class SymlinksModule : ModuleBase
     {
         try
         {
-            // Ensure target directory exists
+            if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(targetPath))
+            {
+                ConsoleHelper.WriteWarning("    Skipped blank symlink path.");
+                return false;
+            }
+
             var targetDir = isDirectory ? targetPath : Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
             {
@@ -110,61 +115,47 @@ public class SymlinksModule : ModuleBase
                 Console.WriteLine($"    Created target directory: {targetDir}");
             }
 
-            // Handle existing source
-            if (isDirectory)
+            if (isDirectory && Directory.Exists(sourcePath))
             {
-                if (Directory.Exists(sourcePath))
+                var info = new DirectoryInfo(sourcePath);
+                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
-                    // Check if it's already a symlink
-                    var info = new DirectoryInfo(sourcePath);
-                    if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                    {
-                        Console.WriteLine($"    Already a symlink, skipping");
-                        return true;
-                    }
-
-                    // Remove existing directory
-                    Console.WriteLine($"    Removing existing directory...");
-                    Directory.Delete(sourcePath, true);
+                    return VerifySymlink(sourcePath, targetPath, true);
                 }
-            }
-            else
-            {
-                if (File.Exists(sourcePath))
-                {
-                    var info = new FileInfo(sourcePath);
-                    if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                    {
-                        Console.WriteLine($"    Already a symlink, skipping");
-                        return true;
-                    }
 
-                    Console.WriteLine($"    Removing existing file...");
-                    File.Delete(sourcePath);
-                }
+                ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
+                return false;
             }
 
-            // Ensure parent directory exists
+            if (!isDirectory && File.Exists(sourcePath))
+            {
+                var info = new FileInfo(sourcePath);
+                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return VerifySymlink(sourcePath, targetPath, false);
+                }
+
+                ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
+                return false;
+            }
+
             var sourceDir = Path.GetDirectoryName(sourcePath);
             if (!string.IsNullOrEmpty(sourceDir) && !Directory.Exists(sourceDir))
             {
                 Directory.CreateDirectory(sourceDir);
             }
 
-            // Create symlink using mklink command
             var linkType = isDirectory ? "/D" : "";
             var result = await RunCmdAsync($"mklink {linkType} \"{sourcePath}\" \"{targetPath}\"", 10000);
 
-            if (result == 0)
+            if (result == 0 && VerifySymlink(sourcePath, targetPath, isDirectory))
             {
                 ConsoleHelper.WriteSuccess($"    Symlink created: {sourcePath} -> {targetPath}");
                 return true;
             }
-            else
-            {
-                ConsoleHelper.WriteError($"    Failed to create symlink");
-                return false;
-            }
+
+            ConsoleHelper.WriteError($"    Failed to create symlink");
+            return false;
         }
         catch (Exception ex)
         {
@@ -173,6 +164,53 @@ public class SymlinksModule : ModuleBase
         }
     }
 
+    private static bool VerifySymlink(string sourcePath, string targetPath, bool isDirectory)
+    {
+        FileSystemInfo info = isDirectory ? new DirectoryInfo(sourcePath) : new FileInfo(sourcePath);
+        if (!info.Exists)
+        {
+            ConsoleHelper.WriteError($"    Symlink missing after creation: {sourcePath}");
+            return false;
+        }
+
+        if (!info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            ConsoleHelper.WriteError($"    Source is not a symlink: {sourcePath}");
+            return false;
+        }
+
+        if (isDirectory && !Directory.Exists(targetPath))
+        {
+            ConsoleHelper.WriteError($"    Target is missing: {targetPath}");
+            return false;
+        }
+
+        if (!isDirectory && !File.Exists(targetPath))
+        {
+            ConsoleHelper.WriteError($"    Target is missing: {targetPath}");
+            return false;
+        }
+
+        var linkTarget = info.LinkTarget;
+        if (string.IsNullOrWhiteSpace(linkTarget))
+        {
+            ConsoleHelper.WriteError($"    Could not read symlink target: {sourcePath}");
+            return false;
+        }
+
+        var normalizedLinkTarget = Path.GetFullPath(linkTarget, Path.GetDirectoryName(sourcePath) ?? Environment.CurrentDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedTarget = Path.GetFullPath(targetPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!normalizedLinkTarget.Equals(normalizedTarget, StringComparison.OrdinalIgnoreCase))
+        {
+            ConsoleHelper.WriteError($"    Symlink target mismatch: {sourcePath} -> {linkTarget}, expected {targetPath}");
+            return false;
+        }
+
+        Console.WriteLine($"    Existing symlink verified: {sourcePath} -> {targetPath}");
+        return true;
+    }
     protected override List<MenuOption> GetMenuOptions()
     {
         return
@@ -193,7 +231,7 @@ public class SymlinksModule : ModuleBase
         var baseDir = ExpandEnvironmentVariables(Config.Symlinks.BaseSymlinkDirectory);
 
         ConsoleHelper.WriteSubHeader("Roaming AppData Symlinks");
-        foreach (var dir in Config.Symlinks.RoamingDirectories)
+        foreach (var dir in Config.Symlinks.RoamingDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
         {
             await CreateAppDataSymlink("Roaming", dir, AppDataRoaming, Path.Combine(baseDir, "AppData", "Roaming"));
         }
@@ -205,7 +243,7 @@ public class SymlinksModule : ModuleBase
         var baseDir = ExpandEnvironmentVariables(Config.Symlinks.BaseSymlinkDirectory);
 
         ConsoleHelper.WriteSubHeader("Local AppData Symlinks");
-        foreach (var dir in Config.Symlinks.LocalDirectories)
+        foreach (var dir in Config.Symlinks.LocalDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
         {
             await CreateAppDataSymlink("Local", dir, AppDataLocal, Path.Combine(baseDir, "AppData", "Local"));
         }
@@ -217,7 +255,7 @@ public class SymlinksModule : ModuleBase
         var baseDir = ExpandEnvironmentVariables(Config.Symlinks.BaseSymlinkDirectory);
 
         ConsoleHelper.WriteSubHeader("LocalLow AppData Symlinks");
-        foreach (var dir in Config.Symlinks.LocalLowDirectories)
+        foreach (var dir in Config.Symlinks.LocalLowDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
         {
             await CreateAppDataSymlink("LocalLow", dir, AppDataLocalLow, Path.Combine(baseDir, "AppData", "LocalLow"));
         }
@@ -261,15 +299,15 @@ public class SymlinksModule : ModuleBase
         ConsoleHelper.WriteSubHeader("Configured Symlinks");
 
         Console.WriteLine("\nRoaming AppData:");
-        foreach (var dir in Config.Symlinks.RoamingDirectories)
+        foreach (var dir in Config.Symlinks.RoamingDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
             Console.WriteLine($"  - {dir}");
 
         Console.WriteLine("\nLocal AppData:");
-        foreach (var dir in Config.Symlinks.LocalDirectories)
+        foreach (var dir in Config.Symlinks.LocalDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
             Console.WriteLine($"  - {dir}");
 
         Console.WriteLine("\nLocalLow AppData:");
-        foreach (var dir in Config.Symlinks.LocalLowDirectories)
+        foreach (var dir in Config.Symlinks.LocalLowDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
             Console.WriteLine($"  - {dir}");
 
         Console.WriteLine("\nSpecial Symlinks:");
@@ -289,21 +327,21 @@ public class SymlinksModule : ModuleBase
         var missing = 0;
 
         // Check Roaming
-        foreach (var dir in Config.Symlinks.RoamingDirectories)
+        foreach (var dir in Config.Symlinks.RoamingDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
         {
             var path = Path.Combine(AppDataRoaming, dir);
             VerifyPath(path, ref valid, ref invalid, ref missing);
         }
 
         // Check Local
-        foreach (var dir in Config.Symlinks.LocalDirectories)
+        foreach (var dir in Config.Symlinks.LocalDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
         {
             var path = Path.Combine(AppDataLocal, dir);
             VerifyPath(path, ref valid, ref invalid, ref missing);
         }
 
         // Check LocalLow
-        foreach (var dir in Config.Symlinks.LocalLowDirectories)
+        foreach (var dir in Config.Symlinks.LocalLowDirectories.Where(dir => !string.IsNullOrWhiteSpace(dir)))
         {
             var path = Path.Combine(AppDataLocalLow, dir);
             VerifyPath(path, ref valid, ref invalid, ref missing);
