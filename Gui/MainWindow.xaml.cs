@@ -1473,17 +1473,16 @@ public sealed partial class MainWindow : Window
     {
         var resultMode = SymlinkImportMode.Copy;
         var accepted = false;
-        var panel = new StackPanel { Spacing = 12, Width = 1080, MaxWidth = 1080 };
-        var selectedCount = new TextBlock
-        {
-            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
-        };
-        panel.Children.Add(selectedCount);
+        ContentDialog? dialog = null;
+        var panel = new StackPanel { Spacing = 12, MaxWidth = 1040 };
 
         var checkBoxes = new List<CheckBox>();
         void UpdateSelectedCount()
         {
-            selectedCount.Text = $"{checkBoxes.Count(checkBox => checkBox.IsChecked == true)} selected";
+            if (dialog is not null)
+            {
+                dialog.Title = $"Import {checkBoxes.Count(checkBox => checkBox.IsChecked == true)} symlink item(s)?";
+            }
         }
 
         var orderedGroups = candidates
@@ -1499,9 +1498,10 @@ public sealed partial class MainWindow : Window
             });
             foreach (var candidate in group)
             {
-                var row = new Grid { ColumnSpacing = 10, MaxWidth = 1060 };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var itemPanel = new StackPanel
+                {
+                    Spacing = 8
+                };
 
                 var checkBox = new CheckBox
                 {
@@ -1510,7 +1510,6 @@ public sealed partial class MainWindow : Window
                     Content = new StackPanel
                     {
                         Spacing = 2,
-                        MaxWidth = 820,
                         Children =
                         {
                             new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
@@ -1521,15 +1520,21 @@ public sealed partial class MainWindow : Window
                 checkBox.Checked += (_, _) => UpdateSelectedCount();
                 checkBox.Unchecked += (_, _) => UpdateSelectedCount();
                 checkBoxes.Add(checkBox);
-                row.Children.Add(checkBox);
+                itemPanel.Children.Add(checkBox);
 
                 var openButton = ActionButton("Open Folder", () => OpenFolder(candidate.Detail));
-                Grid.SetColumn(openButton, 1);
-                row.Children.Add(openButton);
-                panel.Children.Add(row);
+                openButton.HorizontalAlignment = HorizontalAlignment.Left;
+                itemPanel.Children.Add(openButton);
+
+                panel.Children.Add(new Border
+                {
+                    Background = ResourceBrush("WinstallerCardBrush"),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12),
+                    Child = itemPanel
+                });
             }
         }
-        UpdateSelectedCount();
 
         var footer = new StackPanel
         {
@@ -1538,10 +1543,10 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right
         };
 
-        var dialog = new ContentDialog
+        dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
-            Title = $"Import {candidates.Count} symlink item(s)?",
+            Title = "Import 0 symlink item(s)?",
             FullSizeDesired = true,
             Content = new StackPanel
             {
@@ -1554,6 +1559,7 @@ public sealed partial class MainWindow : Window
             },
             DefaultButton = ContentDialogButton.None
         };
+        UpdateSelectedCount();
 
         footer.Children.Add(ActionButton("Copy (Safe, but slower)", () =>
         {
@@ -1588,7 +1594,12 @@ public sealed partial class MainWindow : Window
     private void OpenFolder(string path)
     {
         var target = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(target) || !Directory.Exists(target))
+        while (!string.IsNullOrWhiteSpace(target) && !Directory.Exists(target))
+        {
+            target = Path.GetDirectoryName(target);
+        }
+
+        if (string.IsNullOrWhiteSpace(target))
             return;
 
         try
