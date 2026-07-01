@@ -148,7 +148,7 @@ public sealed partial class MainWindow : Window
 
         _topBarActions.Orientation = Orientation.Horizontal;
         _topBarActions.Spacing = 8;
-        _topBarActions.Margin = new Thickness(153, 0, 0, 0);
+        _topBarActions.Margin = new Thickness(198, 0, 0, 0);
         _topBarActions.VerticalAlignment = VerticalAlignment.Center;
 
         var themePanel = new StackPanel
