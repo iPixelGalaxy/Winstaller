@@ -1166,12 +1166,15 @@ public sealed partial class MainWindow : Window
                 if (picked is null)
                     return;
 
-                list[index] = picked;
-                if (box is not null)
-                    box.Text = picked;
-                if (iconButton is not null)
-                    iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
-                SaveConfiguration();
+                await RunOnUiThreadAsync(() =>
+                {
+                    list[index] = picked;
+                    if (box is not null)
+                        box.Text = picked;
+                    if (iconButton is not null)
+                        iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
+                    SaveConfiguration();
+                });
             });
         row.Children.Add(iconButton);
 
@@ -1240,16 +1243,19 @@ public sealed partial class MainWindow : Window
                 if (picked is null)
                     return;
 
-                symlink.Source = picked;
-                if (sourceBox is not null)
-                    sourceBox.Text = picked;
-                if (sourceButton is not null)
-                    sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-                if (targetButton is not null)
-                    targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-                if (typeToggle is not null)
-                    typeToggle.IsOn = symlink.IsDirectory;
-                SaveConfiguration();
+                await RunOnUiThreadAsync(() =>
+                {
+                    symlink.Source = picked;
+                    if (sourceBox is not null)
+                        sourceBox.Text = picked;
+                    if (sourceButton is not null)
+                        sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+                    if (targetButton is not null)
+                        targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+                    if (typeToggle is not null)
+                        typeToggle.IsOn = symlink.IsDirectory;
+                    SaveConfiguration();
+                });
             });
         targetButton = SymlinkOpenButton(
             GetSpecialSymlinkGlyph(symlink),
@@ -1265,12 +1271,15 @@ public sealed partial class MainWindow : Window
                 if (picked is null)
                     return;
 
-                symlink.Target = picked;
-                if (targetBox is not null)
-                    targetBox.Text = picked;
-                if (targetButton is not null)
-                    targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-                SaveConfiguration();
+                await RunOnUiThreadAsync(() =>
+                {
+                    symlink.Target = picked;
+                    if (targetBox is not null)
+                        targetBox.Text = picked;
+                    if (targetButton is not null)
+                        targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+                    SaveConfiguration();
+                });
             });
         var fields = new StackPanel { Spacing = 6 };
         var sourceRow = new Grid { ColumnSpacing = 6 };
@@ -1384,7 +1393,7 @@ public sealed partial class MainWindow : Window
                 await RunOnUiThreadAsync(async () =>
                 {
                     AppendOutput($"Picker failed: {ex.Message}");
-                    await ShowMessageAsync("Picker failed", ex.Message);
+                    await ShowExceptionAsync("Picker failed", ex);
                 });
             }
         };
@@ -2577,6 +2586,52 @@ public sealed partial class MainWindow : Window
         };
 
         await dialog.ShowAsync();
+    }
+
+    private async Task ShowExceptionAsync(string title, Exception exception)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            await RunOnUiThreadAsync(() => ShowExceptionAsync(title, exception));
+            return;
+        }
+
+        var details = exception.ToString();
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock
+        {
+            Text = exception.Message,
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(new TextBox
+        {
+            Text = details,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+            MinHeight = 180,
+            MaxHeight = 320,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        });
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = title,
+            Content = content,
+            PrimaryButtonText = "Copy Details",
+            CloseButtonText = "OK",
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            var package = new DataPackage();
+            package.SetText(details);
+            Clipboard.SetContent(package);
+            AppendOutput("Picker error copied.");
+        }
     }
 
     private async Task ShowModuleSettingsAsync(ModuleDescriptor module)
