@@ -1154,7 +1154,7 @@ public sealed partial class MainWindow : Window
         Button? iconButton = null;
         TextBox? box = null;
         iconButton = SymlinkOpenButton(
-            GetPathGlyph(value),
+            "\uE8B7",
             async () =>
             {
                 var currentValue = list[index]?.ToString() ?? string.Empty;
@@ -1172,7 +1172,7 @@ public sealed partial class MainWindow : Window
                 if (box is not null)
                     box.Text = picked;
                 if (iconButton is not null)
-                    iconButton.Content = new FontIcon { Glyph = GetPathGlyph(picked), FontSize = 16 };
+                    iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
                 SaveConfiguration();
             });
         row.Children.Add(iconButton);
@@ -1187,7 +1187,7 @@ public sealed partial class MainWindow : Window
         void SaveBox()
         {
             list[index] = box.Text.Trim();
-            iconButton.Content = new FontIcon { Glyph = GetPathGlyph(box.Text), FontSize = 16 };
+            iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
             SaveConfiguration();
             DefocusTextBox(box);
         }
@@ -1238,12 +1238,11 @@ public sealed partial class MainWindow : Window
                     return;
                 }
 
-                var picked = await PickAnyPathAsync(symlink.Source);
+                var picked = await PickPathForTypeAsync(symlink.IsDirectory);
                 if (picked is null)
                     return;
 
                 symlink.Source = picked;
-                symlink.IsDirectory = !LooksLikeFilePath(picked);
                 if (sourceBox is not null)
                     sourceBox.Text = picked;
                 if (sourceButton is not null)
@@ -1255,7 +1254,7 @@ public sealed partial class MainWindow : Window
                 SaveConfiguration();
             });
         targetButton = SymlinkOpenButton(
-            GetPathGlyph(string.IsNullOrWhiteSpace(symlink.Target) ? symlink.Source : symlink.Target),
+            GetSpecialSymlinkGlyph(symlink),
             async () =>
             {
                 if (IsShiftDown())
@@ -1264,7 +1263,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
 
-                var picked = await PickAnyPathAsync(symlink.Target);
+                var picked = await PickPathForTypeAsync(symlink.IsDirectory);
                 if (picked is null)
                     return;
 
@@ -1272,7 +1271,7 @@ public sealed partial class MainWindow : Window
                 if (targetBox is not null)
                     targetBox.Text = picked;
                 if (targetButton is not null)
-                    targetButton.Content = new FontIcon { Glyph = GetPathGlyph(picked), FontSize = 16 };
+                    targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
                 SaveConfiguration();
             });
         var fields = new StackPanel { Spacing = 6 };
@@ -1283,9 +1282,8 @@ public sealed partial class MainWindow : Window
         sourceBox = CompactTextBox(symlink.Source, "Source", value =>
         {
             symlink.Source = value;
-            symlink.IsDirectory = !LooksLikeFilePath(value);
             sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-            targetButton.Content = new FontIcon { Glyph = GetPathGlyph(string.IsNullOrWhiteSpace(symlink.Target) ? symlink.Source : symlink.Target), FontSize = 16 };
+            targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
             SaveConfiguration();
         });
         Grid.SetColumn(sourceBox, 1);
@@ -1298,7 +1296,7 @@ public sealed partial class MainWindow : Window
         targetBox = CompactTextBox(symlink.Target, "Target override", value =>
         {
             symlink.Target = value;
-            targetButton.Content = new FontIcon { Glyph = GetPathGlyph(value), FontSize = 16 };
+            targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
             SaveConfiguration();
         });
         Grid.SetColumn(targetBox, 1);
@@ -1315,6 +1313,7 @@ public sealed partial class MainWindow : Window
         {
             symlink.IsDirectory = typeToggle.IsOn;
             sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
             SaveConfiguration();
         };
         fields.Children.Add(sourceRow);
@@ -2401,7 +2400,7 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> PickSymlinkPathAsync(string rootPath, string currentValue)
     {
-        var picked = await PickAnyPathAsync(currentValue);
+        var picked = await PickFolderPathAsync();
         if (picked is null)
             return null;
 
@@ -2416,11 +2415,9 @@ public sealed partial class MainWindow : Window
         return Path.GetRelativePath(expandedRoot, picked);
     }
 
-    private async Task<string?> PickAnyPathAsync(string currentValue)
+    private async Task<string?> PickPathForTypeAsync(bool isDirectory)
     {
-        return LooksLikeFilePath(currentValue)
-            ? await PickFilePathAsync()
-            : await PickFolderPathAsync();
+        return isDirectory ? await PickFolderPathAsync() : await PickFilePathAsync();
     }
 
     private async Task<string?> PickFolderPathAsync()
@@ -2520,21 +2517,7 @@ public sealed partial class MainWindow : Window
 
     private static string GetSpecialSymlinkGlyph(SpecialSymlink symlink)
     {
-        if (LooksLikeFilePath(symlink.Source) || LooksLikeFilePath(symlink.Target) || !symlink.IsDirectory)
-            return "\uE8A5";
-
-        return "\uE8B7";
-    }
-
-    private static string GetPathGlyph(string path)
-    {
-        return LooksLikeFilePath(path) ? "\uE8A5" : "\uE8B7";
-    }
-
-    private static bool LooksLikeFilePath(string path)
-    {
-        var fileName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return !string.IsNullOrWhiteSpace(fileName) && Path.HasExtension(fileName);
+        return symlink.IsDirectory ? "\uE8B7" : "\uE8A5";
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
