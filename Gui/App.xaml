@@ -12,18 +12,20 @@
                     <SolidColorBrush x:Key="WinstallerPageBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="WinstallerPaneBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="WinstallerTitleBarBrush" Color="Transparent" />
-                    <SolidColorBrush x:Key="WinstallerCardBrush" Color="#2B2B2B" />
-                    <SolidColorBrush x:Key="WinstallerCardStrokeBrush" Color="#44FFFFFF" />
-                    <SolidColorBrush x:Key="WinstallerModuleCardHoverBrush" Color="#393939" />
+                    <SolidColorBrush x:Key="WinstallerCardBrush" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="WinstallerCardStrokeBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="WinstallerDashboardCardBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="WinstallerDashboardCardHoverBrush" Color="#18FFFFFF" />
                     <SolidColorBrush x:Key="WinstallerSecondaryTextBrush" Color="#C5C5C5" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="WinstallerPageBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="WinstallerPaneBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="WinstallerTitleBarBrush" Color="Transparent" />
-                    <SolidColorBrush x:Key="WinstallerCardBrush" Color="#FBFBFB" />
-                    <SolidColorBrush x:Key="WinstallerCardStrokeBrush" Color="#22000000" />
-                    <SolidColorBrush x:Key="WinstallerModuleCardHoverBrush" Color="#F0F6FF" />
+                    <SolidColorBrush x:Key="WinstallerCardBrush" Color="#B3FFFFFF" />
+                    <SolidColorBrush x:Key="WinstallerCardStrokeBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="WinstallerDashboardCardBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="WinstallerDashboardCardHoverBrush" Color="#99FFFFFF" />
                     <SolidColorBrush x:Key="WinstallerSecondaryTextBrush" Color="#5D5D5D" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
@@ -32,7 +34,8 @@
                     <SolidColorBrush x:Key="WinstallerTitleBarBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="WinstallerCardBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="WinstallerCardStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
-                    <SolidColorBrush x:Key="WinstallerModuleCardHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="WinstallerDashboardCardBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="WinstallerDashboardCardHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="WinstallerSecondaryTextBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>

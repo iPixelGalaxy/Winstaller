@@ -476,16 +476,16 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             IsClickEnabled = false,
-            Background = ResourceBrush("WinstallerCardBrush"),
-            BorderBrush = ResourceBrush("WinstallerCardStrokeBrush")
+            Background = ResourceBrush("WinstallerDashboardCardBrush"),
+            BorderThickness = new Thickness(0)
         };
         card.PointerEntered += (_, _) =>
         {
-            card.Background = ResourceBrush("WinstallerModuleCardHoverBrush");
+            card.Background = ResourceBrush("WinstallerDashboardCardHoverBrush");
         };
         card.PointerExited += (_, _) =>
         {
-            card.Background = ResourceBrush("WinstallerCardBrush");
+            card.Background = ResourceBrush("WinstallerDashboardCardBrush");
         };
         card.Tapped += (_, _) => SelectModule(module);
         return card;
@@ -935,7 +935,7 @@ public sealed partial class MainWindow : Window
         {
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(16),
             Content = child,
