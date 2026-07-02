@@ -35,18 +35,6 @@ public sealed partial class App : Application
 
     private static void WriteCrashLog(string context, Exception? exception)
     {
-        try
-        {
-            var logDirectory = BootstrapManager.DataRoot is null
-                ? Path.Combine(BootstrapManager.BootstrapDirectory, "logs")
-                : BootstrapManager.LogsDirectory;
-            Directory.CreateDirectory(logDirectory);
-            var logPath = Path.Combine(logDirectory, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-            File.WriteAllText(logPath, $"{context}{Environment.NewLine}{exception}");
-        }
-        catch
-        {
-            Logger.Error($"{context}: {exception?.Message}");
-        }
+        RunLog.WriteException("Crash", context, exception);
     }
 }

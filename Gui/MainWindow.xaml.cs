@@ -45,6 +45,9 @@ public sealed partial class MainWindow : Window
     private List<ModuleDescriptor> _modules = [];
     private ElementTheme _requestedTheme = ElementTheme.Default;
     private TextBox? _activeOutputBox;
+    private readonly object _outputLock = new();
+    private readonly StringBuilder _pendingOutputText = new();
+    private bool _outputFlushQueued;
     private bool _isRunning;
     private bool _isLoadingUi;
 
@@ -1622,13 +1625,25 @@ public sealed partial class MainWindow : Window
         ToolTipService.SetToolTip(button, text);
         button.Click += async (_, _) =>
         {
+            if (_isRunning)
+            {
+                AppendOutput("Operation already running.");
+                return;
+            }
+
+            button.IsEnabled = false;
             try
             {
                 await action();
             }
             catch (Exception ex)
             {
+                RunLog.WriteException("UI", $"{text} failed", ex);
                 AppendOutput($"{text} failed: {ex.Message}");
+            }
+            finally
+            {
+                button.IsEnabled = true;
             }
         };
         return button;
@@ -1779,7 +1794,7 @@ public sealed partial class MainWindow : Window
         IReadOnlyList<SystemInfoImportCandidate> ignored,
         SymlinkImportMode symlinkMode)
     {
-        var logDialogWidth = Math.Min(1800, Math.Max(900, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1900) - 160));
+        var logDialogWidth = GetLogDialogWidth();
         var outputBox = new TextBox
         {
             AcceptsReturn = true,
@@ -1788,8 +1803,8 @@ public sealed partial class MainWindow : Window
             FontFamily = new FontFamily("Cascadia Mono"),
             MinWidth = logDialogWidth,
             Width = logDialogWidth,
-            MinHeight = 360,
-            MaxHeight = 460
+            MinHeight = 520,
+            MaxHeight = 720
         };
         void CopyLogText(string text)
         {
@@ -1825,9 +1840,9 @@ public sealed partial class MainWindow : Window
             IsIndeterminate = true,
             MinWidth = logDialogWidth
         };
-        var copyLogButton = ActionButton("Copy Log", () =>
+        var copyLogButton = ActionButton("Copy Full Log", () =>
         {
-            CopyLogText(outputBox.Text);
+            CopyTextFromFile(RunLog.Path);
             AppendOutput("Import log copied.");
         });
         copyLogButton.HorizontalAlignment = HorizontalAlignment.Right;
@@ -1857,27 +1872,43 @@ public sealed partial class MainWindow : Window
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
         dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
 
-        Directory.CreateDirectory(BootstrapManager.LogsDirectory);
-        var logPath = Path.Combine(BootstrapManager.LogsDirectory, $"import-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-        var logLock = new object();
+        var uiLogLock = new object();
+        var pendingLogText = new StringBuilder();
+        var logFlushQueued = false;
         void Log(string message)
         {
-            var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
-            lock (logLock)
+            RunLog.Write("Import", message);
+            var line = $"[{DateTime.Now:HH:mm:ss}] {message}" + Environment.NewLine;
+            lock (uiLogLock)
             {
-                File.AppendAllText(logPath, line + Environment.NewLine);
+                pendingLogText.Append(line);
+                if (logFlushQueued)
+                    return;
+                logFlushQueued = true;
             }
 
-            DispatcherQueue.TryEnqueue(() =>
+            if (!DispatcherQueue.TryEnqueue(() =>
             {
-                outputBox.Text += line + Environment.NewLine;
-                outputBox.SelectionStart = outputBox.Text.Length;
-            });
+                string chunk;
+                lock (uiLogLock)
+                {
+                    chunk = pendingLogText.ToString();
+                    pendingLogText.Clear();
+                    logFlushQueued = false;
+                }
+
+                AppendTextToOutputBox(outputBox, chunk);
+            }))
+            {
+                lock (uiLogLock)
+                    logFlushQueued = false;
+            }
         }
 
         var dialogTask = dialog.ShowAsync().AsTask();
         try
         {
+            _isRunning = true;
             Log($"Found {candidates.Count} candidate(s).");
             Log($"Selected {selected.Count} candidate(s).");
             Log($"Ignored {ignored.Count} candidate(s).");
@@ -2022,11 +2053,12 @@ public sealed partial class MainWindow : Window
                     Log("No locking app process could be detected. Close related apps and retry import.");
                 }
             }
-            Log($"Log path: {logPath}");
-            AppendOutput($"Imported {result.Added} item(s). Log: {logPath}");
+            Log($"Log path: {RunLog.Path}");
+            AppendOutput($"Imported {result.Added} item(s). Log: {RunLog.Path}");
         }
         catch (Exception ex)
         {
+            RunLog.WriteException("Import", "Import failed", ex);
             Log($"Failed: {ex}");
             AppendOutput($"Import failed: {ex.Message}");
         }
@@ -2037,6 +2069,7 @@ public sealed partial class MainWindow : Window
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
+                _isRunning = false;
             });
         }
 
@@ -2776,25 +2809,52 @@ public sealed partial class MainWindow : Window
 
     private async Task RunModulesWithOutputDialogAsync(IReadOnlyList<ModuleDescriptor> modules)
     {
+        var logDialogWidth = GetLogDialogWidth();
         var outputBox = new TextBox
         {
             AcceptsReturn = true,
             IsReadOnly = true,
             TextWrapping = TextWrapping.NoWrap,
             FontFamily = new FontFamily("Cascadia Mono"),
-            MinWidth = 720,
-            MinHeight = 420,
-            MaxHeight = 520
+            MinWidth = logDialogWidth,
+            Width = logDialogWidth,
+            MinHeight = 520,
+            MaxHeight = 720
+        };
+
+        var progress = new ProgressBar
+        {
+            IsIndeterminate = true,
+            MinWidth = logDialogWidth
+        };
+        var copyLogButton = ActionButton("Copy Full Log", () => CopyTextFromFile(RunLog.Path));
+        copyLogButton.IsEnabled = false;
+        var openFolderButton = ActionButton("Open Log Folder", () => OpenFolder(Path.GetDirectoryName(RunLog.Path) ?? BootstrapManager.LogsDirectory));
+        var footer = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Width = logDialogWidth,
+            Children = { openFolderButton, copyLogButton }
+        };
+        var content = new StackPanel
+        {
+            Spacing = 12,
+            Width = logDialogWidth,
+            Children = { progress, outputBox, footer }
         };
 
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = modules.Count == 1 ? $"Running {modules[0].Name}" : $"Running {modules.Count} modules",
-            Content = outputBox,
+            Content = content,
             CloseButtonText = string.Empty,
             DefaultButton = ContentDialogButton.None
         };
+        dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
+        dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
 
         _activeOutputBox = outputBox;
         var dialogTask = dialog.ShowAsync().AsTask();
@@ -2805,7 +2865,13 @@ public sealed partial class MainWindow : Window
         finally
         {
             _activeOutputBox = null;
-            dialog.CloseButtonText = "Done";
+            await RunOnUiThreadAsync(() =>
+            {
+                progress.IsIndeterminate = false;
+                copyLogButton.IsEnabled = true;
+                dialog.CloseButtonText = "Done";
+                _isRunning = false;
+            });
         }
 
         await dialogTask;
@@ -2815,6 +2881,7 @@ public sealed partial class MainWindow : Window
     {
         if (_isRunning)
         {
+            AppendOutput("Operation already running.");
             return;
         }
 
@@ -2825,42 +2892,56 @@ public sealed partial class MainWindow : Window
         }
 
         _isRunning = true;
-        AppendOutput($"Starting {modules.Count} module(s).");
-
-        var originalOut = Console.Out;
-        var originalError = Console.Error;
-        var originalIn = Console.In;
-        using var writer = new TextBoxWriter(AppendOutputText);
-        using var reader = new StringReader(string.Join(Environment.NewLine, Enumerable.Repeat("n", 100)));
+        AppendOutput($"Starting {modules.Count} module(s). Log: {RunLog.Path}");
 
         try
         {
-            Console.SetOut(writer);
-            Console.SetError(writer);
-            Console.SetIn(reader);
-
-            foreach (var descriptor in modules)
+            await Task.Run(async () =>
             {
-                AppendOutput("");
-                AppendOutput($"== {descriptor.Name} ==");
+                var originalOut = Console.Out;
+                var originalError = Console.Error;
+                var originalIn = Console.In;
+                using var writer = new BufferedTextBoxWriter(AppendOutputText, "Run");
+                using var reader = new StringReader(string.Join(Environment.NewLine, Enumerable.Repeat("n", 100)));
+
                 try
                 {
-                    var succeeded = await descriptor.CreateModule().ExecuteAsync();
-                    AppendOutput(succeeded ? "Completed successfully." : "Completed with errors.");
+                    Console.SetOut(writer);
+                    Console.SetError(writer);
+                    Console.SetIn(reader);
+
+                    foreach (var descriptor in modules)
+                    {
+                        AppendOutput("");
+                        AppendOutput($"== {descriptor.Name} ==");
+                        RunLog.Write("Run", $"Starting module: {descriptor.Name}");
+                        try
+                        {
+                            var succeeded = await descriptor.CreateModule().ExecuteAsync().ConfigureAwait(false);
+                            var result = succeeded ? "Completed successfully." : "Completed with errors.";
+                            RunLog.Write("Run", $"{descriptor.Name}: {result}");
+                            AppendOutput(result);
+                        }
+                        catch (Exception ex)
+                        {
+                            RunLog.WriteException("Run", $"{descriptor.Name} failed", ex);
+                            AppendOutput($"Failed: {ex.Message}");
+                        }
+                    }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    AppendOutput($"Failed: {ex.Message}");
+                    writer.Flush();
+                    Console.SetOut(originalOut);
+                    Console.SetError(originalError);
+                    Console.SetIn(originalIn);
                 }
-            }
+            }).ConfigureAwait(false);
         }
         finally
         {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-            Console.SetIn(originalIn);
             _isRunning = false;
-            AppendOutput("Run finished.");
+            AppendOutput($"Run finished. Log: {RunLog.Path}");
         }
     }
 
@@ -2899,7 +2980,7 @@ public sealed partial class MainWindow : Window
         }
 
         var completion = new TaskCompletionSource();
-        DispatcherQueue.TryEnqueue(() =>
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
             try
             {
@@ -2910,7 +2991,10 @@ public sealed partial class MainWindow : Window
             {
                 completion.SetException(ex);
             }
-        });
+        }))
+        {
+            completion.SetException(new InvalidOperationException("Failed to enqueue UI work."));
+        }
 
         return completion.Task;
     }
@@ -2921,7 +3005,7 @@ public sealed partial class MainWindow : Window
             return action();
 
         var completion = new TaskCompletionSource<T>();
-        DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
@@ -2931,7 +3015,10 @@ public sealed partial class MainWindow : Window
             {
                 completion.SetException(ex);
             }
-        });
+        }))
+        {
+            completion.SetException(new InvalidOperationException("Failed to enqueue UI work."));
+        }
 
         return completion.Task;
     }
@@ -2942,7 +3029,7 @@ public sealed partial class MainWindow : Window
             return action();
 
         var completion = new TaskCompletionSource();
-        DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
@@ -2953,25 +3040,17 @@ public sealed partial class MainWindow : Window
             {
                 completion.SetException(ex);
             }
-        });
+        }))
+        {
+            completion.SetException(new InvalidOperationException("Failed to enqueue UI work."));
+        }
 
         return completion.Task;
     }
 
     private static void WriteDiagnosticLog(string message)
     {
-        try
-        {
-            var logDirectory = BootstrapManager.DataRoot is null
-                ? Path.Combine(BootstrapManager.BootstrapDirectory, "logs")
-                : BootstrapManager.LogsDirectory;
-            Directory.CreateDirectory(logDirectory);
-            var logPath = Path.Combine(logDirectory, $"debug-{DateTime.Now:yyyyMMdd}.log");
-            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
-        }
-        catch
-        {
-        }
+        RunLog.Write("Debug", message);
     }
 
     private static string FormatBytes(long bytes)
@@ -3126,24 +3205,81 @@ public sealed partial class MainWindow : Window
 
     private void AppendOutput(string text)
     {
+        if (!string.IsNullOrWhiteSpace(text))
+            RunLog.Write("UI", text);
         AppendOutputText(text + Environment.NewLine);
     }
 
     private void AppendOutputText(string text)
     {
+        lock (_outputLock)
+        {
+            _pendingOutputText.Append(text);
+            if (_outputFlushQueued)
+                return;
+            _outputFlushQueued = true;
+        }
+
+        if (!DispatcherQueue.TryEnqueue(FlushOutputText))
+        {
+            lock (_outputLock)
+                _outputFlushQueued = false;
+        }
+    }
+
+    private void FlushOutputText()
+    {
         if (!DispatcherQueue.HasThreadAccess)
         {
-            DispatcherQueue.TryEnqueue(() => AppendOutputText(text));
+            DispatcherQueue.TryEnqueue(FlushOutputText);
             return;
         }
 
-        if (_activeOutputBox is null)
+        string chunk;
+        lock (_outputLock)
         {
-            return;
+            chunk = _pendingOutputText.ToString();
+            _pendingOutputText.Clear();
+            _outputFlushQueued = false;
         }
 
-        _activeOutputBox.Text += text;
-        _activeOutputBox.SelectionStart = _activeOutputBox.Text.Length;
+        if (_activeOutputBox is null || string.IsNullOrEmpty(chunk))
+            return;
+
+        AppendTextToOutputBox(_activeOutputBox, chunk);
+    }
+
+    private static void AppendTextToOutputBox(TextBox outputBox, string text)
+    {
+        const int maxVisibleCharacters = 200_000;
+        var combined = outputBox.Text + text;
+        if (combined.Length > maxVisibleCharacters)
+            combined = combined[^maxVisibleCharacters..];
+
+        outputBox.Text = combined;
+        outputBox.SelectionStart = outputBox.Text.Length;
+    }
+
+    private double GetLogDialogWidth()
+    {
+        var rootWidth = RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1900;
+        return Math.Min(1900, Math.Max(1100, rootWidth - 96));
+    }
+
+    private static void CopyText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        var package = new DataPackage();
+        package.SetText(text);
+        Clipboard.SetContent(package);
+    }
+
+    private static void CopyTextFromFile(string path)
+    {
+        if (File.Exists(path))
+            CopyText(File.ReadAllText(path));
     }
 
     private static string GetSettingDescription(PropertyInfo property)
@@ -3342,26 +3478,58 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private sealed class TextBoxWriter(Action<string> write) : TextWriter
+    private sealed class BufferedTextBoxWriter(Action<string> write, string logArea) : TextWriter
     {
+        private readonly object _lock = new();
+        private readonly StringBuilder _buffer = new();
+
         public override Encoding Encoding => Encoding.UTF8;
 
         public override void Write(char value)
         {
-            write(value.ToString());
+            lock (_lock)
+            {
+                _buffer.Append(value);
+                if (value == '\n')
+                    FlushLocked();
+            }
         }
 
         public override void Write(string? value)
         {
-            if (value is not null)
+            if (string.IsNullOrEmpty(value))
+                return;
+
+            lock (_lock)
             {
-                write(value);
+                _buffer.Append(value);
+                if (value.Contains('\n', StringComparison.Ordinal))
+                    FlushLocked();
             }
         }
 
         public override void WriteLine(string? value)
         {
-            write((value ?? string.Empty) + Environment.NewLine);
+            var line = (value ?? string.Empty) + Environment.NewLine;
+            RunLog.Write(logArea, value ?? string.Empty);
+            write(line);
+        }
+
+        public override void Flush()
+        {
+            lock (_lock)
+                FlushLocked();
+        }
+
+        private void FlushLocked()
+        {
+            if (_buffer.Length == 0)
+                return;
+
+            var text = _buffer.ToString();
+            _buffer.Clear();
+            RunLog.Write(logArea, text.TrimEnd());
+            write(text);
         }
     }
 }
