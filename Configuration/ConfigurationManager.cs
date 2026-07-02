@@ -231,9 +231,6 @@ public static class ConfigurationManager
         SanitizeAppDataList("Roaming", config.RoamingDirectories, config.IgnoredRoamingDirectories);
         SanitizeAppDataList("Local", config.LocalDirectories, config.IgnoredLocalDirectories);
         SanitizeAppDataList("LocalLow", config.LocalLowDirectories, config.IgnoredLocalLowDirectories);
-        config.SpecialSymlinks.RemoveAll(item =>
-            string.IsNullOrWhiteSpace(item.Source) ||
-            string.IsNullOrWhiteSpace(item.Target));
     }
 
     private static void RemoveBlankEntries(List<string> values)
