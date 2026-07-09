@@ -1,3 +1,5 @@
+using Winstaller.Configuration;
+
 namespace Winstaller.Utilities;
 
 public static class RunLog

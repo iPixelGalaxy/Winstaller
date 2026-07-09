@@ -3195,7 +3195,7 @@ public sealed partial class MainWindow : Window
         _busyDepth++;
         _isRunning = true;
         _busyBar.Visibility = Visibility.Visible;
-        _topBarActions.IsEnabled = false;
+        SetTopBarActionsEnabled(false);
     }
 
     private void EndLongOperation()
@@ -3208,7 +3208,13 @@ public sealed partial class MainWindow : Window
 
         _isRunning = false;
         _busyBar.Visibility = Visibility.Collapsed;
-        _topBarActions.IsEnabled = true;
+        SetTopBarActionsEnabled(true);
+    }
+
+    private void SetTopBarActionsEnabled(bool enabled)
+    {
+        foreach (var child in _topBarActions.Children.OfType<Control>())
+            child.IsEnabled = enabled;
     }
 
     private static Brush ResourceBrush(string key)
