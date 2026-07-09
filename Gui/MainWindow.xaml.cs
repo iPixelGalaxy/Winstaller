@@ -38,6 +38,7 @@ public sealed partial class MainWindow : Window
     private readonly ComboBox _themeBox = new();
     private readonly Button _paneButton = new();
     private readonly Grid _titleBar = new();
+    private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
     private readonly List<TextBlock> _topBarActionLabels = [];
 
@@ -48,6 +49,7 @@ public sealed partial class MainWindow : Window
     private readonly object _outputLock = new();
     private readonly StringBuilder _pendingOutputText = new();
     private bool _outputFlushQueued;
+    private int _busyDepth;
     private bool _isRunning;
     private bool _isLoadingUi;
 
@@ -56,6 +58,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         SystemBackdrop = new MicaBackdrop();
         BuildShell();
+        RegisterCloseGuard();
 
         if (BootstrapManager.TryLoad())
         {
@@ -77,6 +80,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
 
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+        RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3) });
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         _navigation.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
@@ -104,7 +108,15 @@ public sealed partial class MainWindow : Window
         SetTitleBar(null);
         var titleBar = BuildTitleBar();
         RootGrid.Children.Add(titleBar);
-        Grid.SetRow(_navigation, 1);
+
+        _busyBar.IsIndeterminate = true;
+        _busyBar.Visibility = Visibility.Collapsed;
+        _busyBar.MinHeight = 3;
+        _busyBar.VerticalAlignment = VerticalAlignment.Stretch;
+        Grid.SetRow(_busyBar, 1);
+        RootGrid.Children.Add(_busyBar);
+
+        Grid.SetRow(_navigation, 2);
         RootGrid.Children.Add(_navigation);
     }
 
@@ -1743,7 +1755,16 @@ public sealed partial class MainWindow : Window
     private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDescriptor? module = null)
     {
         AppendOutput(module is null ? "Scanning system info..." : $"Scanning system info for {module.Name}...");
-        var candidates = await SystemInfoImportService.FindCandidatesAsync(_config, scope);
+        BeginLongOperation();
+        List<SystemInfoImportCandidate> candidates;
+        try
+        {
+            candidates = await SystemInfoImportService.FindCandidatesAsync(_config, scope);
+        }
+        finally
+        {
+            EndLongOperation();
+        }
         if (candidates.Count == 0)
         {
             var message = GetEmptyImportMessage(scope);
@@ -1795,45 +1816,7 @@ public sealed partial class MainWindow : Window
         SymlinkImportMode symlinkMode)
     {
         var logDialogWidth = GetLogDialogWidth();
-        var outputBox = new TextBox
-        {
-            AcceptsReturn = true,
-            IsReadOnly = true,
-            TextWrapping = TextWrapping.NoWrap,
-            FontFamily = new FontFamily("Cascadia Mono"),
-            MinWidth = logDialogWidth,
-            Width = logDialogWidth,
-            MinHeight = 520,
-            MaxHeight = 720
-        };
-        void CopyLogText(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return;
-
-            var package = new DataPackage();
-            package.SetText(text);
-            Clipboard.SetContent(package);
-        }
-
-        outputBox.KeyDown += (sender, args) =>
-        {
-            if (args.Key == Windows.System.VirtualKey.C &&
-                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
-                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
-            {
-                CopyLogText(outputBox.SelectedText);
-                args.Handled = true;
-            }
-        };
-        var logMenu = new MenuFlyout();
-        var copySelectionItem = new MenuFlyoutItem { Text = "Copy Selection" };
-        copySelectionItem.Click += (_, _) => CopyLogText(outputBox.SelectedText);
-        var copyAllItem = new MenuFlyoutItem { Text = "Copy All" };
-        copyAllItem.Click += (_, _) => CopyLogText(outputBox.Text);
-        logMenu.Items.Add(copySelectionItem);
-        logMenu.Items.Add(copyAllItem);
-        outputBox.ContextFlyout = logMenu;
+        var outputBox = CreateLogOutputBox(logDialogWidth);
 
         var progress = new ProgressBar
         {
@@ -1906,9 +1889,9 @@ public sealed partial class MainWindow : Window
         }
 
         var dialogTask = dialog.ShowAsync().AsTask();
+        BeginLongOperation();
         try
         {
-            _isRunning = true;
             Log($"Found {candidates.Count} candidate(s).");
             Log($"Selected {selected.Count} candidate(s).");
             Log($"Ignored {ignored.Count} candidate(s).");
@@ -1991,59 +1974,69 @@ public sealed partial class MainWindow : Window
                                 return;
                             }
 
-                            await RunOnUiThreadAsync(() =>
+                            BeginLongOperation();
+                            try
                             {
-                                button.IsEnabled = false;
-                                progress.IsIndeterminate = true;
-                            });
-                            Log("Killing detected locking apps...");
-                            foreach (var processInfo in lockingProcesses)
-                            {
-                                try
+                                await RunOnUiThreadAsync(() =>
                                 {
-                                    var process = Process.GetProcessById(processInfo.ProcessId);
-                                    Log($"Killing {processInfo.ProcessName} (PID {processInfo.ProcessId})");
-                                    process.Kill(true);
-                                    await process.WaitForExitAsync();
-                                }
-                                catch (Exception ex)
+                                    button.IsEnabled = false;
+                                    progress.IsIndeterminate = true;
+                                });
+                                Log("Killing detected locking apps...");
+                                foreach (var processInfo in lockingProcesses)
                                 {
-                                    Log($"Failed to kill {processInfo.ProcessName} (PID {processInfo.ProcessId}): {ex.Message}");
+                                    try
+                                    {
+                                        var process = Process.GetProcessById(processInfo.ProcessId);
+                                        Log($"Killing {processInfo.ProcessName} (PID {processInfo.ProcessId})");
+                                        process.Kill(true);
+                                        await process.WaitForExitAsync();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Log($"Failed to kill {processInfo.ProcessName} (PID {processInfo.ProcessId}): {ex.Message}");
+                                    }
                                 }
-                            }
 
-                            Log("Retrying failed symlink item(s)...");
-                            var retrySelection = result.SymlinkFailures.Select(failure => failure.Candidate).ToList();
-                            var retryResult = await Task.Run(() => ApplyImport(retrySelection));
-                            await RunOnUiThreadAsync(() =>
-                            {
-                                SaveConfiguration();
-                                LoadConfiguration();
-                                RebuildNavigation();
-                                if (module is null)
+                                Log("Retrying failed symlink item(s)...");
+                                var retrySelection = result.SymlinkFailures.Select(failure => failure.Candidate).ToList();
+                                var retryResult = await Task.Run(() => ApplyImport(retrySelection));
+                                await RunOnUiThreadAsync(() =>
                                 {
-                                    RenderDashboard();
+                                    SaveConfiguration();
+                                    LoadConfiguration();
+                                    RebuildNavigation();
+                                    if (module is null)
+                                    {
+                                        RenderDashboard();
+                                    }
+                                    else
+                                    {
+                                        var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
+                                        RenderModule(refreshedModule ?? module);
+                                    }
+                                });
+
+                                Log($"Retry imported {retryResult.Added} item(s).");
+                                if (retryResult.SymlinkFailures.Count > 0)
+                                {
+                                    Log($"Retry still failed {retryResult.SymlinkFailures.Count} symlink item(s).");
+                                    foreach (var failure in retryResult.SymlinkFailures)
+                                        Log($"- {failure.Title}: {failure.Message}");
                                 }
                                 else
                                 {
-                                    var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
-                                    RenderModule(refreshedModule ?? module);
+                                    Log("Retry completed without symlink copy failures.");
                                 }
-                            });
-
-                            Log($"Retry imported {retryResult.Added} item(s).");
-                            if (retryResult.SymlinkFailures.Count > 0)
-                            {
-                                Log($"Retry still failed {retryResult.SymlinkFailures.Count} symlink item(s).");
-                                foreach (var failure in retryResult.SymlinkFailures)
-                                    Log($"- {failure.Title}: {failure.Message}");
                             }
-                            else
+                            finally
                             {
-                                Log("Retry completed without symlink copy failures.");
+                                await RunOnUiThreadAsync(() =>
+                                {
+                                    progress.IsIndeterminate = false;
+                                    EndLongOperation();
+                                });
                             }
-
-                            await RunOnUiThreadAsync(() => progress.IsIndeterminate = false);
                         }, primary: true);
                         footer.Children.Insert(0, button);
                     });
@@ -2069,7 +2062,7 @@ public sealed partial class MainWindow : Window
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
-                _isRunning = false;
+                EndLongOperation();
             });
         }
 
@@ -2663,6 +2656,7 @@ public sealed partial class MainWindow : Window
             var package = new DataPackage();
             package.SetText(details);
             Clipboard.SetContent(package);
+            Clipboard.Flush();
             AppendOutput("Picker error copied.");
         }
     }
@@ -2810,17 +2804,7 @@ public sealed partial class MainWindow : Window
     private async Task RunModulesWithOutputDialogAsync(IReadOnlyList<ModuleDescriptor> modules)
     {
         var logDialogWidth = GetLogDialogWidth();
-        var outputBox = new TextBox
-        {
-            AcceptsReturn = true,
-            IsReadOnly = true,
-            TextWrapping = TextWrapping.NoWrap,
-            FontFamily = new FontFamily("Cascadia Mono"),
-            MinWidth = logDialogWidth,
-            Width = logDialogWidth,
-            MinHeight = 520,
-            MaxHeight = 720
-        };
+        var outputBox = CreateLogOutputBox(logDialogWidth);
 
         var progress = new ProgressBar
         {
@@ -2870,7 +2854,6 @@ public sealed partial class MainWindow : Window
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
-                _isRunning = false;
             });
         }
 
@@ -2891,7 +2874,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _isRunning = true;
+        BeginLongOperation();
         AppendOutput($"Starting {modules.Count} module(s). Log: {RunLog.Path}");
 
         try
@@ -2940,7 +2923,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            _isRunning = false;
+            await RunOnUiThreadAsync(EndLongOperation);
             AppendOutput($"Run finished. Log: {RunLog.Path}");
         }
     }
@@ -3191,6 +3174,43 @@ public sealed partial class MainWindow : Window
         return AppWindow.GetFromWindowId(id);
     }
 
+    private void RegisterCloseGuard()
+    {
+        var appWindow = GetAppWindow();
+        if (appWindow is not null)
+            appWindow.Closing += AppWindowClosing;
+    }
+
+    private void AppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (!_isRunning)
+            return;
+
+        args.Cancel = true;
+        AppendOutput("A task is still running. Wait for it to finish before closing Winstaller.");
+    }
+
+    private void BeginLongOperation()
+    {
+        _busyDepth++;
+        _isRunning = true;
+        _busyBar.Visibility = Visibility.Visible;
+        _topBarActions.IsEnabled = false;
+    }
+
+    private void EndLongOperation()
+    {
+        if (_busyDepth > 0)
+            _busyDepth--;
+
+        if (_busyDepth > 0)
+            return;
+
+        _isRunning = false;
+        _busyBar.Visibility = Visibility.Collapsed;
+        _topBarActions.IsEnabled = true;
+    }
+
     private static Brush ResourceBrush(string key)
     {
         return (Brush)Application.Current.Resources[key];
@@ -3252,18 +3272,70 @@ public sealed partial class MainWindow : Window
     private static void AppendTextToOutputBox(TextBox outputBox, string text)
     {
         const int maxVisibleCharacters = 200_000;
+        var selectionStart = outputBox.SelectionStart;
+        var selectionLength = outputBox.SelectionLength;
+        var wasAtEnd = selectionStart + selectionLength >= outputBox.Text.Length;
+
         var combined = outputBox.Text + text;
+        var trimOffset = 0;
         if (combined.Length > maxVisibleCharacters)
-            combined = combined[^maxVisibleCharacters..];
+        {
+            trimOffset = combined.Length - maxVisibleCharacters;
+            combined = combined[trimOffset..];
+        }
 
         outputBox.Text = combined;
-        outputBox.SelectionStart = outputBox.Text.Length;
+        if (wasAtEnd)
+        {
+            outputBox.SelectionStart = outputBox.Text.Length;
+            outputBox.SelectionLength = 0;
+            return;
+        }
+
+        outputBox.SelectionStart = Math.Clamp(selectionStart - trimOffset, 0, outputBox.Text.Length);
+        outputBox.SelectionLength = Math.Clamp(selectionLength, 0, outputBox.Text.Length - outputBox.SelectionStart);
     }
 
     private double GetLogDialogWidth()
     {
         var rootWidth = RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1900;
         return Math.Min(1900, Math.Max(1100, rootWidth - 96));
+    }
+
+    private TextBox CreateLogOutputBox(double width)
+    {
+        var outputBox = new TextBox
+        {
+            AcceptsReturn = true,
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new FontFamily("Cascadia Mono"),
+            MinWidth = width,
+            Width = width,
+            MinHeight = 520,
+            MaxHeight = 720
+        };
+
+        outputBox.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.C &&
+                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+            {
+                CopyText(string.IsNullOrEmpty(outputBox.SelectedText) ? outputBox.Text : outputBox.SelectedText);
+                args.Handled = true;
+            }
+        };
+
+        var logMenu = new MenuFlyout();
+        var copySelectionItem = new MenuFlyoutItem { Text = "Copy Selection" };
+        copySelectionItem.Click += (_, _) => CopyText(outputBox.SelectedText);
+        var copyAllItem = new MenuFlyoutItem { Text = "Copy All Visible Log" };
+        copyAllItem.Click += (_, _) => CopyText(outputBox.Text);
+        logMenu.Items.Add(copySelectionItem);
+        logMenu.Items.Add(copyAllItem);
+        outputBox.ContextFlyout = logMenu;
+        return outputBox;
     }
 
     private static void CopyText(string text)
@@ -3274,6 +3346,7 @@ public sealed partial class MainWindow : Window
         var package = new DataPackage();
         package.SetText(text);
         Clipboard.SetContent(package);
+        Clipboard.Flush();
     }
 
     private static void CopyTextFromFile(string path)
