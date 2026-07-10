@@ -40,7 +40,7 @@ public sealed partial class MainWindow : Window
     private readonly Grid _titleBar = new();
     private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
-    private const int ImportPopupDelayMilliseconds = 380;
+    private const int ImportPopupDelayMilliseconds = 180;
     private readonly List<TextBlock> _topBarActionLabels = [];
 
     private WinstallerConfig _config = null!;
