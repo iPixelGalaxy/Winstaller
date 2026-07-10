@@ -1821,6 +1821,7 @@ public sealed partial class MainWindow : Window
         {
             AppendOutput("Opening import review.");
             var result = await ShowSymlinkImportReviewDialogAsync(candidates);
+            AppendOutput("Import review closed.");
             selected = result.Selected;
             symlinkMode = result.Mode;
             if (selected.Count == 0)
@@ -1836,6 +1837,7 @@ public sealed partial class MainWindow : Window
         {
             AppendOutput("Opening import review.");
             selected = await ShowImportReviewDialogAsync(candidates, scope == SystemInfoImportScope.AppInstaller);
+            AppendOutput("Import review closed.");
         }
         if (selected.Count == 0)
         {
@@ -2160,6 +2162,9 @@ public sealed partial class MainWindow : Window
 
     private async Task<List<SystemInfoImportCandidate>> ShowImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates, bool includeRecommendedApps = false)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+            return await RunOnUiThreadAsync(() => ShowImportReviewDialogAsync(candidates, includeRecommendedApps));
+
         var selected = new List<SystemInfoImportCandidate>();
         var panel = new StackPanel { Spacing = 12 };
         CheckBox? recommended = null;
@@ -2242,6 +2247,9 @@ public sealed partial class MainWindow : Window
 
     private async Task<SymlinkImportSelection> ShowSymlinkImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+            return await RunOnUiThreadAsync(() => ShowSymlinkImportReviewDialogAsync(candidates));
+
         var resultMode = SymlinkImportMode.Copy;
         var actionName = "Copy and Symlink";
         var accepted = false;
