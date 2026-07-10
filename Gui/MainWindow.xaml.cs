@@ -40,7 +40,7 @@ public sealed partial class MainWindow : Window
     private readonly Grid _titleBar = new();
     private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
-    private const int BusyFinishDelayMilliseconds = 700;
+    private const int ImportPopupDelayMilliseconds = 380;
     private readonly List<TextBlock> _topBarActionLabels = [];
 
     private WinstallerConfig _config = null!;
@@ -1801,8 +1801,12 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            await RunOnUiThreadAsync(CompleteLongOperationAsync);
+            await RunOnUiThreadAsync(EndLongOperation);
         }
+
+        AppendOutput("Scan complete.");
+        await DelayBeforeImportPopupAsync();
+
         if (candidates.Count == 0)
         {
             var message = GetEmptyImportMessage(scope);
@@ -1815,6 +1819,7 @@ public sealed partial class MainWindow : Window
         var symlinkMode = SymlinkImportMode.Copy;
         if (scope == SystemInfoImportScope.Symlinks)
         {
+            AppendOutput("Opening import review.");
             var result = await ShowSymlinkImportReviewDialogAsync(candidates);
             selected = result.Selected;
             symlinkMode = result.Mode;
@@ -1829,6 +1834,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
+            AppendOutput("Opening import review.");
             selected = await ShowImportReviewDialogAsync(candidates, scope == SystemInfoImportScope.AppInstaller);
         }
         if (selected.Count == 0)
@@ -3253,13 +3259,12 @@ public sealed partial class MainWindow : Window
         SetTopBarActionsEnabled(true);
     }
 
-    private async Task CompleteLongOperationAsync()
+    private async Task DelayBeforeImportPopupAsync()
     {
-        if (_busyDepth <= 0)
+        if (_busyDepth > 0)
             return;
 
-        await Task.Delay(BusyFinishDelayMilliseconds);
-        EndLongOperation();
+        await Task.Delay(ImportPopupDelayMilliseconds);
         await Task.Yield();
     }
 
