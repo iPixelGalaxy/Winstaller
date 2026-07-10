@@ -40,7 +40,6 @@ public sealed partial class MainWindow : Window
     private readonly Grid _titleBar = new();
     private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
-    private const int ImportPopupDelayMilliseconds = 180;
     private readonly List<TextBlock> _topBarActionLabels = [];
 
     private WinstallerConfig _config = null!;
@@ -1805,7 +1804,6 @@ public sealed partial class MainWindow : Window
         }
 
         AppendOutput("Scan complete.");
-        await DelayBeforeImportPopupAsync();
 
         if (candidates.Count == 0)
         {
@@ -3265,15 +3263,6 @@ public sealed partial class MainWindow : Window
         _isRunning = false;
         _busyBar.Visibility = Visibility.Collapsed;
         SetTopBarActionsEnabled(true);
-    }
-
-    private async Task DelayBeforeImportPopupAsync()
-    {
-        if (_busyDepth > 0)
-            return;
-
-        await Task.Delay(ImportPopupDelayMilliseconds);
-        await Task.Yield();
     }
 
     private async Task PaintBusyIndicatorAsync()
