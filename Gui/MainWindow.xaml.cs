@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Management;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -40,6 +41,7 @@ public sealed partial class MainWindow : Window
     private readonly Grid _titleBar = new();
     private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
+    private const int BusyCycleMilliseconds = 900;
     private readonly List<TextBlock> _topBarActionLabels = [];
 
     private WinstallerConfig _config = null!;
@@ -49,6 +51,8 @@ public sealed partial class MainWindow : Window
     private readonly object _outputLock = new();
     private readonly StringBuilder _pendingOutputText = new();
     private bool _outputFlushQueued;
+    private DispatcherQueueTimer? _busyTimer;
+    private DateTimeOffset _busyCycleStarted;
     private int _busyDepth;
     private bool _isRunning;
     private bool _isLoadingUi;
@@ -109,7 +113,10 @@ public sealed partial class MainWindow : Window
         var titleBar = BuildTitleBar();
         RootGrid.Children.Add(titleBar);
 
-        _busyBar.IsIndeterminate = true;
+        _busyBar.IsIndeterminate = false;
+        _busyBar.Minimum = 0;
+        _busyBar.Maximum = 100;
+        _busyBar.Value = 0;
         _busyBar.Visibility = Visibility.Collapsed;
         _busyBar.MinHeight = 4;
         _busyBar.VerticalAlignment = VerticalAlignment.Stretch;
@@ -1823,7 +1830,6 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            await ShowPopupAfterBusySweepAsync();
             await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, result.Ignored, symlinkMode);
             return;
         }
@@ -1842,7 +1848,6 @@ public sealed partial class MainWindow : Window
             await FillNetworkDriveCredentialsAsync(selected);
         }
 
-        await ShowPopupAfterBusySweepAsync();
         await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, [], symlinkMode);
     }
 
@@ -2882,7 +2887,7 @@ public sealed partial class MainWindow : Window
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
         dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
 
-        await ShowPopupAfterBusySweepAsync();
+        await RunPrePopupBusyCycleAsync();
 
         _activeOutputBox = outputBox;
         var dialogTask = dialog.ShowAsync().AsTask();
@@ -3239,7 +3244,7 @@ public sealed partial class MainWindow : Window
     {
         _busyDepth++;
         _isRunning = true;
-        _busyBar.Visibility = Visibility.Visible;
+        StartBusyBarCycle();
         SetTopBarActionsEnabled(false);
     }
 
@@ -3251,8 +3256,8 @@ public sealed partial class MainWindow : Window
         if (_busyDepth > 0)
             return;
 
+        StopBusyBarCycle();
         _isRunning = false;
-        _busyBar.Visibility = Visibility.Collapsed;
         SetTopBarActionsEnabled(true);
     }
 
@@ -3261,24 +3266,80 @@ public sealed partial class MainWindow : Window
         if (_busyDepth <= 0)
             return;
 
-        await Task.Delay(320);
+        await WaitForBusyBarCycleEndAsync();
         EndLongOperation();
         await Task.Yield();
     }
 
-    private async Task ShowPopupAfterBusySweepAsync()
+    private async Task RunPrePopupBusyCycleAsync()
     {
         BeginLongOperation();
         try
         {
-            await PaintBusyIndicatorAsync();
-            await CompleteLongOperationAsync();
+            await WaitForBusyBarCycleEndAsync();
         }
         finally
         {
             if (_busyDepth > 0)
                 EndLongOperation();
         }
+    }
+
+    private void StartBusyBarCycle()
+    {
+        if (_busyDepth == 1 || _busyTimer is null)
+        {
+            _busyCycleStarted = DateTimeOffset.UtcNow;
+            _busyBar.Value = 0;
+        }
+
+        _busyBar.Visibility = Visibility.Visible;
+        _busyTimer ??= CreateBusyTimer();
+        if (!_busyTimer.IsRunning)
+            _busyTimer.Start();
+    }
+
+    private DispatcherQueueTimer CreateBusyTimer()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(16);
+        timer.Tick += (_, _) => UpdateBusyBarValue();
+        return timer;
+    }
+
+    private void UpdateBusyBarValue()
+    {
+        var elapsed = (DateTimeOffset.UtcNow - _busyCycleStarted).TotalMilliseconds;
+        var progress = elapsed / BusyCycleMilliseconds;
+        if (progress >= 1)
+        {
+            _busyCycleStarted = DateTimeOffset.UtcNow;
+            progress %= 1;
+        }
+
+        _busyBar.Value = Math.Clamp(progress * 100, 0, 100);
+    }
+
+    private async Task WaitForBusyBarCycleEndAsync()
+    {
+        await Task.Yield();
+        UpdateBusyBarValue();
+
+        var elapsed = (DateTimeOffset.UtcNow - _busyCycleStarted).TotalMilliseconds;
+        var remaining = BusyCycleMilliseconds - elapsed % BusyCycleMilliseconds;
+        if (remaining < 120)
+            remaining += BusyCycleMilliseconds;
+
+        await Task.Delay(TimeSpan.FromMilliseconds(remaining));
+        _busyBar.Value = 100;
+        await Task.Yield();
+    }
+
+    private void StopBusyBarCycle()
+    {
+        _busyTimer?.Stop();
+        _busyBar.Value = 0;
+        _busyBar.Visibility = Visibility.Collapsed;
     }
 
     private async Task PaintBusyIndicatorAsync()
