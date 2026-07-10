@@ -6,7 +6,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Management;
 using Microsoft.UI;
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -39,12 +38,9 @@ public sealed partial class MainWindow : Window
     private readonly ComboBox _themeBox = new();
     private readonly Button _paneButton = new();
     private readonly Grid _titleBar = new();
-    private readonly Grid _busyHost = new();
-    private readonly Border _busyTail = new();
-    private readonly TranslateTransform _busyTailTransform = new();
+    private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
-    private const int BusyCycleMilliseconds = 900;
-    private const double BusyTailWidth = 180;
+    private const int BusyFinishDelayMilliseconds = 700;
     private readonly List<TextBlock> _topBarActionLabels = [];
 
     private WinstallerConfig _config = null!;
@@ -54,8 +50,6 @@ public sealed partial class MainWindow : Window
     private readonly object _outputLock = new();
     private readonly StringBuilder _pendingOutputText = new();
     private bool _outputFlushQueued;
-    private DispatcherQueueTimer? _busyTimer;
-    private DateTimeOffset _busyCycleStarted;
     private int _busyDepth;
     private bool _isRunning;
     private bool _isLoadingUi;
@@ -116,19 +110,12 @@ public sealed partial class MainWindow : Window
         var titleBar = BuildTitleBar();
         RootGrid.Children.Add(titleBar);
 
-        _busyTail.Width = BusyTailWidth;
-        _busyTail.Height = 4;
-        _busyTail.HorizontalAlignment = HorizontalAlignment.Left;
-        _busyTail.VerticalAlignment = VerticalAlignment.Center;
-        _busyTail.Background = ResourceBrush("AccentFillColorDefaultBrush");
-        _busyTail.CornerRadius = new CornerRadius(2);
-        _busyTail.RenderTransform = _busyTailTransform;
-        _busyHost.Visibility = Visibility.Collapsed;
-        _busyHost.MinHeight = 4;
-        _busyHost.VerticalAlignment = VerticalAlignment.Stretch;
-        _busyHost.Children.Add(_busyTail);
-        Grid.SetRow(_busyHost, 1);
-        RootGrid.Children.Add(_busyHost);
+        _busyBar.IsIndeterminate = true;
+        _busyBar.Visibility = Visibility.Collapsed;
+        _busyBar.MinHeight = 4;
+        _busyBar.VerticalAlignment = VerticalAlignment.Stretch;
+        Grid.SetRow(_busyBar, 1);
+        RootGrid.Children.Add(_busyBar);
 
         Grid.SetRow(_navigation, 2);
         RootGrid.Children.Add(_navigation);
@@ -2894,8 +2881,6 @@ public sealed partial class MainWindow : Window
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
         dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
 
-        await RunPrePopupBusyCycleAsync();
-
         _activeOutputBox = outputBox;
         var dialogTask = dialog.ShowAsync().AsTask();
         try
@@ -3251,7 +3236,7 @@ public sealed partial class MainWindow : Window
     {
         _busyDepth++;
         _isRunning = true;
-        StartBusyBarCycle();
+        _busyBar.Visibility = Visibility.Visible;
         SetTopBarActionsEnabled(false);
     }
 
@@ -3263,8 +3248,8 @@ public sealed partial class MainWindow : Window
         if (_busyDepth > 0)
             return;
 
-        StopBusyBarCycle();
         _isRunning = false;
+        _busyBar.Visibility = Visibility.Collapsed;
         SetTopBarActionsEnabled(true);
     }
 
@@ -3273,87 +3258,9 @@ public sealed partial class MainWindow : Window
         if (_busyDepth <= 0)
             return;
 
-        await WaitForBusyBarCycleEndAsync();
+        await Task.Delay(BusyFinishDelayMilliseconds);
         EndLongOperation();
         await Task.Yield();
-    }
-
-    private async Task RunPrePopupBusyCycleAsync()
-    {
-        BeginLongOperation();
-        try
-        {
-            await WaitForBusyBarCycleEndAsync();
-        }
-        finally
-        {
-            if (_busyDepth > 0)
-                EndLongOperation();
-        }
-    }
-
-    private void StartBusyBarCycle()
-    {
-        if (_busyDepth == 1 || _busyTimer is null)
-        {
-            _busyCycleStarted = DateTimeOffset.UtcNow;
-            UpdateBusyTailPosition();
-        }
-
-        _busyHost.Visibility = Visibility.Visible;
-        _busyTimer ??= CreateBusyTimer();
-        if (!_busyTimer.IsRunning)
-            _busyTimer.Start();
-    }
-
-    private DispatcherQueueTimer CreateBusyTimer()
-    {
-        var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(16);
-        timer.Tick += (_, _) => UpdateBusyTailPosition();
-        return timer;
-    }
-
-    private void UpdateBusyTailPosition()
-    {
-        var width = Math.Max(_busyHost.ActualWidth, RootGrid.ActualWidth);
-        if (width <= 0)
-            width = 900;
-
-        var elapsed = (DateTimeOffset.UtcNow - _busyCycleStarted).TotalMilliseconds;
-        var progress = elapsed / BusyCycleMilliseconds;
-        if (progress >= 1)
-        {
-            _busyCycleStarted = DateTimeOffset.UtcNow;
-            progress %= 1;
-        }
-
-        _busyTailTransform.X = -BusyTailWidth + (width + BusyTailWidth) * progress;
-    }
-
-    private async Task WaitForBusyBarCycleEndAsync()
-    {
-        await Task.Yield();
-        UpdateBusyTailPosition();
-
-        var elapsed = (DateTimeOffset.UtcNow - _busyCycleStarted).TotalMilliseconds;
-        var remaining = BusyCycleMilliseconds - elapsed % BusyCycleMilliseconds;
-        if (remaining < 120)
-            remaining += BusyCycleMilliseconds;
-
-        await Task.Delay(TimeSpan.FromMilliseconds(remaining));
-        var width = Math.Max(_busyHost.ActualWidth, RootGrid.ActualWidth);
-        if (width <= 0)
-            width = 900;
-        _busyTailTransform.X = width + BusyTailWidth;
-        await Task.Yield();
-    }
-
-    private void StopBusyBarCycle()
-    {
-        _busyTimer?.Stop();
-        _busyTailTransform.X = -BusyTailWidth;
-        _busyHost.Visibility = Visibility.Collapsed;
     }
 
     private async Task PaintBusyIndicatorAsync()
