@@ -39,9 +39,12 @@ public sealed partial class MainWindow : Window
     private readonly ComboBox _themeBox = new();
     private readonly Button _paneButton = new();
     private readonly Grid _titleBar = new();
-    private readonly ProgressBar _busyBar = new();
+    private readonly Grid _busyHost = new();
+    private readonly Border _busyTail = new();
+    private readonly TranslateTransform _busyTailTransform = new();
     private readonly StackPanel _topBarActions = new();
     private const int BusyCycleMilliseconds = 900;
+    private const double BusyTailWidth = 180;
     private readonly List<TextBlock> _topBarActionLabels = [];
 
     private WinstallerConfig _config = null!;
@@ -113,15 +116,19 @@ public sealed partial class MainWindow : Window
         var titleBar = BuildTitleBar();
         RootGrid.Children.Add(titleBar);
 
-        _busyBar.IsIndeterminate = false;
-        _busyBar.Minimum = 0;
-        _busyBar.Maximum = 100;
-        _busyBar.Value = 0;
-        _busyBar.Visibility = Visibility.Collapsed;
-        _busyBar.MinHeight = 4;
-        _busyBar.VerticalAlignment = VerticalAlignment.Stretch;
-        Grid.SetRow(_busyBar, 1);
-        RootGrid.Children.Add(_busyBar);
+        _busyTail.Width = BusyTailWidth;
+        _busyTail.Height = 4;
+        _busyTail.HorizontalAlignment = HorizontalAlignment.Left;
+        _busyTail.VerticalAlignment = VerticalAlignment.Center;
+        _busyTail.Background = ResourceBrush("AccentFillColorDefaultBrush");
+        _busyTail.CornerRadius = new CornerRadius(2);
+        _busyTail.RenderTransform = _busyTailTransform;
+        _busyHost.Visibility = Visibility.Collapsed;
+        _busyHost.MinHeight = 4;
+        _busyHost.VerticalAlignment = VerticalAlignment.Stretch;
+        _busyHost.Children.Add(_busyTail);
+        Grid.SetRow(_busyHost, 1);
+        RootGrid.Children.Add(_busyHost);
 
         Grid.SetRow(_navigation, 2);
         RootGrid.Children.Add(_navigation);
@@ -1698,7 +1705,7 @@ public sealed partial class MainWindow : Window
             }
             finally
             {
-                button.IsEnabled = true;
+                await RunOnUiThreadAsync(() => button.IsEnabled = true);
             }
         };
         return button;
@@ -3290,10 +3297,10 @@ public sealed partial class MainWindow : Window
         if (_busyDepth == 1 || _busyTimer is null)
         {
             _busyCycleStarted = DateTimeOffset.UtcNow;
-            _busyBar.Value = 0;
+            UpdateBusyTailPosition();
         }
 
-        _busyBar.Visibility = Visibility.Visible;
+        _busyHost.Visibility = Visibility.Visible;
         _busyTimer ??= CreateBusyTimer();
         if (!_busyTimer.IsRunning)
             _busyTimer.Start();
@@ -3303,12 +3310,16 @@ public sealed partial class MainWindow : Window
     {
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(16);
-        timer.Tick += (_, _) => UpdateBusyBarValue();
+        timer.Tick += (_, _) => UpdateBusyTailPosition();
         return timer;
     }
 
-    private void UpdateBusyBarValue()
+    private void UpdateBusyTailPosition()
     {
+        var width = Math.Max(_busyHost.ActualWidth, RootGrid.ActualWidth);
+        if (width <= 0)
+            width = 900;
+
         var elapsed = (DateTimeOffset.UtcNow - _busyCycleStarted).TotalMilliseconds;
         var progress = elapsed / BusyCycleMilliseconds;
         if (progress >= 1)
@@ -3317,13 +3328,13 @@ public sealed partial class MainWindow : Window
             progress %= 1;
         }
 
-        _busyBar.Value = Math.Clamp(progress * 100, 0, 100);
+        _busyTailTransform.X = -BusyTailWidth + (width + BusyTailWidth) * progress;
     }
 
     private async Task WaitForBusyBarCycleEndAsync()
     {
         await Task.Yield();
-        UpdateBusyBarValue();
+        UpdateBusyTailPosition();
 
         var elapsed = (DateTimeOffset.UtcNow - _busyCycleStarted).TotalMilliseconds;
         var remaining = BusyCycleMilliseconds - elapsed % BusyCycleMilliseconds;
@@ -3331,15 +3342,18 @@ public sealed partial class MainWindow : Window
             remaining += BusyCycleMilliseconds;
 
         await Task.Delay(TimeSpan.FromMilliseconds(remaining));
-        _busyBar.Value = 100;
+        var width = Math.Max(_busyHost.ActualWidth, RootGrid.ActualWidth);
+        if (width <= 0)
+            width = 900;
+        _busyTailTransform.X = width + BusyTailWidth;
         await Task.Yield();
     }
 
     private void StopBusyBarCycle()
     {
         _busyTimer?.Stop();
-        _busyBar.Value = 0;
-        _busyBar.Visibility = Visibility.Collapsed;
+        _busyTailTransform.X = -BusyTailWidth;
+        _busyHost.Visibility = Visibility.Collapsed;
     }
 
     private async Task PaintBusyIndicatorAsync()
@@ -3350,6 +3364,12 @@ public sealed partial class MainWindow : Window
 
     private void SetTopBarActionsEnabled(bool enabled)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => SetTopBarActionsEnabled(enabled));
+            return;
+        }
+
         foreach (var child in _topBarActions.Children.OfType<Control>())
             child.IsEnabled = enabled;
     }
