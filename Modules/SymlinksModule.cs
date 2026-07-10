@@ -122,16 +122,25 @@ public class SymlinksModule : ModuleBase
                 Console.WriteLine($"    Created target directory: {targetDir}");
             }
 
+            if (!PreflightSymlinkPaths(sourcePath, targetPath))
+                return false;
+
             if (isDirectory && Directory.Exists(sourcePath))
             {
                 var info = new DirectoryInfo(sourcePath);
                 if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
-                    return VerifySymlink(sourcePath, targetPath, true);
-                }
+                    if (!Config.Symlinks.Resymlink)
+                        return VerifySymlink(sourcePath, targetPath, true);
 
-                ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
-                return false;
+                    Console.WriteLine("    Removing existing symlink before recreating it...");
+                    Directory.Delete(sourcePath);
+                }
+                else
+                {
+                    ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
+                    return false;
+                }
             }
 
             if (!isDirectory && File.Exists(sourcePath))
@@ -139,11 +148,17 @@ public class SymlinksModule : ModuleBase
                 var info = new FileInfo(sourcePath);
                 if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
-                    return VerifySymlink(sourcePath, targetPath, false);
-                }
+                    if (!Config.Symlinks.Resymlink)
+                        return VerifySymlink(sourcePath, targetPath, false);
 
-                ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
-                return false;
+                    Console.WriteLine("    Removing existing symlink before recreating it...");
+                    File.Delete(sourcePath);
+                }
+                else
+                {
+                    ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
+                    return false;
+                }
             }
 
             var sourceDir = Path.GetDirectoryName(sourcePath);
@@ -171,6 +186,21 @@ public class SymlinksModule : ModuleBase
         }
     }
 
+    private bool PreflightSymlinkPaths(string sourcePath, string targetPath)
+    {
+        var paths = new[]
+        {
+            sourcePath,
+            targetPath,
+            Path.GetDirectoryName(sourcePath) ?? string.Empty,
+            Path.GetDirectoryName(targetPath) ?? string.Empty
+        };
+
+        return SymlinkLockUtility.ClearLocks(
+            paths,
+            Config.Symlinks.ForceKillApps,
+            message => ConsoleHelper.WriteWarning($"    {message}"));
+    }
     private static bool VerifySymlink(string sourcePath, string targetPath, bool isDirectory)
     {
         FileSystemInfo info = isDirectory ? new DirectoryInfo(sourcePath) : new FileInfo(sourcePath);

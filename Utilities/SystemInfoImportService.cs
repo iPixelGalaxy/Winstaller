@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Winstaller.Configuration;
 using Winstaller.Models;
@@ -33,7 +32,6 @@ public enum SymlinkImportMode
 
 public sealed record SystemInfoImportResult(int Added, IReadOnlyList<SymlinkImportFailure> SymlinkFailures);
 public sealed record SymlinkImportFailure(SystemInfoImportCandidate Candidate, string Title, IReadOnlyList<string> FailedPaths, string Message);
-public sealed record LockingProcessInfo(int ProcessId, string ProcessName, string Path);
 
 public static class SystemInfoImportService
 {
@@ -611,19 +609,7 @@ public static class SystemInfoImportService
                path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(IEnumerable<string> paths)
-    {
-        var found = new Dictionary<int, LockingProcessInfo>();
-        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            foreach (var process in FindLockingProcesses(path))
-            {
-                found.TryAdd(process.ProcessId, process);
-            }
-        }
-
-        return found.Values.OrderBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase).ToList();
-    }
+    public static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(IEnumerable<string> paths) => SymlinkLockUtility.FindLockingProcesses(paths);
 
     private static SymlinkMigrationResult MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
@@ -683,6 +669,10 @@ public static class SystemInfoImportService
         }
 
         var destination = GetSymlinkDestination(config, symlink.Section, symlink.Name);
+        var backupPath = symlink.SourcePath + BackupSuffix;
+        if (!PreflightSymlinkPaths(config, log, dataSource, symlink.SourcePath, destination, backupPath))
+            return SymlinkMigrationResult.Fail("Locked by running app.", [dataSource, symlink.SourcePath, destination]);
+
         log?.Invoke($"{mode} {dataSource} -> {destination}");
         try
         {
@@ -748,13 +738,17 @@ public static class SystemInfoImportService
                 {
                     Directory.Delete(symlink.SourcePath);
                 }
+                else if (mode == SymlinkImportMode.Copy && config.Symlinks.CreateBackupFolders)
+                {
+                    if (Directory.Exists(backupPath))
+                        Directory.Delete(backupPath, true);
+                    log?.Invoke($"Moving original to backup: {backupPath}");
+                    Directory.Move(symlink.SourcePath, backupPath);
+                }
                 else if (mode == SymlinkImportMode.Copy)
                 {
-                    var backup = symlink.SourcePath + ".winstaller-backup";
-                    if (Directory.Exists(backup))
-                        Directory.Delete(backup, true);
-                    log?.Invoke($"Moving original to backup: {backup}");
-                    Directory.Move(symlink.SourcePath, backup);
+                    log?.Invoke($"Deleting original after successful copy: {symlink.SourcePath}");
+                    Directory.Delete(symlink.SourcePath, true);
                 }
             }
 
@@ -768,6 +762,14 @@ public static class SystemInfoImportService
             CleanupFailedDestination(destination, log);
             return SymlinkMigrationResult.Fail($"Finalize failed: {ex.Message}", [symlink.SourcePath]);
         }
+    }
+
+    private static bool PreflightSymlinkPaths(WinstallerConfig config, Action<string>? log, params string[] paths)
+    {
+        return SymlinkLockUtility.ClearLocks(
+            paths,
+            config.Symlinks.ForceKillApps,
+            message => log?.Invoke(message));
     }
 
     private static SymlinkMigrationResult RecoverBackupSymlink(WinstallerConfig config, SymlinkImport symlink, Action<string>? log)
@@ -978,72 +980,6 @@ public static class SystemInfoImportService
         if (!normalizedLinkTarget.Equals(normalizedTarget, StringComparison.OrdinalIgnoreCase))
             throw new IOException($"Symlink target mismatch: {source} -> {linkTarget}, expected {target}");
     }
-
-    private static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(string path)
-    {
-        var sessionHandle = 0u;
-        var sessionKey = Guid.NewGuid().ToString("N");
-        if (RmStartSession(out sessionHandle, 0, sessionKey) != 0)
-            return [];
-
-        try
-        {
-            var resources = new[] { path };
-            if (RmRegisterResources(sessionHandle, (uint)resources.Length, resources, 0, null, 0, null) != 0)
-                return [];
-
-            uint needed = 0;
-            uint count = 0;
-            uint reason;
-            var result = RmGetList(sessionHandle, out needed, ref count, null, out reason);
-            if (result != ErrorMoreData || needed == 0)
-                return [];
-
-            var processInfo = new RmProcessInfo[needed];
-            count = needed;
-            result = RmGetList(sessionHandle, out needed, ref count, processInfo, out reason);
-            if (result != 0)
-                return [];
-
-            return processInfo
-                .Take((int)count)
-                .Select(info => new LockingProcessInfo(
-                    info.Process.dwProcessId,
-                    string.IsNullOrWhiteSpace(info.strAppName) ? $"PID {info.Process.dwProcessId}" : info.strAppName,
-                    path))
-                .ToList();
-        }
-        finally
-        {
-            RmEndSession(sessionHandle);
-        }
-    }
-
-    private const int ErrorMoreData = 234;
-
-    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
-    private static extern int RmStartSession(out uint pSessionHandle, int dwSessionFlags, string strSessionKey);
-
-    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
-    private static extern int RmRegisterResources(
-        uint pSessionHandle,
-        uint nFiles,
-        string[]? rgsFilenames,
-        uint nApplications,
-        RmUniqueProcess[]? rgApplications,
-        uint nServices,
-        string[]? rgsServiceNames);
-
-    [DllImport("rstrtmgr.dll")]
-    private static extern int RmGetList(
-        uint dwSessionHandle,
-        out uint pnProcInfoNeeded,
-        ref uint pnProcInfo,
-        [In, Out] RmProcessInfo[]? rgAffectedApps,
-        out uint lpdwRebootReasons);
-
-    [DllImport("rstrtmgr.dll")]
-    private static extern int RmEndSession(uint pSessionHandle);
 
     private static IEnumerable<StartupProgram> ReadStartupKey(RegistryKey root, string path, bool machineLevel)
     {
@@ -1301,29 +1237,4 @@ public static class SystemInfoImportService
         public static CopyDirectoryResult Ok() => new(true, [], string.Empty);
         public static CopyDirectoryResult Fail(IReadOnlyList<string> failedPaths, string message) => new(false, failedPaths, message);
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RmUniqueProcess
-    {
-        public int dwProcessId;
-        public System.Runtime.InteropServices.ComTypes.FILETIME ProcessStartTime;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct RmProcessInfo
-    {
-        public RmUniqueProcess Process;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
-        public string strAppName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
-        public string strServiceShortName;
-        public uint ApplicationType;
-        public uint AppStatus;
-        public uint TSSessionId;
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool bRestartable;
-    }
 }
-
-
-

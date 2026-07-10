@@ -7,6 +7,9 @@ public class SymlinksConfig
 {
     public bool Enabled { get; set; } = true;
     public string BaseSymlinkDirectory { get; set; } = @"D:\ReinstallFiles\Symlinks";
+    public bool ForceKillApps { get; set; } = true;
+    public bool Resymlink { get; set; } = true;
+    public bool CreateBackupFolders { get; set; } = true;
     public List<string> RoamingDirectories { get; set; } = [];
     public List<string> LocalDirectories { get; set; } = [];
     public List<string> LocalLowDirectories { get; set; } = [];
