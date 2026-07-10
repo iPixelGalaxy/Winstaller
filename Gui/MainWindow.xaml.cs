@@ -80,7 +80,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
 
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
-        RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
+        RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(4) });
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         _navigation.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
@@ -111,7 +111,7 @@ public sealed partial class MainWindow : Window
 
         _busyBar.IsIndeterminate = true;
         _busyBar.Visibility = Visibility.Collapsed;
-        _busyBar.MinHeight = 8;
+        _busyBar.MinHeight = 4;
         _busyBar.VerticalAlignment = VerticalAlignment.Stretch;
         Grid.SetRow(_busyBar, 1);
         RootGrid.Children.Add(_busyBar);
@@ -1760,11 +1760,11 @@ public sealed partial class MainWindow : Window
         try
         {
             await PaintBusyIndicatorAsync();
-            candidates = await Task.Run(() => SystemInfoImportService.FindCandidatesAsync(_config, scope));
+            candidates = await Task.Run(async () => await SystemInfoImportService.FindCandidatesAsync(_config, scope));
         }
         finally
         {
-            EndLongOperation();
+            await RunOnUiThreadAsync(EndLongOperation);
         }
         if (candidates.Count == 0)
         {
