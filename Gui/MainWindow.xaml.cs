@@ -808,41 +808,48 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildSettingRow(object target, PropertyInfo property)
     {
-        var row = new Grid { ColumnSpacing = 14 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360) });
+        var row = new StackPanel { Spacing = 10 };
+        var header = new Grid { ColumnSpacing = 14 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        row.Children.Add(new FontIcon
+        header.Children.Add(new FontIcon
         {
             Glyph = GetConfigGlyph(property, null),
             FontSize = 20,
             Width = 28,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 2, 0, 0)
         });
 
         var label = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         label.Children.Add(new TextBlock
         {
             Text = SplitName(property.Name),
-            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            TextWrapping = TextWrapping.WrapWholeWords
         });
         label.Children.Add(new TextBlock
         {
             Text = GetSettingDescription(property),
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
             FontSize = 12,
-            TextWrapping = TextWrapping.Wrap
+            TextWrapping = TextWrapping.WrapWholeWords
         });
         Grid.SetColumn(label, 1);
-        row.Children.Add(label);
+        header.Children.Add(label);
+        row.Children.Add(header);
 
         var editor = BuildValueEditor(target, property);
         editor.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(editor, 2);
+        editor.HorizontalAlignment = HorizontalAlignment.Stretch;
+        editor.Margin = new Thickness(42, 0, 0, 0);
         row.Children.Add(editor);
 
-        return Card(row);
+        var card = Card(row);
+        card.MaxWidth = 760;
+        card.HorizontalAlignment = HorizontalAlignment.Stretch;
+        return card;
     }
 
     private FrameworkElement BuildPropertyEditor(object target, PropertyInfo property)
@@ -914,16 +921,40 @@ public sealed partial class MainWindow : Window
         }
         else if (property.PropertyType == typeof(string))
         {
+            var isReadOnly = IsReadOnlySetting(target, property);
+            if (isReadOnly)
+            {
+                editor = new Border
+                {
+                    Background = ResourceBrush("WinstallerCardBrush"),
+                    BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(10, 8, 10, 8),
+                    Opacity = 0.68,
+                    Child = new TextBlock
+                    {
+                        Text = value?.ToString() ?? string.Empty,
+                        Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+                        TextWrapping = TextWrapping.WrapWholeWords
+                    }
+                };
+                return editor;
+            }
+
             var box = new TextBox
             {
                 Text = value?.ToString() ?? string.Empty,
-                HorizontalAlignment = HorizontalAlignment.Stretch
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                TextWrapping = TextWrapping.NoWrap
             };
+
             box.LostFocus += (_, _) =>
             {
                 property.SetValue(target, box.Text);
                 SaveConfiguration();
             };
+
             editor = box;
         }
         else
@@ -937,6 +968,11 @@ public sealed partial class MainWindow : Window
         }
 
         return editor;
+    }
+
+    private static bool IsReadOnlySetting(object target, PropertyInfo property)
+    {
+        return target is SymlinksConfig && property.Name == nameof(SymlinksConfig.BaseSymlinkDirectory);
     }
 
     private FrameworkElement BuildListSection(object target, PropertyInfo property, bool allowAdd = true)
@@ -1764,7 +1800,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            await RunOnUiThreadAsync(EndLongOperation);
+            await RunOnUiThreadAsync(CompleteLongOperationAsync);
         }
         if (candidates.Count == 0)
         {
@@ -1787,6 +1823,7 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
+            await ShowPopupAfterBusySweepAsync();
             await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, result.Ignored, symlinkMode);
             return;
         }
@@ -1805,6 +1842,7 @@ public sealed partial class MainWindow : Window
             await FillNetworkDriveCredentialsAsync(selected);
         }
 
+        await ShowPopupAfterBusySweepAsync();
         await ImportSelectedSystemInfoAsync(scope, module, candidates, selected, [], symlinkMode);
     }
 
@@ -2690,10 +2728,13 @@ public sealed partial class MainWindow : Window
             Content = new ScrollViewer
             {
                 Content = panel,
-                MaxHeight = 540
+                MaxHeight = 540,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             },
             CloseButtonText = "Done"
         };
+        dialog.Resources["ContentDialogMinWidth"] = 680;
+        dialog.Resources["ContentDialogMaxWidth"] = 840;
 
         await dialog.ShowAsync();
         RenderModule(module);
@@ -2840,6 +2881,8 @@ public sealed partial class MainWindow : Window
         };
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
         dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
+
+        await ShowPopupAfterBusySweepAsync();
 
         _activeOutputBox = outputBox;
         var dialogTask = dialog.ShowAsync().AsTask();
@@ -3211,6 +3254,31 @@ public sealed partial class MainWindow : Window
         _isRunning = false;
         _busyBar.Visibility = Visibility.Collapsed;
         SetTopBarActionsEnabled(true);
+    }
+
+    private async Task CompleteLongOperationAsync()
+    {
+        if (_busyDepth <= 0)
+            return;
+
+        await Task.Delay(320);
+        EndLongOperation();
+        await Task.Yield();
+    }
+
+    private async Task ShowPopupAfterBusySweepAsync()
+    {
+        BeginLongOperation();
+        try
+        {
+            await PaintBusyIndicatorAsync();
+            await CompleteLongOperationAsync();
+        }
+        finally
+        {
+            if (_busyDepth > 0)
+                EndLongOperation();
+        }
     }
 
     private async Task PaintBusyIndicatorAsync()
