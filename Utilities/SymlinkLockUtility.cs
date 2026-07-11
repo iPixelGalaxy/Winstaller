@@ -10,7 +10,7 @@ public static class SymlinkLockUtility
     public static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(IEnumerable<string> paths)
     {
         var found = new Dictionary<int, LockingProcessInfo>();
-        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var path in ExpandLockCheckPaths(paths).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             foreach (var process in FindLockingProcesses(path))
                 found.TryAdd(process.ProcessId, process);
@@ -48,6 +48,33 @@ public static class SymlinkLockUtility
         }
 
         return FindLockingProcesses(paths).Count == 0;
+    }
+
+    private static IEnumerable<string> ExpandLockCheckPaths(IEnumerable<string> paths)
+    {
+        const int maxDirectoryEntries = 300;
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            yield return path;
+
+            if (!Directory.Exists(path))
+                continue;
+
+            List<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                    .Take(maxDirectoryEntries)
+                    .ToList();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+                yield return entry;
+        }
     }
 
     private static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(string path)
@@ -138,3 +165,4 @@ public static class SymlinkLockUtility
         public bool bRestartable;
     }
 }
+

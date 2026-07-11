@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Management;
+using System.Runtime.InteropServices;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -18,7 +19,6 @@ using Winstaller.Configuration;
 using Winstaller.Modules;
 using Winstaller.Utilities;
 using WinRT.Interop;
-using Windows.ApplicationModel.DataTransfer;
 
 namespace Winstaller.Gui;
 
@@ -1753,6 +1753,35 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void RefreshAfterConfigurationReload(ModuleDescriptor? preferredModule)
+    {
+        var selectedModuleName = preferredModule?.Name ?? GetSelectedModuleName();
+        SaveConfiguration();
+        LoadConfiguration();
+        RebuildNavigation();
+
+        if (selectedModuleName is null)
+        {
+            RenderDashboard();
+            return;
+        }
+
+        var refreshedModule = _modules.FirstOrDefault(module => module.Name == selectedModuleName);
+        if (refreshedModule is null)
+        {
+            RenderDashboard();
+            return;
+        }
+
+        SelectModule(refreshedModule);
+    }
+
+    private string? GetSelectedModuleName()
+    {
+        return (_navigation.SelectedItem as NavigationViewItem)?.Tag is ModuleDescriptor module
+            ? module.Name
+            : null;
+    }
     private void SelectModule(ModuleDescriptor module)
     {
         foreach (var item in _navigation.MenuItems.OfType<NavigationViewItem>())
@@ -1967,18 +1996,7 @@ public sealed partial class MainWindow : Window
 
             await RunOnUiThreadAsync(() =>
             {
-                SaveConfiguration();
-                LoadConfiguration();
-                RebuildNavigation();
-                if (module is null)
-                {
-                    RenderDashboard();
-                }
-                else
-                {
-                    var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
-                    RenderModule(refreshedModule ?? module);
-                }
+                RefreshAfterConfigurationReload(module);
             });
 
             Log($"Imported {result.Added} item(s).");
@@ -2047,18 +2065,7 @@ public sealed partial class MainWindow : Window
                                 var retryResult = await Task.Run(() => ApplyImport(retrySelection));
                                 await RunOnUiThreadAsync(() =>
                                 {
-                                    SaveConfiguration();
-                                    LoadConfiguration();
-                                    RebuildNavigation();
-                                    if (module is null)
-                                    {
-                                        RenderDashboard();
-                                    }
-                                    else
-                                    {
-                                        var refreshedModule = _modules.FirstOrDefault(candidate => candidate.Name == module.Name);
-                                        RenderModule(refreshedModule ?? module);
-                                    }
+                                    RefreshAfterConfigurationReload(module);
                                 });
 
                                 Log($"Retry imported {retryResult.Added} item(s).");
@@ -2703,10 +2710,7 @@ public sealed partial class MainWindow : Window
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Primary)
         {
-            var package = new DataPackage();
-            package.SetText(details);
-            Clipboard.SetContent(package);
-            Clipboard.Flush();
+            CopyText(details);
             AppendOutput("Picker error copied.");
         }
     }
@@ -3410,22 +3414,103 @@ public sealed partial class MainWindow : Window
         return outputBox;
     }
 
-    private static void CopyText(string text)
+    private void CopyText(string text)
     {
         if (string.IsNullOrEmpty(text))
             return;
 
-        var package = new DataPackage();
-        package.SetText(text);
-        Clipboard.SetContent(package);
-        Clipboard.Flush();
+        try
+        {
+            SetClipboardText(WindowNative.GetWindowHandle(this), text);
+        }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("UI", "Clipboard copy failed", ex);
+            AppendOutput($"Copy failed: {ex.Message}");
+        }
     }
 
-    private static void CopyTextFromFile(string path)
+    private void CopyTextFromFile(string path)
     {
-        if (File.Exists(path))
-            CopyText(File.ReadAllText(path));
+        try
+        {
+            if (File.Exists(path))
+                CopyText(File.ReadAllText(path));
+        }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("UI", $"Failed reading copy source: {path}", ex);
+            AppendOutput($"Copy failed: {ex.Message}");
+        }
     }
+
+    private static void SetClipboardText(nint hwnd, string text)
+    {
+        if (!OpenClipboard(hwnd))
+            throw new InvalidOperationException("Clipboard is unavailable.");
+
+        var handle = nint.Zero;
+        try
+        {
+            EmptyClipboard();
+            var bytes = (text.Length + 1) * 2;
+            handle = GlobalAlloc(GmemMoveable, (nuint)bytes);
+            if (handle == nint.Zero)
+                throw new InvalidOperationException("Could not allocate clipboard memory.");
+
+            var target = GlobalLock(handle);
+            if (target == nint.Zero)
+                throw new InvalidOperationException("Could not lock clipboard memory.");
+
+            try
+            {
+                Marshal.Copy(text.ToCharArray(), 0, target, text.Length);
+                Marshal.WriteInt16(target, text.Length * 2, 0);
+            }
+            finally
+            {
+                GlobalUnlock(handle);
+            }
+
+            if (SetClipboardData(CfUnicodeText, handle) == nint.Zero)
+                throw new InvalidOperationException("Could not set clipboard data.");
+
+            handle = nint.Zero;
+        }
+        finally
+        {
+            CloseClipboard();
+            if (handle != nint.Zero)
+                GlobalFree(handle);
+        }
+    }
+
+    private const uint GmemMoveable = 0x0002;
+    private const uint CfUnicodeText = 13;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool OpenClipboard(nint hWndNewOwner);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SetClipboardData(uint uFormat, nint hMem);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool CloseClipboard();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalAlloc(uint uFlags, nuint dwBytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalLock(nint hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GlobalUnlock(nint hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalFree(nint hMem);
 
     private static string GetSettingDescription(PropertyInfo property)
     {
@@ -3678,3 +3763,4 @@ public sealed partial class MainWindow : Window
         }
     }
 }
+

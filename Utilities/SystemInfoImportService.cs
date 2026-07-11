@@ -734,6 +734,14 @@ public static class SystemInfoImportService
         {
             if (Directory.Exists(symlink.SourcePath))
             {
+                var finalLocks = SymlinkLockUtility.FindLockingProcesses([symlink.SourcePath]);
+                if (finalLocks.Count > 0 && !PreflightSymlinkPaths(config, log, symlink.SourcePath))
+                {
+                    var lockedPaths = finalLocks.Select(process => process.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    log?.Invoke($"Skipped symlink item because original folder is locked: {symlink.SourcePath}");
+                    return SymlinkMigrationResult.Fail("Original folder locked", lockedPaths.Count == 0 ? [symlink.SourcePath] : lockedPaths);
+                }
+
                 if (symlink.IsExistingSymlink)
                 {
                     Directory.Delete(symlink.SourcePath);
@@ -760,7 +768,11 @@ public static class SystemInfoImportService
         {
             log?.Invoke($"Failed finalizing symlink item: {symlink.Name} ({ex.Message})");
             CleanupFailedDestination(destination, log);
-            return SymlinkMigrationResult.Fail($"Finalize failed: {ex.Message}", [symlink.SourcePath]);
+            var lockedPaths = SymlinkLockUtility.FindLockingProcesses([symlink.SourcePath])
+                .Select(process => process.Path)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return SymlinkMigrationResult.Fail($"Finalize failed: {ex.Message}", lockedPaths.Count == 0 ? [symlink.SourcePath] : lockedPaths);
         }
     }
 
@@ -1238,3 +1250,4 @@ public static class SystemInfoImportService
         public static CopyDirectoryResult Fail(IReadOnlyList<string> failedPaths, string message) => new(false, failedPaths, message);
     }
 }
+

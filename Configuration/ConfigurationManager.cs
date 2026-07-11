@@ -121,7 +121,7 @@ public static class ConfigurationManager
             {
                 Enabled = false,
                 BaseSymlinkDirectory = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "Symlinks"),
-                ForceKillApps = true,
+                ForceKillApps = false,
                 Resymlink = true,
                 CreateBackupFolders = true,
                 RoamingDirectories = [],
