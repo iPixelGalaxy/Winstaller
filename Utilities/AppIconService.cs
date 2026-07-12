@@ -36,7 +36,7 @@ internal static partial class AppIconService
 
     private static async Task<string?> FetchAndCacheAsync(string packageId)
     {
-        var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons-v3");
+        var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
         Directory.CreateDirectory(directory);
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(packageId))).ToLowerInvariant();
         var missPath = Path.Combine(directory, key + ".miss");
