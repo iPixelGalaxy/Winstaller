@@ -373,7 +373,7 @@ public class AppInstallerModule : ModuleBase
 
         try
         {
-            var consoleCmd = $"title Installing {packageId} && winget install {packageId}";
+            var consoleCmd = $"title Installing {packageId} && {BuildWingetInstallCommand(packageId)}";
             var result = await RunCmdAsync(
                 $"start /wait cmd /c \"{consoleCmd}\"",
                 Config.AppInstaller.DefaultTimeoutSeconds * 1000
@@ -405,42 +405,29 @@ public class AppInstallerModule : ModuleBase
             return true;
         }
 
-        Console.WriteLine($"Installing {Config.AppInstaller.DefaultInstalls.Count} default packages in bulk...");
-        Console.WriteLine("Opening new console window for bulk installation...");
-
-        var packagesStr = string.Join(" ", Config.AppInstaller.DefaultInstalls);
-        var consoleCmd = $"title Bulk Installation - {Config.AppInstaller.DefaultInstalls.Count} packages && winget install {packagesStr}";
-
-        Console.WriteLine("Command that will run:");
-        Console.WriteLine($"winget install {packagesStr}");
-
-        try
+        Console.WriteLine($"Installing {Config.AppInstaller.DefaultInstalls.Count} default packages...");
+        var success = true;
+        foreach (var packageId in Config.AppInstaller.DefaultInstalls)
         {
-            Console.WriteLine("Starting bulk installation... This may take a while.");
-
-            var result = await RunCmdAsync(
-                $"start /wait cmd /c \"{consoleCmd}\"",
-                Config.AppInstaller.BulkTimeoutSeconds * 1000
-            );
-
-            if (result == 0)
-            {
-                ConsoleHelper.WriteSuccess("Bulk installation completed successfully");
-                return true;
-            }
-            else
-            {
-                ConsoleHelper.WriteError($"Bulk installation completed with errors (exit code: {result})");
-                return false;
-            }
+            if (!await InstallDefaultPackageAsync(packageId))
+                success = false;
         }
-        catch (Exception ex)
-        {
-            ConsoleHelper.WriteError($"Error during bulk installation: {ex.Message}");
-            return false;
-        }
+
+        return success;
     }
 
+    private string BuildWingetInstallCommand(string packageId)
+    {
+        var command = $"winget install --id \"{packageId}\" --exact";
+        if (Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior) &&
+            behavior.LockVersion &&
+            !string.IsNullOrWhiteSpace(behavior.Version))
+        {
+            command += $" --version \"{behavior.Version}\"";
+        }
+
+        return command;
+    }
     private static string? FindInstaller(string directory)
     {
         var extensions = new[] { ".exe", ".msi" };
@@ -449,9 +436,9 @@ public class AppInstallerModule : ModuleBase
             if (extensions.Any(ext => file.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
                 return file;
         }
+
         return null;
     }
-
     protected override List<MenuOption> GetMenuOptions()
     {
         return

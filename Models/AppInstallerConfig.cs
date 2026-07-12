@@ -15,12 +15,16 @@ public class AppInstallerConfig
     public List<string> ManualInstalls { get; set; } = [];
     public List<CustomInstaller> CustomScripts { get; set; } = [];
     public List<string> DefaultInstalls { get; set; } = [];
+    public List<string> IgnoredApps { get; set; } = [];
     public Dictionary<string, AppInstallBehavior> Behaviors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class AppInstallBehavior
 {
+    public string DisplayName { get; set; } = string.Empty;
     public string InstallMode { get; set; } = "Default";
+    public bool LockVersion { get; set; }
+    public string Version { get; set; } = string.Empty;
     public DiscordInstallOptions Discord { get; set; } = new();
     public SpotifyInstallOptions Spotify { get; set; } = new();
 }

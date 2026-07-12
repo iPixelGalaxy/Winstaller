@@ -560,86 +560,77 @@ public sealed partial class MainWindow : Window
         void Refresh()
         {
             grid.Children.Clear();
-            foreach (var app in config.DefaultInstalls.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
-            {
+            foreach (var app in config.DefaultInstalls.OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase))
                 grid.Children.Add(BuildAppTile(app, config, Refresh));
-            }
         }
 
         Refresh();
-
         return new StackPanel
         {
             Spacing = 12,
             Children =
             {
                 grid,
-                ActionButton("+ Add App", () =>
-                {
-                    config.DefaultInstalls.Add(string.Empty);
-                    SaveConfiguration();
-                    Refresh();
-                })
+                ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null))
             }
         };
     }
 
     private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
     {
-        var title = GetKnownPackageName(packageId);
-        var box = new TextBox
+        var footer = new StackPanel
         {
-            Text = packageId,
-            PlaceholderText = "Winget ID",
-            MinWidth = 190
-        };
-        box.LostFocus += (_, _) =>
-        {
-            var index = config.DefaultInstalls.IndexOf(packageId);
-            if (index >= 0)
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children =
             {
-                config.DefaultInstalls[index] = box.Text.Trim();
-                SaveConfiguration();
-                refresh();
+                ActionButton("Delete", () =>
+                {
+                    config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase));
+                    config.Behaviors.Remove(packageId);
+                    SaveConfiguration();
+                    refresh();
+                }),
+                ActionButton("Settings", async () => await ShowAppBehaviorDialogAsync(config, packageId))
             }
         };
+
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var header = new StackPanel { Spacing = 8 };
+        header.Children.Add(new FontIcon { Glyph = "\uE896", FontSize = 22, HorizontalAlignment = HorizontalAlignment.Left });
+        header.Children.Add(new TextBlock
+        {
+            Text = GetAppDisplayName(config, packageId),
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(header);
+        Grid.SetRow(footer, 1);
+        content.Children.Add(footer);
 
         return new Border
         {
-            Width = 230,
-            MinHeight = 132,
+            Width = 250,
+            MinHeight = 118,
             Margin = new Thickness(0, 0, 8, 8),
-            Background = ResourceBrush("WinstallerDashboardCardBrush"),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12),
-            Child = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    new FontIcon { Glyph = "\uE896", FontSize = 22, HorizontalAlignment = HorizontalAlignment.Left },
-                    new TextBlock
-                    {
-                        Text = title,
-                        FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
-                        TextWrapping = TextWrapping.Wrap
-                    },
-                    box,
-                    KnownBehaviorPackage(packageId)
-                        ? ActionButton("Edit", async () => await ShowAppBehaviorDialogAsync(config, packageId))
-                        : new Grid(),
-                    ActionButton("Remove", () =>
-                    {
-                        config.DefaultInstalls.Remove(packageId);
-                        config.Behaviors.Remove(packageId);
-                        SaveConfiguration();
-                        refresh();
-                    })
-                }
-            }
+            Background = ResourceBrush("WinstallerCardBrush"),
+            BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(14),
+            Child = content
         };
     }
 
+    private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
+    {
+        return config.Behaviors.TryGetValue(packageId, out var behavior) && !string.IsNullOrWhiteSpace(behavior.DisplayName)
+            ? behavior.DisplayName
+            : GetKnownPackageName(packageId);
+    }
     private FrameworkElement BuildShellFoldersContent(ShellFoldersConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };
@@ -1854,7 +1845,8 @@ public sealed partial class MainWindow : Window
 
         AppendOutput("Scan complete.");
 
-        if (candidates.Count == 0)
+        if (candidates.Count == 0 &&
+            (scope != SystemInfoImportScope.AppInstaller || !SystemInfoImportService.GetRecommendedAppCandidates(_config).Any()))
         {
             var message = GetEmptyImportMessage(scope);
             await ShowMessageAsync("Import", message);
@@ -2192,58 +2184,106 @@ public sealed partial class MainWindow : Window
 
         var selected = new List<SystemInfoImportCandidate>();
         var panel = new StackPanel { Spacing = 12 };
-        CheckBox? recommended = null;
-        if (includeRecommendedApps)
+        var checkBoxes = new List<CheckBox>();
+        var ignoredCandidates = new HashSet<SystemInfoImportCandidate>(candidates.Where(candidate => candidate.Group == "Ignored"));
+        ContentDialog? dialog = null;
+        void UpdateTitle()
         {
-            recommended = new CheckBox
-            {
-                Content = "Import Recommended Apps",
-                IsChecked = false
-            };
-            panel.Children.Add(recommended);
+            if (dialog is not null)
+                dialog.Title = $"Import {checkBoxes.Count(box => box.IsChecked == true && box.Tag is SystemInfoImportCandidate candidate && !ignoredCandidates.Contains(candidate))} system item(s)?";
         }
 
-        foreach (var group in candidates.GroupBy(candidate => candidate.Scope))
+        if (includeRecommendedApps)
         {
-            panel.Children.Add(new TextBlock
+            var recommendedCandidates = SystemInfoImportService.GetRecommendedAppCandidates(_config).ToList();
+            var recommendedSelected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var recommendedToggle = new CheckBox { Content = "Add Recommended Apps", IsThreeState = true, IsChecked = false };
+            Button? chooseRecommended = null;
+            chooseRecommended = ActionButton("Choose Apps", () =>
             {
-                Text = SplitName(group.Key.ToString()),
-                FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+                var choices = new StackPanel { Spacing = 8, Padding = new Thickness(12) };
+                void UpdateRecommendedState()
+                {
+                    var available = recommendedCandidates.Where(candidate => candidate.Group != "Ignored").ToList();
+                    recommendedToggle.IsChecked = recommendedSelected.Count == 0 ? false :
+                        recommendedSelected.Count == available.Count ? true : null;
+                }
+                foreach (var candidate in recommendedCandidates)
+                {
+                    var app = (AppImportCandidate)candidate.Value;
+                    var choice = new CheckBox { Content = candidate.Title, IsChecked = recommendedSelected.Contains(app.PackageId), IsEnabled = candidate.Group != "Ignored" };
+                    choice.Checked += (_, _) => { recommendedSelected.Add(app.PackageId); UpdateRecommendedState(); };
+                    choice.Unchecked += (_, _) => { recommendedSelected.Remove(app.PackageId); UpdateRecommendedState(); };
+                    choices.Children.Add(choice);
+                }
+                var flyout = new Flyout { Content = new ScrollViewer { Content = choices, MaxHeight = 360 } };
+                flyout.ShowAt(chooseRecommended);
             });
+            recommendedToggle.Click += (_, _) =>
+            {
+                var available = recommendedCandidates.Where(candidate => candidate.Group != "Ignored").Cast<SystemInfoImportCandidate>().ToList();
+                if (recommendedToggle.IsChecked == true)
+                    foreach (var candidate in available)
+                        recommendedSelected.Add(((AppImportCandidate)candidate.Value).PackageId);
+                else
+                    recommendedSelected.Clear();
+            };
+            var recommendedRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            recommendedRow.Children.Add(recommendedToggle);
+            recommendedRow.Children.Add(chooseRecommended);
+            panel.Children.Add(recommendedRow);
+            panel.Tag = (recommendedCandidates, recommendedSelected);
+        }
 
+        foreach (var group in candidates.GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.Group) ? SplitName(candidate.Scope.ToString()) : candidate.Group))
+        {
+            panel.Children.Add(new TextBlock { Text = group.Key, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
             foreach (var candidate in group)
             {
-                var checkBox = new CheckBox
+                var isIgnored = ignoredCandidates.Contains(candidate);
+                var row = new Grid { ColumnSpacing = 10 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var checkBox = new CheckBox { IsChecked = !isIgnored, Tag = candidate, VerticalAlignment = VerticalAlignment.Center };
+                checkBox.Checked += (_, _) => UpdateTitle();
+                checkBox.Unchecked += (_, _) => UpdateTitle();
+                checkBoxes.Add(checkBox);
+                row.Children.Add(checkBox);
+                var detail = new StackPanel { Spacing = 2 };
+                detail.Children.Add(new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap });
+                detail.Children.Add(new TextBlock { Text = candidate.Detail, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), FontSize = 12, TextWrapping = TextWrapping.Wrap });
+                Grid.SetColumn(detail, 1);
+                row.Children.Add(detail);
+                if (candidate.Value is AppImportCandidate)
                 {
-                    IsChecked = true,
-                    Tag = candidate,
-                    Content = new StackPanel
+                    Button? ignore = null;
+                    ignore = ActionButton(isIgnored ? "Ignored" : "Ignore", () =>
                     {
-                        Spacing = 2,
-                        Children =
+                        if (ignoredCandidates.Remove(candidate))
                         {
-                            new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
-                            new TextBlock
-                            {
-                                Text = candidate.Detail,
-                                Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
-                                FontSize = 12,
-                                TextWrapping = TextWrapping.Wrap
-                            }
+                            ignore!.Content = "Ignore";
+                            SystemInfoImportService.UnignoreCandidates(_config, [candidate]);
                         }
-                    }
-                };
-                panel.Children.Add(checkBox);
+                        else
+                        {
+                            ignoredCandidates.Add(candidate);
+                            ignore!.Content = "Ignored";
+                            checkBox.IsChecked = false;
+                            SystemInfoImportService.IgnoreCandidates(_config, [candidate]);
+                        }
+                        SaveConfiguration();
+                        UpdateTitle();
+                    });
+                    Grid.SetColumn(ignore, 2);
+                    row.Children.Add(ignore);
+                }
+                panel.Children.Add(new Border { Background = ResourceBrush("WinstallerCardBrush"), CornerRadius = new CornerRadius(8), Padding = new Thickness(12), Child = row });
             }
         }
 
-        var scroll = new ScrollViewer
-        {
-            Content = panel,
-            MaxHeight = 520
-        };
-
-        var dialog = new ContentDialog
+        var scroll = new ScrollViewer { Content = panel, MaxHeight = 520 };
+        dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Import {candidates.Count} system item(s)?",
@@ -2252,24 +2292,17 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary
         };
-
+        UpdateTitle();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             return selected;
 
-        foreach (var checkBox in panel.Children.OfType<CheckBox>())
-        {
-            if (checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate)
-            {
+        foreach (var checkBox in checkBoxes)
+            if (checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate && !ignoredCandidates.Contains(candidate))
                 selected.Add(candidate);
-            }
-        }
-
-        if (recommended?.IsChecked == true)
-            selected.AddRange(SystemInfoImportService.GetRecommendedAppCandidates(_config));
-
+        if (panel.Tag is ValueTuple<List<SystemInfoImportCandidate>, HashSet<string>> recommendations)
+            selected.AddRange(recommendations.Item1.Where(candidate => recommendations.Item2.Contains(((AppImportCandidate)candidate.Value).PackageId)));
         return selected;
     }
-
     private async Task<SymlinkImportSelection> ShowSymlinkImportReviewDialogAsync(IReadOnlyList<SystemInfoImportCandidate> candidates)
     {
         if (!DispatcherQueue.HasThreadAccess)
@@ -2775,33 +2808,47 @@ public sealed partial class MainWindow : Window
         RenderModule(module);
     }
 
-    private async Task ShowAppBehaviorDialogAsync(AppInstallerConfig config, string packageId)
+    private async Task ShowAppBehaviorDialogAsync(AppInstallerConfig config, string? packageId)
     {
-        if (!config.Behaviors.TryGetValue(packageId, out var behavior))
-        {
-            behavior = new AppInstallBehavior();
-            config.Behaviors[packageId] = behavior;
-        }
-
+        var isNew = string.IsNullOrWhiteSpace(packageId);
+        var behavior = !isNew && config.Behaviors.TryGetValue(packageId!, out var existing)
+            ? CloneAppBehavior(existing)
+            : new AppInstallBehavior { DisplayName = isNew ? string.Empty : GetKnownPackageName(packageId!) };
+        var name = new TextBox { Text = behavior.DisplayName, PlaceholderText = "App name" };
+        var id = new TextBox { Text = packageId ?? string.Empty, PlaceholderText = "Winget package ID" };
         var mode = new ComboBox { MinWidth = 180 };
         mode.Items.Add("Default");
         mode.Items.Add("Prepared");
         mode.Items.Add("Manual");
         mode.SelectedItem = string.IsNullOrWhiteSpace(behavior.InstallMode) ? "Default" : behavior.InstallMode;
+        var lockVersion = new ToggleSwitch { Header = "Lock version", IsOn = behavior.LockVersion };
+        var version = new TextBox { Text = behavior.Version, PlaceholderText = "Version" };
+        void UpdateVersionState()
+        {
+            version.IsEnabled = lockVersion.IsOn && string.Equals(mode.SelectedItem?.ToString(), "Default", StringComparison.OrdinalIgnoreCase);
+        }
+        lockVersion.Toggled += (_, _) => UpdateVersionState();
+        mode.SelectionChanged += (_, _) => UpdateVersionState();
+        UpdateVersionState();
 
         var panel = new StackPanel { Spacing = 10 };
-        panel.Children.Add(new TextBlock { Text = packageId, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        panel.Children.Add(new TextBlock { Text = "App name" });
+        panel.Children.Add(name);
+        panel.Children.Add(new TextBlock { Text = "Winget package ID" });
+        panel.Children.Add(id);
         panel.Children.Add(new TextBlock { Text = "Install mode" });
         panel.Children.Add(mode);
+        panel.Children.Add(lockVersion);
+        panel.Children.Add(version);
 
-        if (packageId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
+        if (!isNew && packageId!.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
         {
             panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallVencord))!));
             panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallOpenAsar))!));
             panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.DiscordLocation))!));
             panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.VencordInstallerUrl))!));
         }
-        else if (packageId.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
+        else if (!isNew && packageId!.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
         {
             panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.InstallSpicetify))!));
             panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.BlockUpdates))!));
@@ -2812,19 +2859,76 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
-            Title = "Edit App Behavior",
+            Title = isNew ? "Add App" : "App Settings",
             Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel"
         };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+
+        var newId = id.Text.Trim();
+        if (string.IsNullOrWhiteSpace(newId))
         {
-            behavior.InstallMode = mode.SelectedItem?.ToString() ?? "Default";
-            SaveConfiguration();
-            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            await ShowMessageAsync("App Settings", "Winget package ID is required.");
+            return;
         }
+        if (lockVersion.IsOn && string.IsNullOrWhiteSpace(version.Text))
+        {
+            await ShowMessageAsync("App Settings", "Version is required when version locking is enabled.");
+            return;
+        }
+        if ((isNew || !newId.Equals(packageId, StringComparison.OrdinalIgnoreCase)) &&
+            config.DefaultInstalls.Contains(newId, StringComparer.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync("App Settings", "That package ID is already configured.");
+            return;
+        }
+
+        behavior.DisplayName = string.IsNullOrWhiteSpace(name.Text) ? GetKnownPackageName(newId) : name.Text.Trim();
+        behavior.InstallMode = mode.SelectedItem?.ToString() ?? "Default";
+        behavior.LockVersion = lockVersion.IsOn && behavior.InstallMode.Equals("Default", StringComparison.OrdinalIgnoreCase);
+        behavior.Version = behavior.LockVersion ? version.Text.Trim() : string.Empty;
+        if (isNew)
+            config.DefaultInstalls.Add(newId);
+        else if (!newId.Equals(packageId, StringComparison.OrdinalIgnoreCase))
+        {
+            var index = config.DefaultInstalls.FindIndex(existingId => existingId.Equals(packageId, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+                config.DefaultInstalls[index] = newId;
+            config.Behaviors.Remove(packageId!);
+        }
+        config.Behaviors[newId] = behavior;
+        SaveConfiguration();
+        RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
     }
 
+    private static AppInstallBehavior CloneAppBehavior(AppInstallBehavior source)
+    {
+        return new AppInstallBehavior
+        {
+            DisplayName = source.DisplayName,
+            InstallMode = source.InstallMode,
+            LockVersion = source.LockVersion,
+            Version = source.Version,
+            Discord = new DiscordInstallOptions
+            {
+                InstallDiscord = source.Discord.InstallDiscord,
+                InstallVencord = source.Discord.InstallVencord,
+                InstallOpenAsar = source.Discord.InstallOpenAsar,
+                VencordInstallerUrl = source.Discord.VencordInstallerUrl,
+                DiscordLocation = source.Discord.DiscordLocation
+            },
+            Spotify = new SpotifyInstallOptions
+            {
+                InstallSpotify = source.Spotify.InstallSpotify,
+                InstallSpicetify = source.Spotify.InstallSpicetify,
+                BlockUpdates = source.Spotify.BlockUpdates,
+                SidebarConfig = source.Spotify.SidebarConfig,
+                CustomApps = [.. source.Spotify.CustomApps]
+            }
+        };
+    }
     private async Task ShowIgnoredItemsAsync(ModuleDescriptor module)
     {
         var panel = new StackPanel { Spacing = 12 };

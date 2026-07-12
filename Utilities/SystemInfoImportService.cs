@@ -32,6 +32,7 @@ public enum SymlinkImportMode
 
 public sealed record SystemInfoImportResult(int Added, IReadOnlyList<SymlinkImportFailure> SymlinkFailures);
 public sealed record SymlinkImportFailure(SystemInfoImportCandidate Candidate, string Title, IReadOnlyList<string> FailedPaths, string Message);
+public sealed record AppImportCandidate(string PackageId, string DisplayName, string Version, bool IsRecommended);
 
 public static class SystemInfoImportService
 {
@@ -119,10 +120,16 @@ public static class SystemInfoImportService
                     }
                     break;
 
-                case string packageId when candidate.Scope == SystemInfoImportScope.AppInstaller:
-                    if (!GetConfiguredPackageIds(config).Contains(packageId))
+                case AppImportCandidate app when candidate.Scope == SystemInfoImportScope.AppInstaller:
+                    if (!GetConfiguredPackageIds(config).Contains(app.PackageId))
                     {
-                        config.AppInstaller.DefaultInstalls.Add(packageId);
+                        config.AppInstaller.DefaultInstalls.Add(app.PackageId);
+                        config.AppInstaller.Behaviors[app.PackageId] = new AppInstallBehavior
+                        {
+                            DisplayName = app.DisplayName,
+                            Version = app.Version,
+                            LockVersion = false
+                        };
                         added++;
                     }
                     break;
@@ -209,6 +216,11 @@ public static class SystemInfoImportService
                         config.Fonts.IgnoredFonts.Add(fontName);
                     break;
 
+                case AppImportCandidate app:
+                    if (!config.AppInstaller.IgnoredApps.Contains(app.PackageId, StringComparer.OrdinalIgnoreCase))
+                        config.AppInstaller.IgnoredApps.Add(app.PackageId);
+                    break;
+
                 case SymlinkImport symlink:
                     var ignored = symlink.Section switch
                     {
@@ -229,6 +241,12 @@ public static class SystemInfoImportService
     {
         foreach (var candidate in candidates)
         {
+            if (candidate.Value is AppImportCandidate app)
+            {
+                config.AppInstaller.IgnoredApps.RemoveAll(id => id.Equals(app.PackageId, StringComparison.OrdinalIgnoreCase));
+                continue;
+            }
+
             if (candidate.Value is not SymlinkImport symlink)
                 continue;
 
@@ -368,7 +386,8 @@ public static class SystemInfoImportService
                 SystemInfoImportScope.AppInstaller,
                 package.Name,
                 $"{package.Id} {package.Version}".Trim(),
-                package.Id))
+                new AppImportCandidate(package.Id, package.Name, package.Version, false),
+                config.AppInstaller.IgnoredApps.Contains(package.Id, StringComparer.OrdinalIgnoreCase) ? "Ignored" : string.Empty))
             .ToList();
     }
 
@@ -387,8 +406,8 @@ public static class SystemInfoImportService
                 SystemInfoImportScope.AppInstaller,
                 id,
                 "Recommended app",
-                id,
-                "Recommended"));
+                new AppImportCandidate(id, id, string.Empty, true),
+                config.AppInstaller.IgnoredApps.Contains(id, StringComparer.OrdinalIgnoreCase) ? "Ignored" : "Recommended"));
     }
 
     private static IEnumerable<SystemInfoImportCandidate> FindFontCandidates(WinstallerConfig config)
