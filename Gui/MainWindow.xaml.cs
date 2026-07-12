@@ -1627,7 +1627,26 @@ public sealed partial class MainWindow : Window
             MinHeight = 32,
             Padding = new Thickness(12, 6, 12, 6)
         };
-        button.Click += async (_, _) => await action();
+        button.Click += async (_, _) =>
+        {
+            if (!button.IsEnabled)
+                return;
+
+            button.IsEnabled = false;
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                RunLog.WriteException("UI", $"{text} failed", ex);
+                AppendOutput($"{text} failed: {ex.Message}");
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        };
         return button;
     }
 
@@ -1670,6 +1689,7 @@ public sealed partial class MainWindow : Window
             Padding = new Thickness(10, 5, 10, 5),
             VerticalAlignment = VerticalAlignment.Center
         };
+        button.IsEnabled = !_isRunning;
         ToolTipService.SetToolTip(button, text);
         button.Click += async (_, _) =>
         {
@@ -3020,7 +3040,7 @@ public sealed partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        var completion = new TaskCompletionSource();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(() =>
         {
             try
@@ -3045,7 +3065,7 @@ public sealed partial class MainWindow : Window
         if (DispatcherQueue.HasThreadAccess)
             return action();
 
-        var completion = new TaskCompletionSource<T>();
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
@@ -3069,7 +3089,7 @@ public sealed partial class MainWindow : Window
         if (DispatcherQueue.HasThreadAccess)
             return action();
 
-        var completion = new TaskCompletionSource();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
@@ -3253,6 +3273,7 @@ public sealed partial class MainWindow : Window
         _busyDepth++;
         _isRunning = true;
         _busyBar.Visibility = Visibility.Visible;
+        _navigation.IsEnabled = false;
         SetTopBarActionsEnabled(false);
     }
 
@@ -3266,6 +3287,7 @@ public sealed partial class MainWindow : Window
 
         _isRunning = false;
         _busyBar.Visibility = Visibility.Collapsed;
+        _navigation.IsEnabled = true;
         SetTopBarActionsEnabled(true);
     }
 

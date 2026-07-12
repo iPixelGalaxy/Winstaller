@@ -1,6 +1,7 @@
 using Winstaller.Configuration;
 using Winstaller.Models;
 using Winstaller.Utilities;
+using System.Runtime.InteropServices;
 
 namespace Winstaller.Modules;
 
@@ -61,21 +62,13 @@ public class PathModule : ModuleBase
             {
                 var newPath = string.Join(";", pathList);
 
-                // Use setx for machine-level PATH (requires admin)
-                var setxCmd = $"setx /M PATH \"{newPath}\"";
-                var result = await RunCmdAsync(setxCmd, 30000);
+                Environment.SetEnvironmentVariable("PATH", newPath, EnvironmentVariableTarget.Machine);
+                UpdateCurrentProcessPath(Config.Path.Additions);
+                BroadcastEnvironmentChange();
 
-                if (result == 0)
-                {
-                    ConsoleHelper.WriteSuccess($"Added {added} entries to PATH");
-                    Console.WriteLine($"Already present: {alreadyPresent}");
-                    return true;
-                }
-                else
-                {
-                    ConsoleHelper.WriteError("Failed to update PATH");
-                    return false;
-                }
+                ConsoleHelper.WriteSuccess($"Added {added} entries to PATH");
+                Console.WriteLine($"Already present: {alreadyPresent}");
+                return true;
             }
             else
             {
@@ -185,4 +178,35 @@ public class PathModule : ModuleBase
         Console.WriteLine($"\nPresent: {present}, Missing: {missing}");
         return Task.CompletedTask;
     }
-}
+
+    private static void UpdateCurrentProcessPath(IEnumerable<string> additions)
+    {
+        var currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process) ?? string.Empty;
+        var paths = currentPath.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
+
+        foreach (var addition in additions.Select(ExpandEnvironmentVariables))
+        {
+            if (!paths.Contains(addition, StringComparer.OrdinalIgnoreCase))
+                paths.Add(addition);
+        }
+
+        Environment.SetEnvironmentVariable("PATH", string.Join(";", paths), EnvironmentVariableTarget.Process);
+    }
+
+    private static void BroadcastEnvironmentChange()
+    {
+        const nint HwndBroadcast = 0xffff;
+        const uint WmSettingChange = 0x001a;
+        const uint SmtoAbortIfHung = 0x0002;
+        SendMessageTimeout(HwndBroadcast, WmSettingChange, IntPtr.Zero, "Environment", SmtoAbortIfHung, 5000, out _);
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint SendMessageTimeout(
+        nint hWnd,
+        uint msg,
+        nint wParam,
+        string lParam,
+        uint flags,
+        uint timeout,
+        out nint result);}

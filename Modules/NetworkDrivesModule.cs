@@ -45,7 +45,7 @@ public class NetworkDrivesModule : ModuleBase
             }
 
             // Wait before reconnecting
-            await Task.Delay(Config.NetworkDrives.TimeoutSeconds * 100);
+            await Task.Delay(Math.Max(0, Config.NetworkDrives.TimeoutSeconds) * 1000);
 
             // Create new mapping
             Console.WriteLine($"  Mapping {drive.DriveLetter}: to {drive.NetworkPath}...");

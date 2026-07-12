@@ -368,7 +368,21 @@ public static class ConfigurationManager
     private static void SaveJson<T>(string path, T value)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
-        File.WriteAllText(path, JsonSerializer.Serialize(value, JsonOptions));
+
+        var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(value, JsonOptions));
+            if (File.Exists(path))
+                File.Replace(temporaryPath, path, $"{path}.bak", ignoreMetadataErrors: true);
+            else
+                File.Move(temporaryPath, path);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
     }
 
     private static bool GetEnabled(object config)

@@ -106,21 +106,33 @@ public abstract class ModuleBase : IModule
 
             process.Start();
 
-            if (showOutput)
+            var outputTask = showOutput ? process.StandardOutput.ReadToEndAsync() : Task.FromResult(string.Empty);
+            var errorTask = showOutput ? process.StandardError.ReadToEndAsync() : Task.FromResult(string.Empty);
+
+            try
             {
-                var outputTask = process.StandardOutput.ReadToEndAsync();
-                var errorTask = process.StandardError.ReadToEndAsync();
+                using var cts = new CancellationTokenSource(Math.Max(1, timeoutMs));
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
 
                 await Task.WhenAll(outputTask, errorTask);
-
-                if (!string.IsNullOrWhiteSpace(outputTask.Result))
-                    Console.WriteLine(outputTask.Result);
-                if (!string.IsNullOrWhiteSpace(errorTask.Result))
-                    Console.Error.WriteLine(errorTask.Result);
+                Logger.Error($"Process timed out after {timeoutMs / 1000} seconds");
+                return -1;
             }
 
-            using var cts = new CancellationTokenSource(timeoutMs);
-            await process.WaitForExitAsync(cts.Token);
+            await Task.WhenAll(outputTask, errorTask);
+
+            if (!string.IsNullOrWhiteSpace(outputTask.Result))
+                Console.WriteLine(outputTask.Result);
+            if (!string.IsNullOrWhiteSpace(errorTask.Result))
+                Console.Error.WriteLine(errorTask.Result);
 
             Logger.Debug($"Process exited with code: {process.ExitCode}");
             return process.ExitCode;
