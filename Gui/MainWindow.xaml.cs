@@ -581,26 +581,33 @@ public sealed partial class MainWindow : Window
         var footer = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = 6,
             HorizontalAlignment = HorizontalAlignment.Right,
             Children =
             {
-                ActionButton("Delete", () =>
+                IconActionButton("\uE74D", "Delete app", () =>
                 {
                     config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase));
                     config.Behaviors.Remove(packageId);
                     SaveConfiguration();
                     refresh();
                 }),
-                ActionButton("Settings", async () => await ShowAppBehaviorDialogAsync(config, packageId))
+                IconActionButton("\uE713", "App settings", async () => await ShowAppBehaviorDialogAsync(config, packageId))
             }
         };
+
+        var iconHost = new Grid { Width = 40, Height = 40, HorizontalAlignment = HorizontalAlignment.Left };
+        var fallback = new FontIcon { Glyph = "\uE896", FontSize = 26, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var icon = new Image { Width = 40, Height = 40, Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed };
+        iconHost.Children.Add(fallback);
+        iconHost.Children.Add(icon);
+        _ = LoadAppIconAsync(packageId, icon, fallback);
 
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var header = new StackPanel { Spacing = 8 };
-        header.Children.Add(new FontIcon { Glyph = "\uE896", FontSize = 22, HorizontalAlignment = HorizontalAlignment.Left });
+        header.Children.Add(iconHost);
         header.Children.Add(new TextBlock
         {
             Text = GetAppDisplayName(config, packageId),
@@ -623,6 +630,26 @@ public sealed partial class MainWindow : Window
             Padding = new Thickness(14),
             Child = content
         };
+    }
+
+    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback)
+    {
+        try
+        {
+            var path = await AppIconService.GetIconPathAsync(packageId);
+            if (string.IsNullOrWhiteSpace(path))
+                return;
+            await RunOnUiThreadAsync(() =>
+            {
+                icon.Source = new BitmapImage(new Uri(path));
+                icon.Visibility = Visibility.Visible;
+                fallback.Visibility = Visibility.Collapsed;
+            });
+        }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("AppIcon", $"Failed loading icon for {packageId}", ex);
+        }
     }
 
     private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
@@ -1641,6 +1668,31 @@ public sealed partial class MainWindow : Window
         return button;
     }
 
+    private Button IconActionButton(string glyph, string label, Action action)
+    {
+        var button = ActionButton(label, action);
+        button.Content = new FontIcon { Glyph = glyph, FontSize = 16 };
+        button.Width = 32;
+        button.Height = 32;
+        button.MinWidth = 32;
+        button.Padding = new Thickness(0);
+        ToolTipService.SetToolTip(button, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
+        return button;
+    }
+
+    private Button IconActionButton(string glyph, string label, Func<Task> action)
+    {
+        var button = ActionButton(label, action);
+        button.Content = new FontIcon { Glyph = glyph, FontSize = 16 };
+        button.Width = 32;
+        button.Height = 32;
+        button.MinWidth = 32;
+        button.Padding = new Thickness(0);
+        ToolTipService.SetToolTip(button, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
+        return button;
+    }
     private Button TopBarActionButton(Symbol icon, string text, Action action, bool primary = false)
     {
         return TopBarActionButton(icon, text, () =>
@@ -2841,21 +2893,29 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(lockVersion);
         panel.Children.Add(version);
 
-        if (!isNew && packageId!.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
+        var customOptions = new StackPanel { Spacing = 10 };
+        void RefreshCustomOptions()
         {
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallVencord))!));
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallOpenAsar))!));
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.DiscordLocation))!));
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.VencordInstallerUrl))!));
+            customOptions.Children.Clear();
+            var typedId = id.Text.Trim();
+            if (typedId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
+            {
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallVencord))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallOpenAsar))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.DiscordLocation))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.VencordInstallerUrl))!));
+            }
+            else if (typedId.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
+            {
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.InstallSpicetify))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.BlockUpdates))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.SidebarConfig))!));
+                customOptions.Children.Add(BuildListSection(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.CustomApps))!));
+            }
         }
-        else if (!isNew && packageId!.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
-        {
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.InstallSpicetify))!));
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.BlockUpdates))!));
-            panel.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.SidebarConfig))!));
-            panel.Children.Add(BuildListSection(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.CustomApps))!));
-        }
-
+        id.TextChanged += (_, _) => RefreshCustomOptions();
+        panel.Children.Add(customOptions);
+        RefreshCustomOptions();
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
