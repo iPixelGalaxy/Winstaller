@@ -18,6 +18,7 @@ using Winstaller.Models;
 using Winstaller.Configuration;
 using Winstaller.Modules;
 using Winstaller.Utilities;
+using Windows.Foundation;
 using WinRT.Interop;
 
 namespace Winstaller.Gui;
@@ -597,18 +598,18 @@ public sealed partial class MainWindow : Window
         };
 
         var iconView = CreateAppIconView(packageId, 40);
+        var displayName = GetAppDisplayName(config, packageId);
+        var title = CreateAppTileTitle(displayName);
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.Children.Add(iconView.Host);
+        Grid.SetColumn(title, 1);
+        header.Children.Add(title);
 
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var header = new StackPanel { Spacing = 8 };
-        header.Children.Add(iconView.Host);
-        header.Children.Add(new TextBlock
-        {
-            Text = GetAppDisplayName(config, packageId),
-            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
-            TextWrapping = TextWrapping.Wrap
-        });
         content.Children.Add(header);
         Grid.SetRow(footer, 1);
         content.Children.Add(footer);
@@ -616,7 +617,7 @@ public sealed partial class MainWindow : Window
         return new Border
         {
             Width = 250,
-            MinHeight = 118,
+            Height = 128,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
@@ -625,6 +626,42 @@ public sealed partial class MainWindow : Window
             Padding = new Thickness(14),
             Child = content
         };
+    }
+
+    private static TextBlock CreateAppTileTitle(string name)
+    {
+        const double availableWidth = 174;
+        var title = new TextBlock
+        {
+            Text = name,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+
+        title.FontSize = 14;
+        title.Measure(new Size(availableWidth, double.PositiveInfinity));
+        if (title.DesiredSize.Width <= availableWidth)
+            return title;
+
+        title.FontSize = 12.5;
+        title.Measure(new Size(availableWidth, double.PositiveInfinity));
+        if (title.DesiredSize.Width <= availableWidth * 1.12)
+        {
+            ToolTipService.SetToolTip(title, name);
+            return title;
+        }
+
+        title.FontSize = 14;
+        title.TextWrapping = TextWrapping.Wrap;
+        title.MaxLines = 2;
+        title.MaxHeight = 40;
+        title.Measure(new Size(availableWidth, 40));
+        if (title.DesiredSize.Height > 40)
+            title.FontSize = 12.5;
+        ToolTipService.SetToolTip(title, name);
+        return title;
     }
 
     private AppIconView CreateAppIconView(string packageId, double size)
@@ -647,20 +684,33 @@ public sealed partial class MainWindow : Window
             await RunOnUiThreadAsync(() =>
             {
                 if (isCurrent is not null && !isCurrent()) return;
-                var bitmap = new BitmapImage { UriSource = new Uri(path) };
-                bitmap.ImageOpened += (_, _) =>
+                void ShowIcon()
                 {
                     if (isCurrent is not null && !isCurrent()) return;
                     icon.Visibility = Visibility.Visible;
                     fallback.Visibility = Visibility.Collapsed;
-                };
-                bitmap.ImageFailed += (_, _) =>
+                }
+                void HandleFailure()
                 {
                     if (isCurrent is not null && !isCurrent()) return;
                     AppIconService.Invalidate(packageId, path);
                     RunLog.Write("AppIcon", $"Image decode failed for {packageId}: {path}");
-                };
-                icon.Source = bitmap;
+                }
+
+                if (path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+                {
+                    var source = new SvgImageSource(new Uri(path));
+                    source.Opened += (_, _) => ShowIcon();
+                    source.OpenFailed += (_, _) => HandleFailure();
+                    icon.Source = source;
+                }
+                else
+                {
+                    var bitmap = new BitmapImage { UriSource = new Uri(path) };
+                    bitmap.ImageOpened += (_, _) => ShowIcon();
+                    bitmap.ImageFailed += (_, _) => HandleFailure();
+                    icon.Source = bitmap;
+                }
             });
         }
         catch (Exception ex)
