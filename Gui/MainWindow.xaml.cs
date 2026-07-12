@@ -19,7 +19,6 @@ using Winstaller.Configuration;
 using Winstaller.Modules;
 using Winstaller.Utilities;
 using WinRT.Interop;
-using Windows.Storage;
 
 namespace Winstaller.Gui;
 
@@ -645,17 +644,23 @@ public sealed partial class MainWindow : Window
         {
             var path = await AppIconService.GetIconPathAsync(packageId);
             if (string.IsNullOrWhiteSpace(path) || (isCurrent is not null && !isCurrent())) return;
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var stream = await file.OpenReadAsync();
             await RunOnUiThreadAsync(() =>
             {
                 if (isCurrent is not null && !isCurrent()) return;
-                var bitmap = new BitmapImage();
-                bitmap.SetSource(stream);
-                if (isCurrent is not null && !isCurrent()) return;
+                var bitmap = new BitmapImage { UriSource = new Uri(path) };
+                bitmap.ImageOpened += (_, _) =>
+                {
+                    if (isCurrent is not null && !isCurrent()) return;
+                    icon.Visibility = Visibility.Visible;
+                    fallback.Visibility = Visibility.Collapsed;
+                };
+                bitmap.ImageFailed += (_, _) =>
+                {
+                    if (isCurrent is not null && !isCurrent()) return;
+                    AppIconService.Invalidate(packageId, path);
+                    RunLog.Write("AppIcon", $"Image decode failed for {packageId}: {path}");
+                };
                 icon.Source = bitmap;
-                icon.Visibility = Visibility.Visible;
-                fallback.Visibility = Visibility.Collapsed;
             });
         }
         catch (Exception ex)

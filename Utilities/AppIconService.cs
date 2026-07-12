@@ -23,14 +23,20 @@ internal static partial class AppIconService
             : Requests.GetOrAdd(normalized, FetchAndCacheAsync);
     }
 
+    public static void Invalidate(string packageId, string path)
+    {
+        Requests.TryRemove(packageId.Trim(), out _);
+        try { File.Delete(path); } catch { }
+    }
+
     private static async Task<string?> FetchAndCacheAsync(string packageId)
     {
         var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons-v2");
         Directory.CreateDirectory(directory);
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(packageId))).ToLowerInvariant();
-        var iconPath = Path.Combine(directory, key + ".img");
         var missPath = Path.Combine(directory, key + ".miss");
-        if (File.Exists(iconPath)) return iconPath;
+        var cachedPath = GetCachedIconPath(directory, key);
+        if (cachedPath is not null) return cachedPath;
         if (File.Exists(missPath) && DateTime.UtcNow - File.GetLastWriteTimeUtc(missPath) < TimeSpan.FromHours(24)) return null;
 
         try
@@ -42,6 +48,8 @@ internal static partial class AppIconService
                 {
                     var bytes = await DownloadImageAsync(source);
                     if (bytes is null) continue;
+                    var extension = GetImageExtension(bytes)!;
+                    var iconPath = Path.Combine(directory, key + extension);
                     await File.WriteAllBytesAsync(iconPath, bytes);
                     if (File.Exists(missPath)) File.Delete(missPath);
                     return iconPath;
@@ -142,6 +150,39 @@ internal static partial class AppIconService
         ((bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) ||
          (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) ||
          (bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1 && bytes[3] == 0));
+
+    private static string? GetCachedIconPath(string directory, string key)
+    {
+        foreach (var extension in new[] { ".png", ".jpg", ".ico" })
+        {
+            var path = Path.Combine(directory, key + extension);
+            if (File.Exists(path)) return path;
+        }
+
+        var legacyPath = Path.Combine(directory, key + ".img");
+        if (!File.Exists(legacyPath)) return null;
+        try
+        {
+            var extension = GetImageExtension(File.ReadAllBytes(legacyPath));
+            if (extension is null)
+            {
+                File.Delete(legacyPath);
+                return null;
+            }
+
+            var migratedPath = Path.Combine(directory, key + extension);
+            File.Move(legacyPath, migratedPath, true);
+            return migratedPath;
+        }
+        catch { return null; }
+    }
+
+    private static string? GetImageExtension(byte[] bytes)
+    {
+        if (bytes.Length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return ".png";
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return ".jpg";
+        return bytes.Length >= 4 && bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1 && bytes[3] == 0 ? ".ico" : null;
+    }
 
     private static async Task<(Uri? IconUrl, Uri? Homepage, Uri? PublisherUrl)> GetMetadataAsync(string packageId)
     {
