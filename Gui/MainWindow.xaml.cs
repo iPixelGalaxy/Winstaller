@@ -706,7 +706,7 @@ public sealed partial class MainWindow : Window
                 }
                 else
                 {
-                    var bitmap = new BitmapImage { UriSource = new Uri(path) };
+                    var bitmap = new BitmapImage { UriSource = new Uri(path), DecodePixelWidth = Math.Max(64, (int)Math.Ceiling(icon.Width)) };
                     bitmap.ImageOpened += (_, _) => ShowIcon();
                     bitmap.ImageFailed += (_, _) => HandleFailure();
                     icon.Source = bitmap;

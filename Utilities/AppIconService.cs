@@ -11,11 +11,14 @@ internal static partial class AppIconService
 {
     private const int MaxIconBytes = 2 * 1024 * 1024;
     private const int MaxHtmlBytes = 512 * 1024;
+    private const int MinimumIconPixels = 64;
+    private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static readonly ConcurrentDictionary<string, Task<string?>> Requests = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly SemaphoreSlim NetworkGate = new(3, 3);
+    private static readonly SemaphoreSlim MetadataGate = new(4, 4);
+    private static readonly SemaphoreSlim HttpGate = new(8, 8);
 
     private sealed record IconCandidate(Uri Uri, int Priority, string Source);
     private sealed record IconAsset(byte[] Bytes, string Extension, int Width, int Height, IconCandidate Candidate);
@@ -39,7 +42,7 @@ internal static partial class AppIconService
         var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
         Directory.CreateDirectory(directory);
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(packageId))).ToLowerInvariant();
-        var missPath = Path.Combine(directory, key + ".miss");
+        var missPath = Path.Combine(directory, key + ".miss-v2");
         var cachedPath = GetCachedIconPath(directory, key);
         if (cachedPath is not null) return cachedPath;
         if (TryMigrateV2Icon(directory, key, out var migratedPath)) return migratedPath;
@@ -47,33 +50,29 @@ internal static partial class AppIconService
 
         try
         {
-            await NetworkGate.WaitAsync();
-            try
+            var candidates = await GetCandidateUrlsAsync(packageId);
+            var assets = await Task.WhenAll(candidates.Select(DownloadIconAsync));
+            IconAsset? selected = null;
+            foreach (var asset in assets)
             {
-                IconAsset? selected = null;
-                foreach (var candidate in await GetCandidateUrlsAsync(packageId))
+                if (asset is null) continue;
+                if (!IsUsableIcon(asset))
                 {
-                    var asset = await DownloadIconAsync(candidate);
-                    if (asset is null) continue;
-                    if (!IsUsableIcon(asset))
-                    {
-                        RunLog.Write("AppIcon", $"Rejected {packageId} {candidate.Source}: {asset.Width}x{asset.Height}");
-                        continue;
-                    }
-
-                    if (selected is null || IsBetter(asset, selected)) selected = asset;
+                    RunLog.Write("AppIcon", $"Rejected {packageId} {asset.Candidate.Source}: {asset.Width}x{asset.Height}");
+                    continue;
                 }
 
-                if (selected is not null)
-                {
-                    var iconPath = Path.Combine(directory, key + selected.Extension);
-                    await File.WriteAllBytesAsync(iconPath, selected.Bytes);
-                    if (File.Exists(missPath)) File.Delete(missPath);
-                    RunLog.Write("AppIcon", $"Selected {packageId} {selected.Candidate.Source}: {selected.Width}x{selected.Height}");
-                    return iconPath;
-                }
+                if (selected is null || IsBetter(asset, selected)) selected = asset;
             }
-            finally { NetworkGate.Release(); }
+
+            if (selected is not null)
+            {
+                var iconPath = Path.Combine(directory, key + selected.Extension);
+                await File.WriteAllBytesAsync(iconPath, selected.Bytes);
+                if (File.Exists(missPath)) File.Delete(missPath);
+                RunLog.Write("AppIcon", $"Selected {packageId} {selected.Candidate.Source}: {selected.Width}x{selected.Height}");
+                return iconPath;
+            }
         }
         catch (Exception ex)
         {
@@ -87,16 +86,23 @@ internal static partial class AppIconService
 
     private static bool IsBetter(IconAsset candidate, IconAsset current)
     {
-        if (candidate.Candidate.Priority != current.Candidate.Priority)
-            return candidate.Candidate.Priority < current.Candidate.Priority;
-        return candidate.Width * candidate.Height > current.Width * current.Height;
+        var candidatePreferred = IsPreferredQuality(candidate);
+        var currentPreferred = IsPreferredQuality(current);
+        if (candidatePreferred != currentPreferred) return candidatePreferred;
+        var candidateArea = candidate.Width * candidate.Height;
+        var currentArea = current.Width * current.Height;
+        if (candidateArea != currentArea) return candidateArea > currentArea;
+        return candidate.Candidate.Priority < current.Candidate.Priority;
     }
+
+    private static bool IsPreferredQuality(IconAsset asset) =>
+        asset.Extension == ".svg" || (asset.Width >= PreferredIconPixels && asset.Height >= PreferredIconPixels);
 
     private static bool IsUsableIcon(IconAsset asset)
     {
         if (asset.Extension == ".svg")
             return asset.Width == 0 || asset.Height == 0 || IsSquare(asset.Width, asset.Height);
-        return asset.Width >= 16 && asset.Height >= 16 && IsSquare(asset.Width, asset.Height);
+        return asset.Width >= MinimumIconPixels && asset.Height >= MinimumIconPixels && IsSquare(asset.Width, asset.Height);
     }
 
     private static bool IsSquare(int width, int height)
@@ -111,13 +117,17 @@ internal static partial class AppIconService
         var metadata = await GetMetadataAsync(packageId);
         var candidates = new List<IconCandidate>();
         AddCandidate(candidates, metadata.IconUrl, 0, "winget icon");
-        if (RecommendedAppCatalog.IsMicrosoftStorePackage(packageId))
-            candidates.AddRange(await DiscoverIconCandidatesAsync(new Uri($"https://apps.microsoft.com/detail/{packageId}"), "Microsoft Store"));
-        foreach (var page in new[] { metadata.Homepage, metadata.PublisherUrl })
+        var pages = new List<(Uri? Page, string Source)>
         {
-            candidates.AddRange(await DiscoverIconCandidatesAsync(page, page?.Host ?? "site"));
+            (metadata.Homepage, metadata.Homepage?.Host ?? "site"),
+            (metadata.PublisherUrl, metadata.PublisherUrl?.Host ?? "site")
+        };
+        if (RecommendedAppCatalog.IsMicrosoftStorePackage(packageId))
+            pages.Add((new Uri($"https://apps.microsoft.com/detail/{packageId}"), "Microsoft Store"));
+        var discoveries = await Task.WhenAll(pages.Select(page => DiscoverIconCandidatesAsync(page.Page, page.Source)));
+        foreach (var (page, source) in pages)
             AddCandidate(candidates, GetFaviconUrl(page), 5, "site favicon");
-        }
+        candidates.AddRange(discoveries.SelectMany(discovery => discovery));
 
         return candidates
             .GroupBy(candidate => candidate.Uri.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
@@ -138,21 +148,50 @@ internal static partial class AppIconService
         if (html is null) return [];
 
         var candidates = new List<IconCandidate>();
+        var manifests = new List<Uri>();
         foreach (Match tag in HtmlTagRegex().Matches(html))
         {
             var value = tag.Value;
-            var href = ReadAttribute(value, "href") ?? ReadAttribute(value, "content");
-            if (string.IsNullOrWhiteSpace(href) || !Uri.TryCreate(page, href, out var uri) || uri.Scheme != Uri.UriSchemeHttps) continue;
             var rel = ReadAttribute(value, "rel");
             var property = ReadAttribute(value, "property");
+            var href = ReadAttribute(value, "href") ?? ReadAttribute(value, "content");
+            if (rel?.Contains("manifest", StringComparison.OrdinalIgnoreCase) == true && Uri.TryCreate(page, href, out var manifest) && manifest.Scheme == Uri.UriSchemeHttps)
+            {
+                manifests.Add(manifest);
+                continue;
+            }
+            var sourceUri = href;
+            if (value.StartsWith("<img", StringComparison.OrdinalIgnoreCase))
+            {
+                var descriptor = $"{ReadAttribute(value, "alt")} {ReadAttribute(value, "class")} {ReadAttribute(value, "id")} {ReadAttribute(value, "src")}";
+                if (descriptor.Contains("icon", StringComparison.OrdinalIgnoreCase) || descriptor.Contains("logo", StringComparison.OrdinalIgnoreCase)) sourceUri = ReadAttribute(value, "src");
+                else continue;
+            }
+            if (string.IsNullOrWhiteSpace(sourceUri) || !Uri.TryCreate(page, sourceUri, out var uri) || uri.Scheme != Uri.UriSchemeHttps) continue;
             if (rel?.Contains("icon", StringComparison.OrdinalIgnoreCase) == true)
                 AddCandidate(candidates, uri, rel.Contains("apple", StringComparison.OrdinalIgnoreCase) ? 3 : 2, $"{source} {rel}");
+            else if (value.StartsWith("<img", StringComparison.OrdinalIgnoreCase))
+                AddCandidate(candidates, uri, 3, $"{source} logo image");
             else if (string.Equals(property, "og:image", StringComparison.OrdinalIgnoreCase))
                 AddCandidate(candidates, uri, 4, $"{source} Open Graph");
         }
+        var manifestCandidates = await Task.WhenAll(manifests.Distinct().Select(manifest => DiscoverManifestCandidatesAsync(manifest, source)));
+        candidates.AddRange(manifestCandidates.SelectMany(result => result));
         return candidates;
     }
 
+    private static async Task<IEnumerable<IconCandidate>> DiscoverManifestCandidatesAsync(Uri manifest, string source)
+    {
+        var text = await DownloadTextAsync(manifest);
+        if (text is null) return [];
+        var candidates = new List<IconCandidate>();
+        foreach (Match match in ManifestSourceRegex().Matches(text))
+        {
+            if (Uri.TryCreate(manifest, match.Groups["value"].Value, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                AddCandidate(candidates, uri, 2, $"{source} web manifest");
+        }
+        return candidates;
+    }
     private static string? ReadAttribute(string tag, string name)
     {
         var match = Regex.Match(tag, $"\\b{name}\\s*=\\s*['\"](?<value>[^'\"]+)['\"]", RegexOptions.IgnoreCase);
@@ -161,41 +200,50 @@ internal static partial class AppIconService
 
     private static async Task<string?> DownloadTextAsync(Uri uri)
     {
-        using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
-        if (!response.IsSuccessStatusCode || response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps || response.Content.Headers.ContentLength is > MaxHtmlBytes) return null;
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        using var reader = new StreamReader(stream, Encoding.UTF8, true, 81920, false);
-        var buffer = new char[81920];
-        var builder = new StringBuilder();
-        while (builder.Length < MaxHtmlBytes)
+        await HttpGate.WaitAsync();
+        try
         {
-            var read = await reader.ReadAsync(buffer);
-            if (read == 0) break;
-            builder.Append(buffer, 0, read);
+            using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
+            if (!response.IsSuccessStatusCode || response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps || response.Content.Headers.ContentLength is > MaxHtmlBytes) return null;
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var reader = new StreamReader(stream, Encoding.UTF8, true, 81920, false);
+            var buffer = new char[81920];
+            var builder = new StringBuilder();
+            while (builder.Length < MaxHtmlBytes)
+            {
+                var read = await reader.ReadAsync(buffer);
+                if (read == 0) break;
+                builder.Append(buffer, 0, read);
+            }
+            return builder.ToString();
         }
-        return builder.ToString();
+        catch { return null; }
+        finally { HttpGate.Release(); }
     }
-
     private static async Task<IconAsset?> DownloadIconAsync(IconCandidate candidate)
     {
-        using var response = await HttpClient.GetAsync(candidate.Uri, HttpCompletionOption.ResponseHeadersRead);
-        if (!response.IsSuccessStatusCode || response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps || response.Content.Headers.ContentLength is > MaxIconBytes) return null;
-        await using var input = await response.Content.ReadAsStreamAsync();
-        await using var output = new MemoryStream();
-        var buffer = new byte[81920];
-        while (true)
+        await HttpGate.WaitAsync();
+        try
         {
-            var read = await input.ReadAsync(buffer);
-            if (read == 0) break;
-            if (output.Length + read > MaxIconBytes) return null;
-            await output.WriteAsync(buffer.AsMemory(0, read));
+            using var response = await HttpClient.GetAsync(candidate.Uri, HttpCompletionOption.ResponseHeadersRead);
+            if (!response.IsSuccessStatusCode || response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps || response.Content.Headers.ContentLength is > MaxIconBytes) return null;
+            await using var input = await response.Content.ReadAsStreamAsync();
+            await using var output = new MemoryStream();
+            var buffer = new byte[81920];
+            while (true)
+            {
+                var read = await input.ReadAsync(buffer);
+                if (read == 0) break;
+                if (output.Length + read > MaxIconBytes) return null;
+                await output.WriteAsync(buffer.AsMemory(0, read));
+            }
+            var bytes = output.ToArray();
+            if (!TryGetImageInfo(bytes, out var extension, out var width, out var height)) return null;
+            return new IconAsset(bytes, extension, width, height, candidate);
         }
-
-        var bytes = output.ToArray();
-        if (!TryGetImageInfo(bytes, out var extension, out var width, out var height)) return null;
-        return new IconAsset(bytes, extension, width, height, candidate);
+        catch { return null; }
+        finally { HttpGate.Release(); }
     }
-
     private static bool TryGetImageInfo(byte[] bytes, out string extension, out int width, out int height)
     {
         extension = string.Empty;
@@ -257,7 +305,15 @@ internal static partial class AppIconService
         foreach (var extension in new[] { ".png", ".jpg", ".ico", ".svg" })
         {
             var path = Path.Combine(directory, key + extension);
-            if (File.Exists(path)) return path;
+            if (!File.Exists(path)) continue;
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                if (TryGetImageInfo(bytes, out var detectedExtension, out var width, out var height) &&
+                    IsUsableIcon(new IconAsset(bytes, detectedExtension, width, height, new IconCandidate(new Uri("https://localhost"), 0, "cache")))) return path;
+                File.Delete(path);
+            }
+            catch { }
         }
         return null;
     }
@@ -285,40 +341,47 @@ internal static partial class AppIconService
 
     private static async Task<(Uri? IconUrl, Uri? Homepage, Uri? PublisherUrl)> GetMetadataAsync(string packageId)
     {
-        using var process = Process.Start(new ProcessStartInfo
+        await MetadataGate.WaitAsync();
+        try
         {
-            FileName = "winget",
-            Arguments = $"show --id \"{packageId}\" --exact --source {(RecommendedAppCatalog.IsMicrosoftStorePackage(packageId) ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity --no-progress",
-            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
-        });
-        if (process is null) return default;
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); return default; }
-        await Task.WhenAll(output, error);
-        if (process.ExitCode != 0) return default;
-        Uri? icon = null; Uri? homepage = null; Uri? publisher = null;
-        foreach (var line in output.Result.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = line.IndexOf(':');
-            if (separator <= 0) continue;
-            var key = line[..separator].Trim(); var value = line[(separator + 1)..].Trim();
-            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) continue;
-            if (key.Equals("Icon", StringComparison.OrdinalIgnoreCase)) icon ??= uri;
-            else if (key.Equals("Homepage", StringComparison.OrdinalIgnoreCase)) homepage ??= uri;
-            else if (key.Equals("Publisher Url", StringComparison.OrdinalIgnoreCase)) publisher ??= uri;
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "winget",
+                Arguments = $"show --id \"{packageId}\" --exact --source {(RecommendedAppCatalog.IsMicrosoftStorePackage(packageId) ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity --no-progress",
+                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+            });
+            if (process is null) return default;
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); return default; }
+            await Task.WhenAll(output, error);
+            if (process.ExitCode != 0) return default;
+            Uri? icon = null; Uri? homepage = null; Uri? publisher = null;
+            foreach (var line in output.Result.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var separator = line.IndexOf(':');
+                if (separator <= 0) continue;
+                var key = line[..separator].Trim(); var value = line[(separator + 1)..].Trim();
+                if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) continue;
+                if (key.Equals("Icon", StringComparison.OrdinalIgnoreCase)) icon ??= uri;
+                else if (key.Equals("Homepage", StringComparison.OrdinalIgnoreCase)) homepage ??= uri;
+                else if (key.Equals("Publisher Url", StringComparison.OrdinalIgnoreCase)) publisher ??= uri;
+            }
+            return (icon, homepage, publisher);
         }
-        return (icon, homepage, publisher);
+        catch { return default; }
+        finally { MetadataGate.Release(); }
     }
-
     private static Uri? GetFaviconUrl(Uri? site) => site?.Scheme == Uri.UriSchemeHttps
         ? new UriBuilder(site) { Path = "/favicon.ico", Query = string.Empty, Fragment = string.Empty }.Uri : null;
 
-    [GeneratedRegex("<(?:link|meta)\\b[^>]*>", RegexOptions.IgnoreCase)]
+    [GeneratedRegex("<(?:link|meta|img)\\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex HtmlTagRegex();
 
+    [GeneratedRegex("[\"']src[\"']\\s*:\\s*[\"'](?<value>[^\"']+)[\"']", RegexOptions.IgnoreCase)]
+    private static partial Regex ManifestSourceRegex();
     [GeneratedRegex("viewBox\\s*=\\s*['\"][^'\"]*?\\s+(?<width>[0-9.]+)\\s+(?<height>[0-9.]+)['\"]", RegexOptions.IgnoreCase)]
     private static partial Regex SvgViewBoxRegex();
 }
