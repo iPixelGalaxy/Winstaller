@@ -645,13 +645,13 @@ public sealed partial class MainWindow : Window
         {
             var path = await AppIconService.GetIconPathAsync(packageId);
             if (string.IsNullOrWhiteSpace(path) || (isCurrent is not null && !isCurrent())) return;
-            await RunOnUiThreadAsync(async () =>
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var stream = await file.OpenReadAsync();
+            await RunOnUiThreadAsync(() =>
             {
                 if (isCurrent is not null && !isCurrent()) return;
-                var file = await StorageFile.GetFileFromPathAsync(path);
-                using var stream = await file.OpenReadAsync();
                 var bitmap = new BitmapImage();
-                await bitmap.SetSourceAsync(stream);
+                bitmap.SetSource(stream);
                 if (isCurrent is not null && !isCurrent()) return;
                 icon.Source = bitmap;
                 icon.Visibility = Visibility.Visible;
@@ -1947,6 +1947,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        RunLog.Write("Import", $"Review selected {selected.Count} {SplitName(scope.ToString())} item(s).");
+
         if (scope == SystemInfoImportScope.NetworkDrives)
         {
             await FillNetworkDriveCredentialsAsync(selected);
@@ -1963,6 +1965,12 @@ public sealed partial class MainWindow : Window
         IReadOnlyList<SystemInfoImportCandidate> ignored,
         SymlinkImportMode symlinkMode)
     {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            await RunOnUiThreadAsync(() => ImportSelectedSystemInfoAsync(scope, module, candidates, selected, ignored, symlinkMode));
+            return;
+        }
+
         var logDialogWidth = GetLogDialogWidth();
         var outputBox = CreateLogOutputBox(logDialogWidth);
 
@@ -2076,6 +2084,8 @@ public sealed partial class MainWindow : Window
 
             Log($"Imported {result.Added} item(s).");
             Log($"Skipped or failed {Math.Max(0, selected.Count - result.Added)} selected item(s).");
+            if (selected.Count > 0 && result.Added == 0)
+                Log("No selected items were added; they are already configured or were skipped.");
             if (result.SymlinkFailures.Count > 0)
             {
                 Log("Failed symlink folders:");
