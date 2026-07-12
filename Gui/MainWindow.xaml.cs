@@ -597,8 +597,8 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var iconView = CreateAppIconView(packageId, 40);
         var displayName = GetAppDisplayName(config, packageId);
+        var iconView = CreateAppIconView(packageId, 40, displayName);
         var title = CreateAppTileTitle(displayName);
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -664,22 +664,22 @@ public sealed partial class MainWindow : Window
         return title;
     }
 
-    private AppIconView CreateAppIconView(string packageId, double size)
+    private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null)
     {
         var host = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left };
         var fallback = new FontIcon { Glyph = "\uE896", FontSize = size * 0.65, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var image = new Image { Width = size, Height = size, Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed };
         host.Children.Add(fallback);
         host.Children.Add(image);
-        _ = LoadAppIconAsync(packageId, image, fallback);
+        _ = LoadAppIconAsync(packageId, image, fallback, displayName: displayName);
         return new AppIconView(host, image, fallback);
     }
 
-    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback, Func<bool>? isCurrent = null)
+    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback, Func<bool>? isCurrent = null, string? displayName = null)
     {
         try
         {
-            var path = await AppIconService.GetIconPathAsync(packageId);
+            var path = await AppIconService.GetIconPathAsync(packageId, displayName);
             if (string.IsNullOrWhiteSpace(path) || (isCurrent is not null && !isCurrent())) return;
             await RunOnUiThreadAsync(() =>
             {
@@ -720,9 +720,10 @@ public sealed partial class MainWindow : Window
     }
     private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
     {
-        return config.Behaviors.TryGetValue(packageId, out var behavior) && !string.IsNullOrWhiteSpace(behavior.DisplayName)
+        var displayName = config.Behaviors.TryGetValue(packageId, out var behavior) && !string.IsNullOrWhiteSpace(behavior.DisplayName)
             ? behavior.DisplayName
             : GetKnownPackageName(packageId);
+        return RecommendedAppCatalog.NormalizeExistingDisplayName(packageId, displayName);
     }
     private FrameworkElement BuildShellFoldersContent(ShellFoldersConfig config)
     {
@@ -2339,7 +2340,7 @@ public sealed partial class MainWindow : Window
                 foreach (var candidate in recommendedCandidates)
                 {
                     var app = (AppImportCandidate)candidate.Value;
-                    var iconView = CreateAppIconView(app.PackageId, 32);
+                    var iconView = CreateAppIconView(app.PackageId, 32, app.DisplayName);
                     var choiceContent = new Grid { ColumnSpacing = 8 };
                     choiceContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     choiceContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2396,7 +2397,7 @@ public sealed partial class MainWindow : Window
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 if (candidate.Value is AppImportCandidate appCandidate)
-                    row.Children.Add(CreateAppIconView(appCandidate.PackageId, 32).Host);
+                    row.Children.Add(CreateAppIconView(appCandidate.PackageId, 32, appCandidate.DisplayName).Host);
                 var checkBox = new CheckBox { IsChecked = !isIgnored, Tag = candidate, VerticalAlignment = VerticalAlignment.Center };
                 checkBox.Checked += (_, _) => UpdateTitle();
                 checkBox.Unchecked += (_, _) => UpdateTitle();
@@ -2967,7 +2968,7 @@ public sealed partial class MainWindow : Window
         var behavior = !isNew && config.Behaviors.TryGetValue(packageId!, out var existing)
             ? CloneAppBehavior(existing)
             : new AppInstallBehavior { DisplayName = isNew ? string.Empty : GetKnownPackageName(packageId!) };
-        var name = new TextBox { Text = behavior.DisplayName, PlaceholderText = "App name" };
+        var name = new TextBox { Text = isNew ? behavior.DisplayName : GetAppDisplayName(config, packageId!), PlaceholderText = "App name" };
         var id = new TextBox { Text = packageId ?? string.Empty, PlaceholderText = "Winget package ID" };
         var iconPreview = CreateAppIconView(id.Text, 64);
         var iconGeneration = 0;
@@ -2980,9 +2981,10 @@ public sealed partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(typedId)) return;
             await Task.Delay(600);
             if (generation != iconGeneration) return;
-            await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, () => generation == iconGeneration);
+            await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, () => generation == iconGeneration, name.Text);
         }
         id.TextChanged += async (_, _) => await RefreshIconPreviewAsync();
+        name.TextChanged += async (_, _) => await RefreshIconPreviewAsync();
         var mode = new ComboBox { MinWidth = 180 };
         mode.Items.Add("Default");
         mode.Items.Add("Prepared");
@@ -3885,6 +3887,8 @@ public sealed partial class MainWindow : Window
 
     private static string GetKnownPackageName(string packageId)
     {
+        var knownName = RecommendedAppCatalog.GetKnownDisplayName(packageId);
+        if (!string.IsNullOrWhiteSpace(knownName)) return knownName;
         return packageId.ToLowerInvariant() switch
         {
             "discord.discord" => "Discord",

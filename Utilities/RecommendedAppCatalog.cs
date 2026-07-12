@@ -29,11 +29,11 @@ internal static class RecommendedAppCatalog
         new("JanDeDobbeleer.OhMyPosh", "Oh My Posh", "Shell prompt theme engine"),
         new("File-New-Project.EarTrumpet", "EarTrumpet", "Per-app volume control"),
         new("voidtools.Everything.Alpha", "Everything Alpha", "Fast file search"),
-        new("Microsoft.DotNet.DesktopRuntime.6", ".NET Desktop Runtime 6", "Windows desktop runtime"),
-        new("Microsoft.DotNet.DesktopRuntime.7", ".NET Desktop Runtime 7", "Windows desktop runtime"),
-        new("Microsoft.DotNet.DesktopRuntime.8", ".NET Desktop Runtime 8", "Windows desktop runtime"),
-        new("Microsoft.DotNet.DesktopRuntime.9", ".NET Desktop Runtime 9", "Windows desktop runtime"),
-        new("Microsoft.DotNet.DesktopRuntime.10", ".NET Desktop Runtime 10", "Windows desktop runtime"),
+        new("Microsoft.DotNet.DesktopRuntime.6", "Runtime 6", "Windows desktop runtime"),
+        new("Microsoft.DotNet.DesktopRuntime.7", "Runtime 7", "Windows desktop runtime"),
+        new("Microsoft.DotNet.DesktopRuntime.8", "Runtime 8", "Windows desktop runtime"),
+        new("Microsoft.DotNet.DesktopRuntime.9", "Runtime 9", "Windows desktop runtime"),
+        new("Microsoft.DotNet.DesktopRuntime.10", "Runtime 10", "Windows desktop runtime"),
         new("Microsoft.VCRedist.2005.x86", "Visual C++ 2005 x86", "Microsoft runtime"),
         new("Microsoft.VCRedist.2005.x64", "Visual C++ 2005 x64", "Microsoft runtime"),
         new("Microsoft.VCRedist.2008.x86", "Visual C++ 2008 x86", "Microsoft runtime"),
@@ -64,4 +64,35 @@ internal static class RecommendedAppCatalog
 
     public static bool IsMicrosoftStorePackage(string packageId) =>
         Apps.FirstOrDefault(app => app.PackageId.Equals(packageId, StringComparison.OrdinalIgnoreCase))?.IsStore == true;
+
+    public static string GetImportDisplayName(string packageId, string detectedName) =>
+        TryGetRuntimeDisplayName(packageId, out var runtimeName) ? runtimeName : detectedName;
+
+    public static string NormalizeExistingDisplayName(string packageId, string displayName)
+    {
+        if (!TryGetRuntimeDisplayName(packageId, out var runtimeName)) return displayName;
+        var normalized = displayName.Trim();
+        return normalized.Equals(packageId, StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("desktop runtime", StringComparison.OrdinalIgnoreCase)
+            ? runtimeName
+            : displayName;
+    }
+
+    public static string? GetKnownDisplayName(string packageId)
+    {
+        if (TryGetRuntimeDisplayName(packageId, out var runtimeName)) return runtimeName;
+        return Apps.FirstOrDefault(app => app.PackageId.Equals(packageId, StringComparison.OrdinalIgnoreCase))?.Name;
+    }
+
+    private static bool TryGetRuntimeDisplayName(string packageId, out string displayName)
+    {
+        const string prefix = "Microsoft.DotNet.DesktopRuntime.";
+        if (packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && int.TryParse(packageId[prefix.Length..], out var major))
+        {
+            displayName = $"Runtime {major}";
+            return true;
+        }
+        displayName = string.Empty;
+        return false;
+    }
 }

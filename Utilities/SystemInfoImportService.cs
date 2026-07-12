@@ -382,12 +382,16 @@ public static class SystemInfoImportService
             .Where(package => IsInstallableWingetId(package.Id))
             .Where(package => !configured.Contains(package.Id))
             .OrderBy(package => package.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(package => new SystemInfoImportCandidate(
-                SystemInfoImportScope.AppInstaller,
-                package.Name,
-                $"{package.Id} {package.Version}".Trim(),
-                new AppImportCandidate(package.Id, package.Name, package.Version, false),
-                config.AppInstaller.IgnoredApps.Contains(package.Id, StringComparer.OrdinalIgnoreCase) ? "Ignored" : string.Empty))
+            .Select(package =>
+            {
+                var displayName = RecommendedAppCatalog.GetImportDisplayName(package.Id, package.Name);
+                return new SystemInfoImportCandidate(
+                    SystemInfoImportScope.AppInstaller,
+                    displayName,
+                    $"{package.Id} {package.Version}".Trim(),
+                    new AppImportCandidate(package.Id, displayName, package.Version, false),
+                    config.AppInstaller.IgnoredApps.Contains(package.Id, StringComparer.OrdinalIgnoreCase) ? "Ignored" : string.Empty);
+            })
             .ToList();
     }
 

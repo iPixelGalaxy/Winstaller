@@ -15,22 +15,23 @@ internal static partial class AppIconService
     private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
-    private const string SelfhstIndexFileName = "selfhst-index.json";
+    private const string IconCacheVersionFileName = ".icon-resolver-v4";
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static readonly ConcurrentDictionary<string, Task<string?>> Requests = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim MetadataGate = new(4, 4);
     private static readonly SemaphoreSlim HttpGate = new(8, 8);
-    private static int selfhstCacheChecked;
+    private static readonly SemaphoreSlim StoreSearchGate = new(2, 2);
+    private static int iconCacheVersionChecked;
 
     private sealed record IconCandidate(Uri Uri, int Priority, string Source);
     private sealed record IconAsset(byte[] Bytes, string Extension, int Width, int Height, IconCandidate Candidate);
 
-    public static Task<string?> GetIconPathAsync(string packageId)
+    public static Task<string?> GetIconPathAsync(string packageId, string? displayName = null)
     {
         var normalized = packageId.Trim();
         return string.IsNullOrWhiteSpace(normalized) || BootstrapManager.DataRoot is null
             ? Task.FromResult<string?>(null)
-            : Requests.GetOrAdd(normalized, FetchAndCacheAsync);
+            : Requests.GetOrAdd(normalized, _ => FetchAndCacheAsync(normalized, displayName));
     }
 
     public static void Invalidate(string packageId, string path)
@@ -39,23 +40,23 @@ internal static partial class AppIconService
         try { File.Delete(path); } catch { }
     }
 
-    private static async Task<string?> FetchAndCacheAsync(string packageId)
+    private static async Task<string?> FetchAndCacheAsync(string packageId, string? displayName)
     {
         var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
         Directory.CreateDirectory(directory);
-        ClearSelfhstCache(directory);
+        EnsureCurrentIconCache(directory);
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(packageId))).ToLowerInvariant();
         var missPath = Path.Combine(directory, key + ".miss-v2");
         var cachedPath = GetCachedIconPath(directory, key);
         if (cachedPath is not null) return cachedPath;
-        if (TryMigrateV2Icon(directory, key, out var migratedPath)) return migratedPath;
         if (File.Exists(missPath) && DateTime.UtcNow - File.GetLastWriteTimeUtc(missPath) < TimeSpan.FromHours(1)) return null;
 
         try
         {
-            var selected = IsMicrosoftStorePackage(packageId)
-                ? await SelectBestIconAsync(packageId, await GetMicrosoftStoreCandidateUrlsAsync(packageId))
-                : null;
+            var storePackageId = await ResolveMicrosoftStorePackageIdAsync(packageId, displayName);
+            var selected = storePackageId is null
+                ? null
+                : await SelectBestIconAsync(packageId, await GetMicrosoftStoreCandidateUrlsAsync(storePackageId));
             selected ??= await SelectBestIconAsync(packageId, await GetCandidateUrlsAsync(packageId));
 
             if (selected is not null)
@@ -97,30 +98,84 @@ internal static partial class AppIconService
     private static bool IsMicrosoftStorePackage(string packageId) =>
         RecommendedAppCatalog.IsMicrosoftStorePackage(packageId) || StoreProductIdRegex().IsMatch(packageId);
 
-    private static async Task<List<IconCandidate>> GetMicrosoftStoreCandidateUrlsAsync(string packageId)
+    private static async Task<string?> ResolveMicrosoftStorePackageIdAsync(string packageId, string? displayName)
     {
-        var storePage = new Uri($"https://apps.microsoft.com/detail/{packageId}");
+        if (IsMicrosoftStorePackage(packageId)) return packageId;
+        if (string.IsNullOrWhiteSpace(displayName)) return null;
+
+        await StoreSearchGate.WaitAsync();
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "winget",
+                Arguments = $"search --name \"{EscapeWingetArgument(displayName)}\" --source msstore --count 10 --accept-source-agreements --disable-interactivity",
+                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+            });
+            if (process is null) return null;
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); return null; }
+            await Task.WhenAll(output, error);
+            if (process.ExitCode != 0) return null;
+
+            var matches = StoreSearchResultRegex().Matches(output.Result)
+                .Select(match => (Name: match.Groups["name"].Value.Trim(), Id: match.Groups["id"].Value))
+                .Where(result => IsStoreSearchMatch(result.Name, displayName, packageId))
+                .Select(result => result.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (matches.Count != 1) return null;
+            RunLog.Write("AppIcon", $"Store match {packageId}: {matches[0]}");
+            return matches[0];
+        }
+        catch { return null; }
+        finally { StoreSearchGate.Release(); }
+    }
+
+    private static bool IsStoreSearchMatch(string storeName, string displayName, string packageId)
+    {
+        var candidate = NormalizeStoreName(storeName);
+        if (candidate.Length == 0) return false;
+        var packageName = packageId.Split('.').LastOrDefault() ?? string.Empty;
+        return candidate == NormalizeStoreName(displayName) || candidate == NormalizeStoreName(packageName);
+    }
+
+    private static string NormalizeStoreName(string value)
+    {
+        var normalized = new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        return normalized.StartsWith("microsoft", StringComparison.Ordinal) ? normalized["microsoft".Length..] : normalized;
+    }
+
+    private static string EscapeWingetArgument(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    private static async Task<List<IconCandidate>> GetMicrosoftStoreCandidateUrlsAsync(string storePackageId)
+    {
+        var storePage = new Uri($"https://apps.microsoft.com/detail/{storePackageId}");
         return (await DiscoverIconCandidatesAsync(storePage, "Microsoft Store"))
             .Where(candidate => candidate.Uri.Host.EndsWith(".s-microsoft.com", StringComparison.OrdinalIgnoreCase))
             .OrderBy(candidate => candidate.Priority)
             .ToList();
     }
 
-    private static void ClearSelfhstCache(string directory)
+    private static void EnsureCurrentIconCache(string directory)
     {
-        if (Interlocked.Exchange(ref selfhstCacheChecked, 1) != 0) return;
-        var indexPath = Path.Combine(directory, SelfhstIndexFileName);
-        if (!File.Exists(indexPath)) return;
+        if (Interlocked.Exchange(ref iconCacheVersionChecked, 1) != 0) return;
+        var markerPath = Path.Combine(directory, IconCacheVersionFileName);
+        if (File.Exists(markerPath)) return;
 
-        foreach (var pattern in new[] { "*.png", "*.jpg", "*.ico", "*.svg", "*.miss-v2" })
+        foreach (var pattern in new[] { "*.png", "*.jpg", "*.ico", "*.svg", "*.miss-v2", "selfhst-index.json" })
         {
             foreach (var path in Directory.EnumerateFiles(directory, pattern))
             {
                 try { File.Delete(path); } catch { }
             }
         }
-        try { File.Delete(indexPath); } catch { }
+        try { File.WriteAllText(markerPath, "v4"); } catch { }
     }
+
     private static bool IsBetter(IconAsset candidate, IconAsset current)
     {
         var candidatePreferred = IsPreferredQuality(candidate);
@@ -195,18 +250,9 @@ internal static partial class AppIconService
                 manifests.Add(manifest);
                 continue;
             }
-            var sourceUri = href;
-            if (value.StartsWith("<img", StringComparison.OrdinalIgnoreCase))
-            {
-                var descriptor = $"{ReadAttribute(value, "alt")} {ReadAttribute(value, "class")} {ReadAttribute(value, "id")} {ReadAttribute(value, "src")}";
-                if (descriptor.Contains("icon", StringComparison.OrdinalIgnoreCase) || descriptor.Contains("logo", StringComparison.OrdinalIgnoreCase)) sourceUri = ReadAttribute(value, "src");
-                else continue;
-            }
-            if (string.IsNullOrWhiteSpace(sourceUri) || !Uri.TryCreate(page, sourceUri, out var uri) || uri.Scheme != Uri.UriSchemeHttps) continue;
+            if (string.IsNullOrWhiteSpace(href) || !Uri.TryCreate(page, href, out var uri) || uri.Scheme != Uri.UriSchemeHttps) continue;
             if (rel?.Contains("icon", StringComparison.OrdinalIgnoreCase) == true)
                 AddCandidate(candidates, uri, rel.Contains("apple", StringComparison.OrdinalIgnoreCase) ? 3 : 2, $"{source} {rel}");
-            else if (value.StartsWith("<img", StringComparison.OrdinalIgnoreCase))
-                AddCandidate(candidates, uri, 3, $"{source} logo image");
             else if (string.Equals(property, "og:image", StringComparison.OrdinalIgnoreCase))
                 AddCandidate(candidates, uri, 4, $"{source} Open Graph");
         }
@@ -412,9 +458,11 @@ internal static partial class AppIconService
     private static Uri? GetFaviconUrl(Uri? site) => site?.Scheme == Uri.UriSchemeHttps
         ? new UriBuilder(site) { Path = "/favicon.ico", Query = string.Empty, Fragment = string.Empty }.Uri : null;
 
+    [GeneratedRegex("(?m)^(?<name>.+?)\\s{2,}(?<id>(?:9[A-Z0-9]{11}|XP[A-Z0-9]{12}))\\s", RegexOptions.IgnoreCase)]
+    private static partial Regex StoreSearchResultRegex();
     [GeneratedRegex("^(?:9[A-Z0-9]{11}|XP[A-Z0-9]{12})$", RegexOptions.IgnoreCase)]
     private static partial Regex StoreProductIdRegex();
-    [GeneratedRegex("<(?:link|meta|img)\\b[^>]*>", RegexOptions.IgnoreCase)]
+    [GeneratedRegex("<(?:link|meta)\\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex HtmlTagRegex();
 
     [GeneratedRegex("[\"']src[\"']\\s*:\\s*[\"'](?<value>[^\"']+)[\"']", RegexOptions.IgnoreCase)]
