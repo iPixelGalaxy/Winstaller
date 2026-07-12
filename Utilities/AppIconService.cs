@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Winstaller.Configuration;
 
@@ -15,20 +16,25 @@ internal static partial class AppIconService
     private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
+    private const string SelfhstIndexUrl = "https://cdn.jsdelivr.net/gh/selfhst/icons@main/icons.json";
+    private const string SelfhstCdnBaseUrl = "https://cdn.jsdelivr.net/gh/selfhst/icons@main";
+    private static readonly TimeSpan SelfhstCatalogLifetime = TimeSpan.FromHours(24);
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static readonly ConcurrentDictionary<string, Task<string?>> Requests = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim MetadataGate = new(4, 4);
     private static readonly SemaphoreSlim HttpGate = new(8, 8);
+    private static readonly SemaphoreSlim SelfhstCatalogGate = new(1, 1);
 
     private sealed record IconCandidate(Uri Uri, int Priority, string Source);
     private sealed record IconAsset(byte[] Bytes, string Extension, int Width, int Height, IconCandidate Candidate);
+    private sealed record SelfhstIcon(string Name, string Reference, bool HasSvg, bool HasPng);
 
-    public static Task<string?> GetIconPathAsync(string packageId)
+    public static Task<string?> GetIconPathAsync(string packageId, string? displayName = null)
     {
         var normalized = packageId.Trim();
         return string.IsNullOrWhiteSpace(normalized) || BootstrapManager.DataRoot is null
             ? Task.FromResult<string?>(null)
-            : Requests.GetOrAdd(normalized, FetchAndCacheAsync);
+            : Requests.GetOrAdd(normalized, _ => FetchAndCacheAsync(normalized, displayName));
     }
 
     public static void Invalidate(string packageId, string path)
@@ -37,7 +43,7 @@ internal static partial class AppIconService
         try { File.Delete(path); } catch { }
     }
 
-    private static async Task<string?> FetchAndCacheAsync(string packageId)
+    private static async Task<string?> FetchAndCacheAsync(string packageId, string? displayName)
     {
         var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
         Directory.CreateDirectory(directory);
@@ -50,20 +56,8 @@ internal static partial class AppIconService
 
         try
         {
-            var candidates = await GetCandidateUrlsAsync(packageId);
-            var assets = await Task.WhenAll(candidates.Select(DownloadIconAsync));
-            IconAsset? selected = null;
-            foreach (var asset in assets)
-            {
-                if (asset is null) continue;
-                if (!IsUsableIcon(asset))
-                {
-                    RunLog.Write("AppIcon", $"Rejected {packageId} {asset.Candidate.Source}: {asset.Width}x{asset.Height}");
-                    continue;
-                }
-
-                if (selected is null || IsBetter(asset, selected)) selected = asset;
-            }
+            var selected = await SelectBestIconAsync(packageId, await GetSelfhstCandidatesAsync(packageId, displayName));
+            selected ??= await SelectBestIconAsync(packageId, await GetCandidateUrlsAsync(packageId));
 
             if (selected is not null)
             {
@@ -84,6 +78,111 @@ internal static partial class AppIconService
         return null;
     }
 
+    private static async Task<IconAsset?> SelectBestIconAsync(string packageId, IEnumerable<IconCandidate> candidates)
+    {
+        var assets = await Task.WhenAll(candidates.Select(DownloadIconAsync));
+        IconAsset? selected = null;
+        foreach (var asset in assets)
+        {
+            if (asset is null) continue;
+            if (!IsUsableIcon(asset))
+            {
+                RunLog.Write("AppIcon", $"Rejected {packageId} {asset.Candidate.Source}: {asset.Width}x{asset.Height}");
+                continue;
+            }
+            if (selected is null || IsBetter(asset, selected)) selected = asset;
+        }
+        return selected;
+    }
+
+    private static async Task<List<IconCandidate>> GetSelfhstCandidatesAsync(string packageId, string? displayName)
+    {
+        var catalog = await GetSelfhstCatalogAsync();
+        foreach (var lookup in GetSelfhstLookups(packageId, displayName))
+        {
+            if (!catalog.TryGetValue(NormalizeLookup(lookup), out var icon)) continue;
+            var candidates = new List<IconCandidate>();
+            if (icon.HasSvg) AddCandidate(candidates, new Uri($"{SelfhstCdnBaseUrl}/svg/{icon.Reference}.svg"), -2, $"selfh.st {icon.Name}");
+            if (icon.HasPng) AddCandidate(candidates, new Uri($"{SelfhstCdnBaseUrl}/png/{icon.Reference}.png"), -1, $"selfh.st {icon.Name}");
+            return candidates;
+        }
+        return [];
+    }
+
+    private static IEnumerable<string> GetSelfhstLookups(string packageId, string? displayName)
+    {
+        if (SelfhstAliases.TryGetValue(packageId, out var alias)) yield return alias;
+        if (!string.IsNullOrWhiteSpace(displayName)) yield return displayName;
+        yield return packageId;
+        var lastSegment = packageId.Split('.').LastOrDefault();
+        if (!string.IsNullOrWhiteSpace(lastSegment)) yield return lastSegment;
+    }
+
+    private static async Task<Dictionary<string, SelfhstIcon>> GetSelfhstCatalogAsync()
+    {
+        var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "selfhst-index.json");
+        if (File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < SelfhstCatalogLifetime)
+            return ParseSelfhstCatalog(await File.ReadAllTextAsync(path));
+
+        await SelfhstCatalogGate.WaitAsync();
+        try
+        {
+            if (File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < SelfhstCatalogLifetime)
+                return ParseSelfhstCatalog(await File.ReadAllTextAsync(path));
+            var downloaded = await DownloadTextAsync(new Uri(SelfhstIndexUrl));
+            if (downloaded is not null)
+            {
+                await File.WriteAllTextAsync(path, downloaded);
+                return ParseSelfhstCatalog(downloaded);
+            }
+            return File.Exists(path) ? ParseSelfhstCatalog(await File.ReadAllTextAsync(path)) : new(StringComparer.Ordinal);
+        }
+        catch { return new(StringComparer.Ordinal); }
+        finally { SelfhstCatalogGate.Release(); }
+    }
+
+    private static Dictionary<string, SelfhstIcon> ParseSelfhstCatalog(string json)
+    {
+        var catalog = new Dictionary<string, SelfhstIcon>(StringComparer.Ordinal);
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            foreach (var row in document.RootElement.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() < 4) continue;
+                var name = row[0].GetString();
+                var reference = row[1].GetString();
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(reference)) continue;
+                var icon = new SelfhstIcon(name, reference, row[2].GetString() == "Y", row[3].GetString() == "Y");
+                catalog.TryAdd(NormalizeLookup(name), icon);
+                catalog.TryAdd(NormalizeLookup(reference), icon);
+            }
+        }
+        catch { }
+        return catalog;
+    }
+
+    private static string NormalizeLookup(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static readonly IReadOnlyDictionary<string, string> SelfhstAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["File-New-Project.EarTrumpet"] = "eartrumpet",
+        ["GitHub.GitHubDesktop"] = "github-desktop",
+        ["JanDeDobbeleer.OhMyPosh"] = "oh-my-posh",
+        ["KeePassXCTeam.KeePassXC"] = "keepassxc",
+        ["Microsoft.PowerToys"] = "powertoys",
+        ["Microsoft.VisualStudioCode"] = "visual-studio-code",
+        ["Microsoft.WindowsTerminal"] = "windows-terminal",
+        ["Nilesoft.Shell"] = "nilesoft-shell",
+        ["Notepad++.Notepad++"] = "notepad-plus-plus",
+        ["RARLab.WinRAR"] = "winrar",
+        ["ThioJoe.SvgThumbnailExtension"] = "svg-thumbnail-extension",
+        ["Unity.UnityHub"] = "unity-hub",
+        ["VideoLAN.VLC"] = "vlc",
+        ["voidtools.Everything.Alpha"] = "everything"
+    };
     private static bool IsBetter(IconAsset candidate, IconAsset current)
     {
         var candidatePreferred = IsPreferredQuality(candidate);

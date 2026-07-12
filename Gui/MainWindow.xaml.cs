@@ -572,7 +572,15 @@ public sealed partial class MainWindow : Window
             Children =
             {
                 grid,
-                ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null))
+                ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null)),
+                new HyperlinkButton
+                {
+                    Content = "App icons: selfh.st/icons — CC BY 4.0",
+                    NavigateUri = new Uri("https://selfh.st/icons-about/"),
+                    FontSize = 12,
+                    Padding = new Thickness(0),
+                    HorizontalAlignment = HorizontalAlignment.Left
+                }
             }
         };
     }
@@ -597,8 +605,8 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var iconView = CreateAppIconView(packageId, 40);
         var displayName = GetAppDisplayName(config, packageId);
+        var iconView = CreateAppIconView(packageId, 40, displayName);
         var title = CreateAppTileTitle(displayName);
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -664,22 +672,22 @@ public sealed partial class MainWindow : Window
         return title;
     }
 
-    private AppIconView CreateAppIconView(string packageId, double size)
+    private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null)
     {
         var host = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left };
         var fallback = new FontIcon { Glyph = "\uE896", FontSize = size * 0.65, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var image = new Image { Width = size, Height = size, Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed };
         host.Children.Add(fallback);
         host.Children.Add(image);
-        _ = LoadAppIconAsync(packageId, image, fallback);
+        _ = LoadAppIconAsync(packageId, image, fallback, displayName: displayName);
         return new AppIconView(host, image, fallback);
     }
 
-    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback, Func<bool>? isCurrent = null)
+    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback, Func<bool>? isCurrent = null, string? displayName = null)
     {
         try
         {
-            var path = await AppIconService.GetIconPathAsync(packageId);
+            var path = await AppIconService.GetIconPathAsync(packageId, displayName);
             if (string.IsNullOrWhiteSpace(path) || (isCurrent is not null && !isCurrent())) return;
             await RunOnUiThreadAsync(() =>
             {
@@ -2339,7 +2347,7 @@ public sealed partial class MainWindow : Window
                 foreach (var candidate in recommendedCandidates)
                 {
                     var app = (AppImportCandidate)candidate.Value;
-                    var iconView = CreateAppIconView(app.PackageId, 32);
+                    var iconView = CreateAppIconView(app.PackageId, 32, app.DisplayName);
                     var choiceContent = new Grid { ColumnSpacing = 8 };
                     choiceContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     choiceContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2396,7 +2404,7 @@ public sealed partial class MainWindow : Window
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 if (candidate.Value is AppImportCandidate appCandidate)
-                    row.Children.Add(CreateAppIconView(appCandidate.PackageId, 32).Host);
+                    row.Children.Add(CreateAppIconView(appCandidate.PackageId, 32, appCandidate.DisplayName).Host);
                 var checkBox = new CheckBox { IsChecked = !isIgnored, Tag = candidate, VerticalAlignment = VerticalAlignment.Center };
                 checkBox.Checked += (_, _) => UpdateTitle();
                 checkBox.Unchecked += (_, _) => UpdateTitle();
