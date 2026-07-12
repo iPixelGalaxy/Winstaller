@@ -2263,7 +2263,20 @@ public sealed partial class MainWindow : Window
                 foreach (var candidate in recommendedCandidates)
                 {
                     var app = (AppImportCandidate)candidate.Value;
-                    var choice = new CheckBox { Content = candidate.Title, IsChecked = recommendedSelected.Contains(app.PackageId), IsEnabled = candidate.Group != "Ignored" };
+                    var choice = new CheckBox
+                    {
+                        IsChecked = recommendedSelected.Contains(app.PackageId),
+                        IsEnabled = candidate.Group != "Ignored",
+                        Content = new StackPanel
+                        {
+                            Spacing = 2,
+                            Children =
+                            {
+                                new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap },
+                                new TextBlock { Text = candidate.Detail, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap }
+                            }
+                        }
+                    };
                     choice.Checked += (_, _) => { recommendedSelected.Add(app.PackageId); UpdateRecommendedState(); };
                     choice.Unchecked += (_, _) => { recommendedSelected.Remove(app.PackageId); UpdateRecommendedState(); };
                     choices.Children.Add(choice);

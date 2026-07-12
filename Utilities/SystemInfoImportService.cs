@@ -393,23 +393,16 @@ public static class SystemInfoImportService
 
     public static IEnumerable<SystemInfoImportCandidate> GetRecommendedAppCandidates(WinstallerConfig config)
     {
-        string[] recommended =
-        [
-            "Git.Git",
-            "Discord.Discord",
-            "Spotify.Spotify"
-        ];
         var configured = GetConfiguredPackageIds(config);
-        return recommended
-            .Where(id => !configured.Contains(id))
-            .Select(id => new SystemInfoImportCandidate(
+        return RecommendedAppCatalog.Apps
+            .Where(app => !configured.Contains(app.PackageId))
+            .Select(app => new SystemInfoImportCandidate(
                 SystemInfoImportScope.AppInstaller,
-                id,
-                "Recommended app",
-                new AppImportCandidate(id, id, string.Empty, true),
-                config.AppInstaller.IgnoredApps.Contains(id, StringComparer.OrdinalIgnoreCase) ? "Ignored" : "Recommended"));
+                app.Name,
+                $"{app.Description} • {app.PackageId}",
+                new AppImportCandidate(app.PackageId, app.Name, string.Empty, true),
+                config.AppInstaller.IgnoredApps.Contains(app.PackageId, StringComparer.OrdinalIgnoreCase) ? "Ignored" : "Recommended"));
     }
-
     private static IEnumerable<SystemInfoImportCandidate> FindFontCandidates(WinstallerConfig config)
     {
         var windowsFonts = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");

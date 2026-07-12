@@ -2,6 +2,7 @@ using Winstaller.Configuration;
 using Winstaller.Models;
 using Winstaller.Utilities;
 using System.Net.Http;
+using System.Reflection;
 
 namespace Winstaller.Modules;
 
@@ -27,6 +28,9 @@ public class AppInstallerModule : ModuleBase
         }
 
         EnsureAdministrator();
+
+        if (!await EnsurePackageServicesAsync())
+            return false;
 
         ConsoleHelper.WriteHeader("Starting Package Installations");
 
@@ -89,6 +93,107 @@ public class AppInstallerModule : ModuleBase
         return successCount == totalCount;
     }
 
+    private static async Task<bool> EnsurePackageServicesAsync()
+    {
+        ConsoleHelper.WriteSubHeader("Checking Microsoft Store and App Installer");
+        if (!await IsStoreAvailableAsync())
+        {
+            ConsoleHelper.WriteWarning("Microsoft Store is unavailable. Running wsreset -i...");
+            await RunProcessAsync("wsreset.exe", "-i", 120000, false);
+            for (var attempt = 0; attempt < 60 && !await IsStoreAvailableAsync(); attempt++)
+                await Task.Delay(TimeSpan.FromSeconds(5));
+            if (!await IsStoreAvailableAsync())
+            {
+                ConsoleHelper.WriteError("Microsoft Store did not become available.");
+                return false;
+            }
+        }
+
+        if (!await IsWingetAvailableAsync())
+        {
+            await RunPowerShellAsync("Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe", 60000);
+            if (!await IsWingetAvailableAsync())
+            {
+                ConsoleHelper.WriteWarning("Repairing App Installer and WinGet...");
+                var repair = "Install-PackageProvider -Name NuGet -Force | Out-Null; Install-Module -Name Microsoft.WinGet.Client -Force -AllowClobber -Repository PSGallery -Scope AllUsers | Out-Null; Import-Module Microsoft.WinGet.Client; Repair-WinGetPackageManager -Force -Latest -AllUsers";
+                await RunPowerShellAsync(repair, 600000);
+            }
+        }
+
+        if (!await IsWingetAvailableAsync())
+        {
+            ConsoleHelper.WriteError("WinGet is unavailable after App Installer repair.");
+            return false;
+        }
+
+        await RunProcessAsync("winget", "upgrade Microsoft.AppInstaller --accept-source-agreements --accept-package-agreements --disable-interactivity --no-progress", 300000, false);
+        if (await RunProcessAsync("winget", "source update --disable-interactivity --no-progress", 120000, false) != 0 ||
+            await RunProcessAsync("winget", "show --id 9WZDNCRFHVN5 --exact --source msstore --accept-source-agreements --disable-interactivity --no-progress", 120000, false) != 0)
+        {
+            ConsoleHelper.WriteError("WinGet cannot access required sources.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private static Task<bool> IsStoreAvailableAsync()
+    {
+        return IsPowerShellConditionTrueAsync("Get-AppxPackage -Name Microsoft.WindowsStore -ErrorAction SilentlyContinue");
+    }
+
+    private static async Task<bool> IsWingetAvailableAsync()
+    {
+        return await RunProcessAsync("winget", "--version", 30000, false) == 0;
+    }
+
+    private static async Task<bool> IsPowerShellConditionTrueAsync(string expression)
+    {
+        return await RunPowerShellAsync($"if ({expression}) {{ exit 0 }} else {{ exit 1 }}", 30000) == 0;
+    }
+
+    private async Task<bool> InstallBundledHevcAsync()
+    {
+        const string identity = "Microsoft.HEVCVideoExtensions";
+        var provisioned = await IsPowerShellConditionTrueAsync($"Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq '{identity}'");
+        var installed = await IsPowerShellConditionTrueAsync($"Get-AppxPackage -Name {identity} -ErrorAction SilentlyContinue");
+        var bundlePath = ExtractHevcBundle();
+        if (bundlePath is null)
+        {
+            ConsoleHelper.WriteError("Bundled HEVC Video Extensions package is missing.");
+            return false;
+        }
+
+        if (!provisioned && await RunProcessAsync("dism.exe", $"/Online /Add-ProvisionedAppxPackage /PackagePath:\"{bundlePath}\" /SkipLicense", 300000, true) != 0)
+        {
+            ConsoleHelper.WriteError("Failed provisioning HEVC Video Extensions.");
+            return false;
+        }
+        if (!installed && await RunPowerShellAsync($"Add-AppxPackage -Path '{bundlePath.Replace("'", "''")}'", 300000) != 0)
+        {
+            ConsoleHelper.WriteError("Failed registering HEVC Video Extensions for current user.");
+            return false;
+        }
+
+        var upgrade = await RunProcessAsync("winget", $"upgrade --id {RecommendedAppCatalog.HevcPackageId} --exact --source msstore --accept-source-agreements --accept-package-agreements --disable-interactivity --no-progress", Config.AppInstaller.DefaultTimeoutSeconds * 1000, true);
+        return upgrade == 0;
+    }
+
+    private static string? ExtractHevcBundle()
+    {
+        const string resourceName = "Winstaller.Assets.HEVCVideoExtensions.appxbundle";
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+        if (stream is null || BootstrapManager.DataRoot is null)
+            return null;
+        var directory = Path.Combine(BootstrapManager.CacheDirectory, "packages");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "HEVC Video Extensions.appxbundle");
+        if (File.Exists(path) && new FileInfo(path).Length == stream.Length)
+            return path;
+        using var output = File.Create(path);
+        stream.CopyTo(output);
+        return path;
+    }
     private async Task<bool> InstallConfiguredPackageAsync(string packageId)
     {
         if (!Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior))
@@ -418,7 +523,8 @@ public class AppInstallerModule : ModuleBase
 
     private string BuildWingetInstallCommand(string packageId)
     {
-        var command = $"winget install --id \"{packageId}\" --exact";
+        var source = RecommendedAppCatalog.IsMicrosoftStorePackage(packageId) ? "msstore" : "winget";
+        var command = $"winget install --id \"{packageId}\" --exact --source {source} --accept-source-agreements --accept-package-agreements --disable-interactivity";
         if (Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior) &&
             behavior.LockVersion &&
             !string.IsNullOrWhiteSpace(behavior.Version))
@@ -456,6 +562,9 @@ public class AppInstallerModule : ModuleBase
     private async Task InstallPreparedOnlyAsync()
     {
         EnsureAdministrator();
+
+        if (!await EnsurePackageServicesAsync())
+            return;
         ConsoleHelper.WriteSubHeader("Prepared Installers");
         foreach (var packageId in Config.AppInstaller.PreparedInstallers)
         {
@@ -467,6 +576,9 @@ public class AppInstallerModule : ModuleBase
     private async Task InstallManualOnlyAsync()
     {
         EnsureAdministrator();
+
+        if (!await EnsurePackageServicesAsync())
+            return;
         ConsoleHelper.WriteSubHeader("Manual Installations");
         foreach (var packageId in Config.AppInstaller.ManualInstalls)
         {
@@ -478,6 +590,9 @@ public class AppInstallerModule : ModuleBase
     private async Task InstallCustomOnlyAsync()
     {
         EnsureAdministrator();
+
+        if (!await EnsurePackageServicesAsync())
+            return;
         ConsoleHelper.WriteSubHeader("Custom Installations");
         foreach (var script in Config.AppInstaller.CustomScripts)
         {
@@ -489,6 +604,9 @@ public class AppInstallerModule : ModuleBase
     private async Task InstallDefaultOnlyAsync()
     {
         EnsureAdministrator();
+
+        if (!await EnsurePackageServicesAsync())
+            return;
         await InstallDefaultPackagesBulkAsync();
     }
 

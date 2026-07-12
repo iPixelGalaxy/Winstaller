@@ -66,7 +66,7 @@ internal static class AppIconService
         using var process = Process.Start(new ProcessStartInfo
         {
             FileName = "winget",
-            Arguments = $"show --id \"{packageId}\" --exact --source winget --accept-source-agreements --disable-interactivity --no-progress",
+            Arguments = $"show --id \"{packageId}\" --exact --source {(RecommendedAppCatalog.IsMicrosoftStorePackage(packageId) ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity --no-progress",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
