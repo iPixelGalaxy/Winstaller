@@ -16,7 +16,7 @@ internal static partial class AppIconService
     private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
-    private const string IconCacheVersionFileName = ".icon-resolver-v6";
+    private const string IconCacheVersionFileName = ".icon-resolver-v7";
     private const string GitHubIndexFileName = "github-icon-index.json";
     private const string GitHubIconBaseUrl = "https://raw.githubusercontent.com/iPixelGalaxy/Winstaller/master/Assets/IconCache";
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
@@ -37,11 +37,35 @@ internal static partial class AppIconService
     public static Task<string?> GetIconPathAsync(string packageId, string? displayName = null)
     {
         var normalized = packageId.Trim();
-        return string.IsNullOrWhiteSpace(normalized) || BootstrapManager.DataRoot is null
-            ? Task.FromResult<string?>(null)
-            : Requests.GetOrAdd(normalized, _ => FetchAndCacheAsync(normalized, displayName));
+        if (string.IsNullOrWhiteSpace(normalized) || BootstrapManager.DataRoot is null)
+            return Task.FromResult<string?>(null);
+
+        var sharedKey = GetSharedIconKey(normalized);
+        return Requests.GetOrAdd(sharedKey, _ => FetchAndCacheAsync(sharedKey, displayName));
     }
 
+    public static void WarmCache(IEnumerable<string> packageIds)
+    {
+        _ = Task.WhenAll(packageIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(id => GetIconPathAsync(id)));
+    }
+
+    public static void ClearCache()
+    {
+        Requests.Clear();
+        lock (GitHubIndexTaskLock) gitHubIndexTask = null;
+        Interlocked.Exchange(ref iconCacheVersionChecked, 0);
+        try
+        {
+            var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+        catch (Exception ex) { RunLog.WriteException("AppIcon", "Failed clearing icon cache", ex); }
+    }
+
+    private static string GetSharedIconKey(string packageId) =>
+        packageId.StartsWith("Microsoft.DotNet.DesktopRuntime.", StringComparison.OrdinalIgnoreCase) ? "Microsoft.DotNet.DesktopRuntime.6" :
+        packageId.StartsWith("Microsoft.VCRedist.", StringComparison.OrdinalIgnoreCase) ? "Microsoft.VCRedist.2015+.x64" : packageId;
     public static void Invalidate(string packageId, string path)
     {
         Requests.TryRemove(packageId.Trim(), out _);
@@ -272,7 +296,7 @@ internal static partial class AppIconService
                 try { File.Delete(path); } catch { }
             }
         }
-        try { File.WriteAllText(markerPath, "v6"); } catch { }
+        try { File.WriteAllText(markerPath, "v7"); } catch { }
     }
 
     private static bool IsBetter(IconAsset candidate, IconAsset current)

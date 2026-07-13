@@ -62,6 +62,13 @@ internal static class RecommendedAppCatalog
         new("WinFsp.WinFsp", "WinFsp", "File-system proxy framework")
     ];
 
+    public static string? GetFamilyName(string packageId) =>
+        packageId.StartsWith("Microsoft.VCRedist.", StringComparison.OrdinalIgnoreCase) ? "VC++ Redistributables" :
+        packageId.StartsWith("Microsoft.DotNet.DesktopRuntime.", StringComparison.OrdinalIgnoreCase) ? ".NET Desktop Runtimes" : null;
+
+    public static string GetFamilyIconPackageId(string packageId) =>
+        packageId.StartsWith("Microsoft.VCRedist.", StringComparison.OrdinalIgnoreCase) ? "Microsoft.VCRedist.2015+.x64" :
+        packageId.StartsWith("Microsoft.DotNet.DesktopRuntime.", StringComparison.OrdinalIgnoreCase) ? "Microsoft.DotNet.DesktopRuntime.6" : packageId;
     public static bool IsMicrosoftStorePackage(string packageId) =>
         Apps.FirstOrDefault(app => app.PackageId.Equals(packageId, StringComparison.OrdinalIgnoreCase))?.IsStore == true;
 

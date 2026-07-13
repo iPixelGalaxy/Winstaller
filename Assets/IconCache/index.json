@@ -3,6 +3,14 @@
   "icons": [
     {
       "packageIds": [
+        "'MicaForEveryone.MicaForEveryone','MicaForEveryone.MicaForEveryone2'"
+      ],
+      "file": "png/micaforeveryone-micaforeveryone-micaforeveryone-micaforeveryone2.png",
+      "sha256": "126cb4654ad3225642ccd122bdc89ab99aa9f1d7db44718026f99f4aaccb931b",
+      "source": "Installed Mica For Everyone"
+    },
+    {
+      "packageIds": [
         "7zip.7zip"
       ],
       "file": "png/7zip-7zip.png",
@@ -86,8 +94,8 @@
         "Git.Git"
       ],
       "file": "png/git-git.png",
-      "sha256": "0702f53b9afda3e446947656dddeeadc51dab0402bfff56dc6f324236efda864",
-      "source": "Installed Git"
+      "sha256": "d42f662b39ff0a0b5fe921631295d3b24f347d183d3b6e6954b79cbae3956fee",
+      "source": "Installed Git Bash"
     },
     {
       "packageIds": [
@@ -143,6 +151,25 @@
     },
     {
       "packageIds": [
+        "Microsoft.VCRedist.2005.x86",
+        "Microsoft.VCRedist.2005.x64",
+        "Microsoft.VCRedist.2008.x86",
+        "Microsoft.VCRedist.2008.x64",
+        "Microsoft.VCRedist.2010.x86",
+        "Microsoft.VCRedist.2010.x64",
+        "Microsoft.VCRedist.2012.x86",
+        "Microsoft.VCRedist.2012.x64",
+        "Microsoft.VCRedist.2013.x86",
+        "Microsoft.VCRedist.2013.x64",
+        "Microsoft.VCRedist.2015+.x86",
+        "Microsoft.VCRedist.2015+.x64"
+      ],
+      "file": "png/microsoft-vcredist-2005-x86.png",
+      "sha256": "1112236a61aaafe2533d936affa21639f0c6b7d2d17b5092156380be29faa51c",
+      "source": "Shared Microsoft runtime icon"
+    },
+    {
+      "packageIds": [
         "Microsoft.VisualStudioCode"
       ],
       "file": "png/microsoft-visualstudiocode.png",
@@ -164,6 +191,14 @@
       "file": "png/nilesoft-shell.png",
       "sha256": "3e4cc08a6d1c2fb2d906fc4ebebaa52d2a482bd79fb628673cbf42af4a123f24",
       "source": "Installed Nilesoft Shell"
+    },
+    {
+      "packageIds": [
+        "Plex.Plex"
+      ],
+      "file": "png/plex-plex.png",
+      "sha256": "dd20e8e0f6dadbb0cab854b44a33283245906d77f094e938c9545f037196acdc",
+      "source": "Installed Plex"
     },
     {
       "packageIds": [

@@ -68,6 +68,7 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
+            StartIconWarmup();
         }
         else
         {
@@ -326,6 +327,7 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
+            StartIconWarmup();
             _ = ShowGuidedSetupPromptAsync();
         };
         return card;
@@ -370,6 +372,7 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
+            StartIconWarmup();
             AppendOutput("Configuration reloaded.");
         }));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Folder, "Open Config Directory", OpenConfig));
@@ -561,8 +564,15 @@ public sealed partial class MainWindow : Window
         void Refresh()
         {
             grid.Children.Clear();
-            foreach (var app in config.DefaultInstalls.OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase))
-                grid.Children.Add(BuildAppTile(app, config, Refresh));
+            foreach (var group in config.DefaultInstalls.OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
+                         .GroupBy(app => RecommendedAppCatalog.GetFamilyName(app) ?? app, StringComparer.OrdinalIgnoreCase))
+            {
+                var apps = group.ToList();
+                grid.Children.Add(RecommendedAppCatalog.GetFamilyName(apps[0]) is { } family
+                    ? BuildAppFamilyTile(family, apps, config, Refresh)
+                    : BuildAppTile(apps[0], config, Refresh));
+            }
+
         }
 
         Refresh();
@@ -577,6 +587,26 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    private FrameworkElement BuildAppFamilyTile(string family, List<string> packageIds, AppInstallerConfig config, Action refresh)
+    {
+        var iconView = CreateAppIconView(RecommendedAppCatalog.GetFamilyIconPackageId(packageIds[0]), 40, family);
+        var removeAll = IconActionButton("\uE74D", "Remove all", () => { foreach (var packageId in packageIds) { config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase)); config.Behaviors.Remove(packageId); } SaveConfiguration(); refresh(); });
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(iconView.Host);
+        var labels = new StackPanel { Spacing = 2, Children = { new TextBlock { Text = family, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap }, new TextBlock { Text = $"{packageIds.Count} packages", FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") } } };
+        Grid.SetColumn(labels, 1); header.Children.Add(labels); Grid.SetColumn(removeAll, 2); header.Children.Add(removeAll);
+        var children = new StackPanel { Spacing = 6 };
+        foreach (var packageId in packageIds.OrderBy(id => GetAppDisplayName(config, id), StringComparer.OrdinalIgnoreCase))
+        {
+            var row = new Grid { ColumnSpacing = 6 }; row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = GetAppDisplayName(config, packageId), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+            var delete = IconActionButton("\uE74D", "Delete app", () => { config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase)); config.Behaviors.Remove(packageId); SaveConfiguration(); refresh(); });
+            var settings = IconActionButton("\uE713", "App settings", async () => await ShowAppBehaviorDialogAsync(config, packageId));
+            Grid.SetColumn(delete, 1); Grid.SetColumn(settings, 2); row.Children.Add(delete); row.Children.Add(settings); children.Children.Add(row);
+        }
+        return new Border { Width = 250, Margin = new Thickness(0, 0, 8, 8), Background = ResourceBrush("WinstallerCardBrush"), BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14), Child = new Expander { Header = header, Content = children } };
+    }
     private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
     {
         var footer = new StackPanel
@@ -664,61 +694,67 @@ public sealed partial class MainWindow : Window
         return title;
     }
 
+    private void StartIconWarmup()
+    {
+        if (_config?.AppInstaller is not { } appInstaller) return;
+        AppIconService.WarmCache(RecommendedAppCatalog.Apps.Select(app => app.PackageId).Concat(appInstaller.DefaultInstalls));
+    }
+
     private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null)
     {
         var host = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left };
-        var fallback = new FontIcon { Glyph = "\uE896", FontSize = size * 0.65, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var fallback = new FontIcon { Glyph = "\uE896", FontSize = size * 0.65, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
+        var spinner = new ProgressRing { Width = Math.Max(16, size * 0.55), Height = Math.Max(16, size * 0.55), IsActive = true, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var image = new Image { Width = size, Height = size, Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed };
         host.Children.Add(fallback);
+        host.Children.Add(spinner);
         host.Children.Add(image);
-        _ = LoadAppIconAsync(packageId, image, fallback, displayName: displayName);
-        return new AppIconView(host, image, fallback);
+        _ = LoadAppIconAsync(packageId, image, fallback, spinner, displayName: displayName);
+        return new AppIconView(host, image, fallback, spinner);
     }
 
-    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback, Func<bool>? isCurrent = null, string? displayName = null)
+    private async Task LoadAppIconAsync(string packageId, Image icon, FontIcon fallback, ProgressRing spinner, Func<bool>? isCurrent = null, string? displayName = null)
     {
         try
         {
             var path = await AppIconService.GetIconPathAsync(packageId, displayName);
-            if (string.IsNullOrWhiteSpace(path) || (isCurrent is not null && !isCurrent())) return;
+            if (isCurrent is not null && !isCurrent()) return;
             await RunOnUiThreadAsync(() =>
             {
                 if (isCurrent is not null && !isCurrent()) return;
+                void ShowFallback() { spinner.IsActive = false; spinner.Visibility = Visibility.Collapsed; fallback.Visibility = Visibility.Visible; }
+                if (string.IsNullOrWhiteSpace(path)) { ShowFallback(); return; }
                 void ShowIcon()
                 {
                     if (isCurrent is not null && !isCurrent()) return;
-                    icon.Visibility = Visibility.Visible;
-                    fallback.Visibility = Visibility.Collapsed;
+                    spinner.IsActive = false; spinner.Visibility = Visibility.Collapsed;
+                    icon.Visibility = Visibility.Visible; fallback.Visibility = Visibility.Collapsed;
                 }
                 void HandleFailure()
                 {
                     if (isCurrent is not null && !isCurrent()) return;
                     AppIconService.Invalidate(packageId, path);
+                    ShowFallback();
                     RunLog.Write("AppIcon", $"Image decode failed for {packageId}: {path}");
                 }
 
                 if (path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
                 {
-                    var source = new SvgImageSource(new Uri(path));
-                    source.Opened += (_, _) => ShowIcon();
-                    source.OpenFailed += (_, _) => HandleFailure();
-                    icon.Source = source;
+                    var source = new SvgImageSource(new Uri(path)); source.Opened += (_, _) => ShowIcon(); source.OpenFailed += (_, _) => HandleFailure(); icon.Source = source;
                 }
                 else
                 {
                     var bitmap = new BitmapImage { UriSource = new Uri(path), DecodePixelWidth = Math.Max(64, (int)Math.Ceiling(icon.Width)) };
-                    bitmap.ImageOpened += (_, _) => ShowIcon();
-                    bitmap.ImageFailed += (_, _) => HandleFailure();
-                    icon.Source = bitmap;
+                    bitmap.ImageOpened += (_, _) => ShowIcon(); bitmap.ImageFailed += (_, _) => HandleFailure(); icon.Source = bitmap;
                 }
             });
         }
         catch (Exception ex)
         {
             RunLog.WriteException("AppIcon", $"Failed loading icon for {packageId}", ex);
+            await RunOnUiThreadAsync(() => { spinner.IsActive = false; spinner.Visibility = Visibility.Collapsed; fallback.Visibility = Visibility.Visible; });
         }
-    }
-    private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
+    }    private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
     {
         var displayName = config.Behaviors.TryGetValue(packageId, out var behavior) && !string.IsNullOrWhiteSpace(behavior.DisplayName)
             ? behavior.DisplayName
@@ -2930,6 +2966,7 @@ public sealed partial class MainWindow : Window
             if (!property.CanRead ||
                 !property.CanWrite ||
                 property.Name == "Enabled" ||
+                (module.Config is AppInstallerConfig && (property.Name.Contains("Timeout", StringComparison.OrdinalIgnoreCase) || property.Name == nameof(AppInstallerConfig.SetupInfoDirectory))) ||
                 IsSupportedList(property.PropertyType))
             {
                 continue;
@@ -2938,6 +2975,16 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(BuildSettingRow(module.Config, property));
         }
 
+        if (module.Config is AppInstallerConfig)
+        {
+            panel.Children.Add(new TextBlock { Text = "Setup info is managed automatically. Installation time limits use built-in defaults.", TextWrapping = TextWrapping.Wrap, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
+            panel.Children.Add(ActionButton("Clear Icon Cache", () =>
+            {
+                AppIconService.ClearCache();
+                StartIconWarmup();
+                RenderModule(module);
+            }));
+        }
         if (panel.Children.Count == 0)
         {
             panel.Children.Add(new TextBlock { Text = "No module settings available." });
@@ -2978,12 +3025,14 @@ public sealed partial class MainWindow : Window
         {
             var generation = ++iconGeneration;
             iconPreview.Image.Visibility = Visibility.Collapsed;
-            iconPreview.Fallback.Visibility = Visibility.Visible;
+            iconPreview.Fallback.Visibility = Visibility.Collapsed;
+            iconPreview.Spinner.Visibility = Visibility.Visible;
+            iconPreview.Spinner.IsActive = true;
             var typedId = id.Text.Trim();
             if (string.IsNullOrWhiteSpace(typedId)) return;
             await Task.Delay(600);
             if (generation != iconGeneration) return;
-            await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, () => generation == iconGeneration, name.Text);
+            await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, iconPreview.Spinner, () => generation == iconGeneration, name.Text);
         }
         id.TextChanged += async (_, _) => await RefreshIconPreviewAsync();
         name.TextChanged += async (_, _) => await RefreshIconPreviewAsync();
@@ -4028,7 +4077,7 @@ public sealed partial class MainWindow : Window
             value.EndsWith('s') && value.Length > 1 ? value[..^1] : value;
     }
 
-    private sealed record AppIconView(Grid Host, Image Image, FontIcon Fallback);
+    private sealed record AppIconView(Grid Host, Image Image, FontIcon Fallback, ProgressRing Spinner);
     private sealed record ShellFolderPreset(string Name, string RegistryValue, string DefaultPath);
     private sealed record SymlinkImportSelection(
         List<SystemInfoImportCandidate> Selected,
