@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Winstaller.Configuration;
 
@@ -15,16 +16,23 @@ internal static partial class AppIconService
     private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
-    private const string IconCacheVersionFileName = ".icon-resolver-v4";
+    private const string IconCacheVersionFileName = ".icon-resolver-v5";
+    private const string GitHubIndexFileName = "github-icon-index.json";
+    private const string GitHubIconBaseUrl = "https://raw.githubusercontent.com/iPixelGalaxy/Winstaller/master/Assets/IconCache";
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static readonly ConcurrentDictionary<string, Task<string?>> Requests = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim MetadataGate = new(4, 4);
     private static readonly SemaphoreSlim HttpGate = new(8, 8);
     private static readonly SemaphoreSlim StoreSearchGate = new(2, 2);
+    private static readonly SemaphoreSlim GitHubIndexGate = new(1, 1);
+    private static readonly object GitHubIndexTaskLock = new();
+    private static Task<Dictionary<string, GitHubIconEntry>>? gitHubIndexTask;
     private static int iconCacheVersionChecked;
 
     private sealed record IconCandidate(Uri Uri, int Priority, string Source);
     private sealed record IconAsset(byte[] Bytes, string Extension, int Width, int Height, IconCandidate Candidate);
+    private sealed class GitHubIconManifest { public int SchemaVersion { get; set; } public List<GitHubIconEntry> Icons { get; set; } = []; }
+    private sealed class GitHubIconEntry { public List<string> PackageIds { get; set; } = []; public string File { get; set; } = string.Empty; public string Sha256 { get; set; } = string.Empty; public string Source { get; set; } = string.Empty; }
 
     public static Task<string?> GetIconPathAsync(string packageId, string? displayName = null)
     {
@@ -45,6 +53,8 @@ internal static partial class AppIconService
         var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
         Directory.CreateDirectory(directory);
         EnsureCurrentIconCache(directory);
+        var customPath = await GetGitHubIconPathAsync(directory, packageId);
+        if (customPath is not null) return customPath;
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(packageId))).ToLowerInvariant();
         var missPath = Path.Combine(directory, key + ".miss-v2");
         var cachedPath = GetCachedIconPath(directory, key);
@@ -78,6 +88,95 @@ internal static partial class AppIconService
         return null;
     }
 
+    private static Task<Dictionary<string, GitHubIconEntry>> GetGitHubIndexAsync(string directory)
+    {
+        lock (GitHubIndexTaskLock)
+            return gitHubIndexTask ??= LoadGitHubIndexAsync(directory);
+    }
+
+    private static async Task<string?> GetGitHubIconPathAsync(string directory, string packageId)
+    {
+        var index = await GetGitHubIndexAsync(directory);
+        if (!index.TryGetValue(packageId, out var entry)) return null;
+        var path = Path.Combine(directory, $"github-{entry.Sha256.ToLowerInvariant()}.png");
+        if (TryGetVerifiedCachedGitHubIcon(path, entry)) return path;
+
+        var asset = await DownloadIconAsync(new IconCandidate(new Uri($"{GitHubIconBaseUrl}/{entry.File}"), -3, "Winstaller icon cache"));
+        if (asset is null || asset.Extension != ".png" || !IsUsableIcon(asset) || !MatchesSha256(asset.Bytes, entry.Sha256))
+        {
+            RunLog.Write("AppIcon", $"Rejected GitHub cache icon for {packageId}");
+            return null;
+        }
+
+        await File.WriteAllBytesAsync(path, asset.Bytes);
+        RunLog.Write("AppIcon", $"Selected {packageId} Winstaller icon cache: {asset.Width}x{asset.Height}");
+        return path;
+    }
+
+    private static async Task<Dictionary<string, GitHubIconEntry>> LoadGitHubIndexAsync(string directory)
+    {
+        var path = Path.Combine(directory, GitHubIndexFileName);
+        if (File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromHours(24))
+            return ParseGitHubIndex(await File.ReadAllTextAsync(path));
+
+        await GitHubIndexGate.WaitAsync();
+        try
+        {
+            if (File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromHours(24))
+                return ParseGitHubIndex(await File.ReadAllTextAsync(path));
+            var downloaded = await DownloadTextAsync(new Uri($"{GitHubIconBaseUrl}/index.json"));
+            if (downloaded is not null)
+            {
+                await File.WriteAllTextAsync(path, downloaded);
+                return ParseGitHubIndex(downloaded);
+            }
+            return File.Exists(path) ? ParseGitHubIndex(await File.ReadAllTextAsync(path)) : new(StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return new(StringComparer.OrdinalIgnoreCase); }
+        finally { GitHubIndexGate.Release(); }
+    }
+
+    private static Dictionary<string, GitHubIconEntry> ParseGitHubIndex(string json)
+    {
+        var index = new Dictionary<string, GitHubIconEntry>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var manifest = JsonSerializer.Deserialize<GitHubIconManifest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (manifest?.SchemaVersion != 1) return index;
+            foreach (var entry in manifest.Icons)
+            {
+                if (!IsValidGitHubIconEntry(entry)) continue;
+                foreach (var packageId in entry.PackageIds.Where(id => !string.IsNullOrWhiteSpace(id)))
+                    index.TryAdd(packageId.Trim(), entry);
+            }
+        }
+        catch { }
+        return index;
+    }
+
+    private static bool IsValidGitHubIconEntry(GitHubIconEntry entry) =>
+        entry.PackageIds.Count > 0 &&
+        entry.File.EndsWith(".png", StringComparison.OrdinalIgnoreCase) &&
+        entry.File.All(character => char.IsLetterOrDigit(character) || character is '.' or '-' or '_' or '/') &&
+        !entry.File.Contains("..", StringComparison.Ordinal) &&
+        entry.Sha256.Length == 64 && entry.Sha256.All(Uri.IsHexDigit);
+
+    private static bool TryGetVerifiedCachedGitHubIcon(string path, GitHubIconEntry entry)
+    {
+        if (!File.Exists(path)) return false;
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            return MatchesSha256(bytes, entry.Sha256) &&
+                   TryGetImageInfo(bytes, out var extension, out var width, out var height) &&
+                   extension == ".png" &&
+                   IsUsableIcon(new IconAsset(bytes, extension, width, height, new IconCandidate(new Uri("https://localhost"), 0, "cache")));
+        }
+        catch { return false; }
+    }
+
+    private static bool MatchesSha256(byte[] bytes, string expected) =>
+        Convert.ToHexString(SHA256.HashData(bytes)).Equals(expected, StringComparison.OrdinalIgnoreCase);
     private static async Task<IconAsset?> SelectBestIconAsync(string packageId, IEnumerable<IconCandidate> candidates)
     {
         var assets = await Task.WhenAll(candidates.Select(DownloadIconAsync));
@@ -166,14 +265,14 @@ internal static partial class AppIconService
         var markerPath = Path.Combine(directory, IconCacheVersionFileName);
         if (File.Exists(markerPath)) return;
 
-        foreach (var pattern in new[] { "*.png", "*.jpg", "*.ico", "*.svg", "*.miss-v2", "selfhst-index.json" })
+        foreach (var pattern in new[] { "*.png", "*.jpg", "*.ico", "*.svg", "*.miss-v2", "selfhst-index.json", GitHubIndexFileName })
         {
             foreach (var path in Directory.EnumerateFiles(directory, pattern))
             {
                 try { File.Delete(path); } catch { }
             }
         }
-        try { File.WriteAllText(markerPath, "v4"); } catch { }
+        try { File.WriteAllText(markerPath, "v5"); } catch { }
     }
 
     private static bool IsBetter(IconAsset candidate, IconAsset current)
