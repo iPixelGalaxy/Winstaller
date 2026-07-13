@@ -16,7 +16,7 @@ internal static partial class AppIconService
     private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
-    private const string IconCacheVersionFileName = ".icon-resolver-v5";
+    private const string IconCacheVersionFileName = ".icon-resolver-v6";
     private const string GitHubIndexFileName = "github-icon-index.json";
     private const string GitHubIconBaseUrl = "https://raw.githubusercontent.com/iPixelGalaxy/Winstaller/master/Assets/IconCache";
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
@@ -272,7 +272,7 @@ internal static partial class AppIconService
                 try { File.Delete(path); } catch { }
             }
         }
-        try { File.WriteAllText(markerPath, "v5"); } catch { }
+        try { File.WriteAllText(markerPath, "v6"); } catch { }
     }
 
     private static bool IsBetter(IconAsset candidate, IconAsset current)

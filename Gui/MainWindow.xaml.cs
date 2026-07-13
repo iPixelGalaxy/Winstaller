@@ -2970,6 +2970,8 @@ public sealed partial class MainWindow : Window
             : new AppInstallBehavior { DisplayName = isNew ? string.Empty : GetKnownPackageName(packageId!) };
         var name = new TextBox { Text = isNew ? behavior.DisplayName : GetAppDisplayName(config, packageId!), PlaceholderText = "App name" };
         var id = new TextBox { Text = packageId ?? string.Empty, PlaceholderText = "Winget package ID" };
+        EnableAppSettingsTextCopy(name);
+        EnableAppSettingsTextCopy(id);
         var iconPreview = CreateAppIconView(id.Text, 64);
         var iconGeneration = 0;
         async Task RefreshIconPreviewAsync()
@@ -2992,6 +2994,7 @@ public sealed partial class MainWindow : Window
         mode.SelectedItem = string.IsNullOrWhiteSpace(behavior.InstallMode) ? "Default" : behavior.InstallMode;
         var lockVersion = new ToggleSwitch { Header = "Lock version", IsOn = behavior.LockVersion };
         var version = new TextBox { Text = behavior.Version, PlaceholderText = "Version" };
+        EnableAppSettingsTextCopy(version);
         void UpdateVersionState()
         {
             version.IsEnabled = lockVersion.IsOn && string.Equals(mode.SelectedItem?.ToString(), "Default", StringComparison.OrdinalIgnoreCase);
@@ -3031,6 +3034,7 @@ public sealed partial class MainWindow : Window
                 customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.SidebarConfig))!));
                 customOptions.Children.Add(BuildListSection(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.CustomApps))!));
             }
+            EnableAppSettingsTextCopyInTree(customOptions);
         }
         id.TextChanged += (_, _) => RefreshCustomOptions();
         panel.Children.Add(customOptions);
@@ -3683,6 +3687,37 @@ public sealed partial class MainWindow : Window
         return Math.Min(1900, Math.Max(1100, rootWidth - 96));
     }
 
+    private void EnableAppSettingsTextCopy(TextBox box)
+    {
+        box.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.C &&
+                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+            {
+                CopyText(box.SelectedText);
+                args.Handled = true;
+            }
+        };
+
+        var menu = new MenuFlyout();
+        var copy = new MenuFlyoutItem { Text = "Copy" };
+        copy.Click += (_, _) => CopyText(box.SelectedText);
+        var selectAll = new MenuFlyoutItem { Text = "Select All" };
+        selectAll.Click += (_, _) => box.SelectAll();
+        menu.Items.Add(copy);
+        menu.Items.Add(selectAll);
+        box.ContextFlyout = menu;
+    }
+
+    private void EnableAppSettingsTextCopyInTree(DependencyObject root)
+    {
+        if (root is TextBox box)
+            EnableAppSettingsTextCopy(box);
+
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            EnableAppSettingsTextCopyInTree(VisualTreeHelper.GetChild(root, index));
+    }
     private TextBox CreateLogOutputBox(double width)
     {
         var outputBox = new TextBox

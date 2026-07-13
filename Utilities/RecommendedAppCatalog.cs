@@ -34,18 +34,18 @@ internal static class RecommendedAppCatalog
         new("Microsoft.DotNet.DesktopRuntime.8", "Runtime 8", "Windows desktop runtime"),
         new("Microsoft.DotNet.DesktopRuntime.9", "Runtime 9", "Windows desktop runtime"),
         new("Microsoft.DotNet.DesktopRuntime.10", "Runtime 10", "Windows desktop runtime"),
-        new("Microsoft.VCRedist.2005.x86", "Visual C++ 2005 x86", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2005.x64", "Visual C++ 2005 x64", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2008.x86", "Visual C++ 2008 x86", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2008.x64", "Visual C++ 2008 x64", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2010.x86", "Visual C++ 2010 x86", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2010.x64", "Visual C++ 2010 x64", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2012.x86", "Visual C++ 2012 x86", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2012.x64", "Visual C++ 2012 x64", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2013.x86", "Visual C++ 2013 x86", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2013.x64", "Visual C++ 2013 x64", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2015+.x86", "Visual C++ 2015-2022 x86", "Microsoft runtime"),
-        new("Microsoft.VCRedist.2015+.x64", "Visual C++ 2015-2022 x64", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2005.x86", "VC++ 2005 x86", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2005.x64", "VC++ 2005 x64", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2008.x86", "VC++ 2008 x86", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2008.x64", "VC++ 2008 x64", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2010.x86", "VC++ 2010 x86", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2010.x64", "VC++ 2010 x64", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2012.x86", "VC++ 2012 x86", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2012.x64", "VC++ 2012 x64", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2013.x86", "VC++ 2013 x86", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2013.x64", "VC++ 2013 x64", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2015+.x86", "VC++ 2015–2022 x86", "Microsoft runtime"),
+        new("Microsoft.VCRedist.2015+.x64", "VC++ 2015–2022 x64", "Microsoft runtime"),
         new("RARLab.WinRAR", "WinRAR", "Archive manager"),
         new("Microsoft.PowerShell", "PowerShell", "Cross-platform shell"),
         new("GitHub.GitHubDesktop", "GitHub Desktop", "Git desktop client"),
@@ -66,32 +66,50 @@ internal static class RecommendedAppCatalog
         Apps.FirstOrDefault(app => app.PackageId.Equals(packageId, StringComparison.OrdinalIgnoreCase))?.IsStore == true;
 
     public static string GetImportDisplayName(string packageId, string detectedName) =>
-        TryGetRuntimeDisplayName(packageId, out var runtimeName) ? runtimeName : detectedName;
+        TryGetGeneratedDisplayName(packageId, out var generatedName) ? generatedName : detectedName;
 
     public static string NormalizeExistingDisplayName(string packageId, string displayName)
     {
-        if (!TryGetRuntimeDisplayName(packageId, out var runtimeName)) return displayName;
+        if (!TryGetGeneratedDisplayName(packageId, out var generatedName)) return displayName;
         var normalized = displayName.Trim();
         return normalized.Equals(packageId, StringComparison.OrdinalIgnoreCase) ||
-               normalized.Contains("desktop runtime", StringComparison.OrdinalIgnoreCase)
-            ? runtimeName
+               normalized.Contains("desktop runtime", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("visual c++", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("vc++", StringComparison.OrdinalIgnoreCase)
+            ? generatedName
             : displayName;
     }
 
     public static string? GetKnownDisplayName(string packageId)
     {
-        if (TryGetRuntimeDisplayName(packageId, out var runtimeName)) return runtimeName;
+        if (TryGetGeneratedDisplayName(packageId, out var generatedName)) return generatedName;
         return Apps.FirstOrDefault(app => app.PackageId.Equals(packageId, StringComparison.OrdinalIgnoreCase))?.Name;
     }
 
-    private static bool TryGetRuntimeDisplayName(string packageId, out string displayName)
+    private static bool TryGetGeneratedDisplayName(string packageId, out string displayName)
     {
-        const string prefix = "Microsoft.DotNet.DesktopRuntime.";
-        if (packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && int.TryParse(packageId[prefix.Length..], out var major))
+        const string runtimePrefix = "Microsoft.DotNet.DesktopRuntime.";
+        if (packageId.StartsWith(runtimePrefix, StringComparison.OrdinalIgnoreCase) && int.TryParse(packageId[runtimePrefix.Length..], out var major))
         {
             displayName = $"Runtime {major}";
             return true;
         }
+
+        const string redistPrefix = "Microsoft.VCRedist.";
+        if (packageId.StartsWith(redistPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = packageId[redistPrefix.Length..].Split('.');
+            if (parts.Length == 2 && (parts[1].Equals("x86", StringComparison.OrdinalIgnoreCase) || parts[1].Equals("x64", StringComparison.OrdinalIgnoreCase)))
+            {
+                var year = parts[0].Equals("2015+", StringComparison.OrdinalIgnoreCase) ? "2015–2022" : parts[0];
+                if (year.All(char.IsDigit) || year == "2015–2022")
+                {
+                    displayName = $"VC++ {year} {parts[1].ToLowerInvariant()}";
+                    return true;
+                }
+            }
+        }
+
         displayName = string.Empty;
         return false;
     }

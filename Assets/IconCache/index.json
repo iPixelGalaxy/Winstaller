@@ -6,15 +6,15 @@
         "7zip.7zip"
       ],
       "file": "png/7zip-7zip.png",
-      "sha256": "b8fab069b18b2a525d353c1dc7c2a06acafa3e9480325f98e9caf1aeedfd7a5b",
-      "source": "Installed 7-Zip"
+      "sha256": "85c2080080627d30a8f59a620687b4ca00c7baca4e9584fac3ca34c861fc27c8",
+      "source": "7-Zip official logo"
     },
     {
       "packageIds": [
         "9MSMLRH6LZF3"
       ],
       "file": "png/9msmlrh6lzf3.png",
-      "sha256": "40da7a5c68f4c295fbb9540029483d0d1eda84cd711df91d2c80a0871449817a",
+      "sha256": "3685bc511f018a674ffb97b6814fe4ce69f029b4d4549694aab9a943a841956f",
       "source": "Installed Microsoft Store Notepad"
     },
     {
@@ -22,7 +22,7 @@
         "9MZ95KL8MR0L"
       ],
       "file": "png/9mz95kl8mr0l.png",
-      "sha256": "ef7d362f509dea123ba14228452045aef6620f8e065fa86e8a04e12d86057f03",
+      "sha256": "3d54f22ca75dc53de7bbe2dc5251129cc14a102468c0e777af0a400f7d64cc0f",
       "source": "Installed Microsoft Store Snipping Tool"
     },
     {
@@ -30,7 +30,7 @@
         "9NBLGGH4Z1JC"
       ],
       "file": "png/9nblggh4z1jc.png",
-      "sha256": "190be94e1a62d28b23eff8243262c4cce2a6daa3cee485e7af726361a2c7d46c",
+      "sha256": "700755b900cf2ad5d5e70bbe67c2e4f9644b76fbb5e50bb8b820da42861bf1e7",
       "source": "Installed Microsoft Store Speedtest"
     },
     {
@@ -38,7 +38,7 @@
         "9PCFS5B6T72H"
       ],
       "file": "png/9pcfs5b6t72h.png",
-      "sha256": "3f1772d6da70f117006c3d747066bc398b40132aea4a1599f29a2d884beb3865",
+      "sha256": "3dc251411026dcd88e13d0faa8c552580a476cd658f818aaed652a4373068cf0",
       "source": "Installed Microsoft Store Paint"
     },
     {
@@ -46,7 +46,7 @@
         "9WZDNCRFHVN5"
       ],
       "file": "png/9wzdncrfhvn5.png",
-      "sha256": "718e063707c097b2a0ebcf430b14a61b436c9e3b757e9ca710b762427c4ab175",
+      "sha256": "7382c3e00784c0c669934b63f457af18001cca0df62e27a4284d09d7b74bf3da",
       "source": "Installed Microsoft Store Calculator"
     },
     {
@@ -54,7 +54,7 @@
         "aria2.aria2"
       ],
       "file": "png/aria2-aria2.png",
-      "sha256": "e4c51b68dd375d59c0e004062a353214e3f006960be44a0a596542384717ba39",
+      "sha256": "0702f53b9afda3e446947656dddeeadc51dab0402bfff56dc6f324236efda864",
       "source": "Installed aria2"
     },
     {
@@ -62,7 +62,7 @@
         "Ditto.Ditto"
       ],
       "file": "png/ditto-ditto.png",
-      "sha256": "80f1be517b37fe5269e798d4b81ae71709cf7294206b887e85a6600809e69539",
+      "sha256": "f3ce100db738c45b0ee97234cf78d903701e5840a7d9ce98e215d22e56a91882",
       "source": "Installed Ditto"
     },
     {
@@ -70,7 +70,7 @@
         "DuongDieuPhap.ImageGlass"
       ],
       "file": "png/duongdieuphap-imageglass.png",
-      "sha256": "fa07713e5db526ff16f58aec168d38d343b0c2feefa17e0c43a41efe699f1dfd",
+      "sha256": "8ff5b9d152328c7eccd70b6d41830c6ccb0837662108047b595a648d77b6b0d2",
       "source": "Installed ImageGlass"
     },
     {
@@ -78,7 +78,7 @@
         "File-New-Project.EarTrumpet"
       ],
       "file": "png/file-new-project-eartrumpet.png",
-      "sha256": "0e774146344e925f9428436278059ca56105976340f7c36de5a33a89d4b24b71",
+      "sha256": "b646f63314615d15f555d8e81f4ca7aaae40267d4aa1cef11cacbdacca710cd5",
       "source": "Installed Microsoft Store EarTrumpet"
     },
     {
@@ -86,7 +86,7 @@
         "Git.Git"
       ],
       "file": "png/git-git.png",
-      "sha256": "da2fb2a894a5b86f5cce9a86209eb04660b6c1695ad5fe99a5fce88d6828d342",
+      "sha256": "0702f53b9afda3e446947656dddeeadc51dab0402bfff56dc6f324236efda864",
       "source": "Installed Git"
     },
     {
@@ -94,7 +94,7 @@
         "GitHub.GitHubDesktop"
       ],
       "file": "png/github-githubdesktop.png",
-      "sha256": "47decd7c252eae8eb104ff67f3cf76ab78ab830713de1586827148877c2f942b",
+      "sha256": "9e4d9fdaa1a28d186607aef5d0e2c561d3367920b119dd3303f73a6839ac3aec",
       "source": "Installed GitHub Desktop"
     },
     {
@@ -102,8 +102,16 @@
         "KeePassXCTeam.KeePassXC"
       ],
       "file": "png/keepassxcteam-keepassxc.png",
-      "sha256": "3ec721a675b88f562d352a65b874afbbe363a551b9f415e726f1be87de32f752",
+      "sha256": "35983281d291f2eaff01dbf1eb5d3e56ea354c73273a5a2e553403e824009498",
       "source": "Installed KeePassXC"
+    },
+    {
+      "packageIds": [
+        "MedalB.V.Medal"
+      ],
+      "file": "png/medalb-v-medal.png",
+      "sha256": "bf416420a237850968cd49f5368681d8ead597589f9384087763b29a5a08e257",
+      "source": "Installed Medal"
     },
     {
       "packageIds": [
@@ -114,15 +122,15 @@
         "Microsoft.DotNet.DesktopRuntime.10"
       ],
       "file": "png/microsoft-dotnet-desktopruntime-6.png",
-      "sha256": "15a112ed7ac5a304f818b392c3f93405ec10ee257c78a14c1c9aadcd0776bdb0",
-      "source": "Installed .NET Desktop Runtime"
+      "sha256": "d88f0d3d0102205ad038bf8aa49f70a211831ce381dcbbfb061b2e57b654db7b",
+      "source": "Official Microsoft .NET logo"
     },
     {
       "packageIds": [
         "Microsoft.PowerShell"
       ],
       "file": "png/microsoft-powershell.png",
-      "sha256": "b967fadd34773ac94f2fd749aa0d18b9b1ba2e5acb5b7a5260d6a7843e0d6707",
+      "sha256": "1ce8154581d6564052885d24b97df08bc873fae268801551cac585fbff8b08a9",
       "source": "Installed PowerShell"
     },
     {
@@ -130,15 +138,15 @@
         "Microsoft.PowerToys"
       ],
       "file": "png/microsoft-powertoys.png",
-      "sha256": "09437845e14dd969deca327a16356ab7a0ace2af7432bca677e50ebc1ca30742",
-      "source": "Installed PowerToys"
+      "sha256": "9b7f9e85cdebba71ba01b0ddb3d96a571dd9365087391cb01987d3f2b4c50975",
+      "source": "Installed PowerToys settings logo"
     },
     {
       "packageIds": [
         "Microsoft.VisualStudioCode"
       ],
       "file": "png/microsoft-visualstudiocode.png",
-      "sha256": "e3ce1c8c0f40fda690b8d632b849c4f2e46956eb70c7b80e3e115dcc27ef653a",
+      "sha256": "a3751743f37c94a9748faf8f4b23e0dc88bf08fb9bef18fe35c514524b9be5cd",
       "source": "Installed Visual Studio Code"
     },
     {
@@ -146,7 +154,7 @@
         "Microsoft.WindowsTerminal"
       ],
       "file": "png/microsoft-windowsterminal.png",
-      "sha256": "c4d1b7fe319046515f09da8befb22d9962bce1b0ed79beac1271e4cee2c81dd2",
+      "sha256": "36abb587e9a7888a078772e85b525e24a581350d4130420356555110619edc05",
       "source": "Installed Windows Terminal"
     },
     {
@@ -154,7 +162,7 @@
         "Nilesoft.Shell"
       ],
       "file": "png/nilesoft-shell.png",
-      "sha256": "2986e2905fac7b9c29be71d2804b29096364471d34d3bd9120fc8b898c9b4e3c",
+      "sha256": "3e4cc08a6d1c2fb2d906fc4ebebaa52d2a482bd79fb628673cbf42af4a123f24",
       "source": "Installed Nilesoft Shell"
     },
     {
@@ -162,7 +170,7 @@
         "RARLab.WinRAR"
       ],
       "file": "png/rarlab-winrar.png",
-      "sha256": "22c047abc289fa468db8dba0f50dce9399168748d3c4c1779bfd150c69bde89d",
+      "sha256": "4de404c20035ee035cf68378f8f2de29e0faef7a992f7d3dcde274adef19c20d",
       "source": "Installed WinRAR"
     },
     {
@@ -170,7 +178,7 @@
         "Unity.UnityHub"
       ],
       "file": "png/unity-unityhub.png",
-      "sha256": "aff473e9eae132b0f449259f438872b57918b161668f53d9316115ca8dba5ea0",
+      "sha256": "ffa590f59b546fd1c9df6268f71dd8a37aa2f613557bd7ad10ca0fb2fed8868f",
       "source": "Installed Unity Hub"
     },
     {
@@ -178,7 +186,7 @@
         "VideoLAN.VLC"
       ],
       "file": "png/videolan-vlc.png",
-      "sha256": "860316c281b268ffd1cdc58bd1708c97e1591685667c151dd52898765c91f13b",
+      "sha256": "425fe48395323e7b47dc8d5582877a0e59826c00823f53cba4b09dca64ee17b1",
       "source": "Installed VLC"
     }
   ]
