@@ -555,24 +555,44 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
     {
+        var runtimeGrid = new VariableSizedWrapGrid
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
         var grid = new VariableSizedWrapGrid
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Left
         };
+        var runtimeTitle = new TextBlock { Text = "Runtimes", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } };
+        var runtimeCount = new TextBlock { FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") };
+        var runtimeSection = new Expander
+        {
+            Header = new StackPanel { Spacing = 2, Children = { runtimeTitle, runtimeCount } },
+            Content = runtimeGrid,
+            IsExpanded = true
+        };
 
         void Refresh()
         {
+            runtimeGrid.Children.Clear();
             grid.Children.Clear();
-            foreach (var group in config.DefaultInstalls.OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
-                         .GroupBy(app => RecommendedAppCatalog.GetFamilyName(app) ?? app, StringComparer.OrdinalIgnoreCase))
-            {
-                var apps = group.ToList();
-                grid.Children.Add(RecommendedAppCatalog.GetFamilyName(apps[0]) is { } family
-                    ? BuildAppFamilyTile(family, apps, config, Refresh)
-                    : BuildAppTile(apps[0], config, Refresh));
-            }
+            var runtimes = config.DefaultInstalls
+                .Where(app => RecommendedAppCatalog.GetFamilyName(app) is not null)
+                .OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            runtimeCount.Text = $"{runtimes.Count} packages";
+            runtimeSection.Visibility = runtimes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var packageId in runtimes)
+                runtimeGrid.Children.Add(BuildAppTile(packageId, config, Refresh));
 
+            foreach (var packageId in config.DefaultInstalls
+                         .Where(app => RecommendedAppCatalog.GetFamilyName(app) is null)
+                         .OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase))
+            {
+                grid.Children.Add(BuildAppTile(packageId, config, Refresh));
+            }
         }
 
         Refresh();
@@ -581,6 +601,7 @@ public sealed partial class MainWindow : Window
             Spacing = 12,
             Children =
             {
+                runtimeSection,
                 grid,
                 ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null))
             }
@@ -609,6 +630,9 @@ public sealed partial class MainWindow : Window
     }
     private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
     {
+        Uri? installerUrl = null;
+        var download = IconActionButton("\uE896", "Direct download unavailable", () => OpenExternalUri(installerUrl));
+        download.IsEnabled = false;
         var footer = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -623,6 +647,7 @@ public sealed partial class MainWindow : Window
                     SaveConfiguration();
                     refresh();
                 }),
+                download,
                 IconActionButton("\uE713", "App settings", async () => await ShowAppBehaviorDialogAsync(config, packageId))
             }
         };
@@ -630,12 +655,20 @@ public sealed partial class MainWindow : Window
         var displayName = GetAppDisplayName(config, packageId);
         var iconView = CreateAppIconView(packageId, 40, displayName);
         var title = CreateAppTileTitle(displayName);
+        var version = new TextBlock
+        {
+            Text = "Version loading…",
+            FontSize = 11,
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var labels = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { title, version } };
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.Children.Add(iconView.Host);
-        Grid.SetColumn(title, 1);
-        header.Children.Add(title);
+        Grid.SetColumn(labels, 1);
+        header.Children.Add(labels);
 
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -643,6 +676,8 @@ public sealed partial class MainWindow : Window
         content.Children.Add(header);
         Grid.SetRow(footer, 1);
         content.Children.Add(footer);
+
+        _ = LoadAppMetadataAsync(packageId, version, download, url => installerUrl = url);
 
         return new Border
         {
@@ -700,7 +735,7 @@ public sealed partial class MainWindow : Window
         AppIconService.WarmCache(RecommendedAppCatalog.Apps.Select(app => app.PackageId).Concat(appInstaller.DefaultInstalls));
     }
 
-    private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null)
+    private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null, Func<bool>? isCurrent = null)
     {
         var host = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left };
         var fallback = new FontIcon { Glyph = "\uE896", FontSize = size * 0.65, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
@@ -709,7 +744,7 @@ public sealed partial class MainWindow : Window
         host.Children.Add(fallback);
         host.Children.Add(spinner);
         host.Children.Add(image);
-        _ = LoadAppIconAsync(packageId, image, fallback, spinner, displayName: displayName);
+        _ = LoadAppIconAsync(packageId, image, fallback, spinner, isCurrent, displayName);
         return new AppIconView(host, image, fallback, spinner);
     }
 
@@ -752,9 +787,68 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             RunLog.WriteException("AppIcon", $"Failed loading icon for {packageId}", ex);
-            await RunOnUiThreadAsync(() => { spinner.IsActive = false; spinner.Visibility = Visibility.Collapsed; fallback.Visibility = Visibility.Visible; });
+            try
+            {
+                if (isCurrent is not null && !isCurrent()) return;
+                await RunOnUiThreadAsync(() =>
+                {
+                    if (isCurrent is not null && !isCurrent()) return;
+                    spinner.IsActive = false;
+                    spinner.Visibility = Visibility.Collapsed;
+                    fallback.Visibility = Visibility.Visible;
+                });
+            }
+            catch (Exception uiException)
+            {
+                RunLog.WriteException("AppIcon", $"Failed showing fallback for {packageId}", uiException);
+            }
         }
-    }    private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
+    }
+
+    private async Task LoadAppMetadataAsync(string packageId, TextBlock version, Button download, Action<Uri?> setInstallerUrl)
+    {
+        try
+        {
+            var metadata = await WingetPackageMetadataService.GetAsync(packageId);
+            await RunOnUiThreadAsync(() =>
+            {
+                version.Text = string.IsNullOrWhiteSpace(metadata.Version) ? "Version unavailable" : $"Version {metadata.Version}";
+                setInstallerUrl(metadata.InstallerUrl);
+                download.IsEnabled = metadata.InstallerUrl is not null;
+                var label = metadata.InstallerUrl is null ? "Direct download unavailable" : "Open direct download";
+                ToolTipService.SetToolTip(download, label);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(download, label);
+            });
+        }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("WingetMetadata", $"Failed showing metadata for {packageId}", ex);
+            try
+            {
+                await RunOnUiThreadAsync(() => version.Text = "Version unavailable");
+            }
+            catch (Exception uiException)
+            {
+                RunLog.WriteException("WingetMetadata", $"Failed showing unavailable metadata for {packageId}", uiException);
+            }
+        }
+    }
+
+    private void OpenExternalUri(Uri? uri)
+    {
+        if (uri is null || uri.Scheme != Uri.UriSchemeHttps) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("UI", $"Failed opening {uri}", ex);
+            AppendOutput($"Failed to open download: {ex.Message}");
+        }
+    }
+
+    private static string GetAppDisplayName(AppInstallerConfig config, string packageId)
     {
         var displayName = config.Behaviors.TryGetValue(packageId, out var behavior) && !string.IsNullOrWhiteSpace(behavior.DisplayName)
             ? behavior.DisplayName
@@ -3019,23 +3113,42 @@ public sealed partial class MainWindow : Window
         var id = new TextBox { Text = packageId ?? string.Empty, PlaceholderText = "Winget package ID" };
         EnableAppSettingsTextCopy(name);
         EnableAppSettingsTextCopy(id);
-        var iconPreview = CreateAppIconView(id.Text, 64);
+        var iconPreviewActive = true;
+        var iconPreview = CreateAppIconView(id.Text, 64, name.Text, () => iconPreviewActive);
         var iconGeneration = 0;
+        CancellationTokenSource? iconPreviewCancellation = null;
         async Task RefreshIconPreviewAsync()
         {
+            iconPreviewCancellation?.Cancel();
+            iconPreviewCancellation?.Dispose();
+            iconPreviewCancellation = new CancellationTokenSource();
+            var cancellationToken = iconPreviewCancellation.Token;
             var generation = ++iconGeneration;
+            if (!iconPreviewActive) return;
             iconPreview.Image.Visibility = Visibility.Collapsed;
             iconPreview.Fallback.Visibility = Visibility.Collapsed;
             iconPreview.Spinner.Visibility = Visibility.Visible;
             iconPreview.Spinner.IsActive = true;
             var typedId = id.Text.Trim();
-            if (string.IsNullOrWhiteSpace(typedId)) return;
-            await Task.Delay(600);
-            if (generation != iconGeneration) return;
-            await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, iconPreview.Spinner, () => generation == iconGeneration, name.Text);
+            if (string.IsNullOrWhiteSpace(typedId))
+            {
+                iconPreview.Spinner.IsActive = false;
+                iconPreview.Spinner.Visibility = Visibility.Collapsed;
+                iconPreview.Fallback.Visibility = Visibility.Visible;
+                return;
+            }
+            try
+            {
+                await Task.Delay(600, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (!iconPreviewActive || generation != iconGeneration) return;
+            await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, iconPreview.Spinner, () => iconPreviewActive && generation == iconGeneration, name.Text);
         }
-        id.TextChanged += async (_, _) => await RefreshIconPreviewAsync();
-        name.TextChanged += async (_, _) => await RefreshIconPreviewAsync();
+        id.TextChanged += (_, _) => _ = RefreshIconPreviewAsync();
         var mode = new ComboBox { MinWidth = 180 };
         mode.Items.Add("Default");
         mode.Items.Add("Prepared");
@@ -3096,7 +3209,19 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel"
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        ContentDialogResult dialogResult;
+        try
+        {
+            dialogResult = await dialog.ShowAsync();
+        }
+        finally
+        {
+            iconPreviewActive = false;
+            ++iconGeneration;
+            iconPreviewCancellation?.Cancel();
+            iconPreviewCancellation?.Dispose();
+        }
+        if (dialogResult != ContentDialogResult.Primary)
             return;
 
         var newId = id.Text.Trim();
