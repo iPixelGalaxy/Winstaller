@@ -608,28 +608,9 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private FrameworkElement BuildAppFamilyTile(string family, List<string> packageIds, AppInstallerConfig config, Action refresh)
-    {
-        var iconView = CreateAppIconView(RecommendedAppCatalog.GetFamilyIconPackageId(packageIds[0]), 40, family);
-        var removeAll = IconActionButton("\uE74D", "Remove all", () => { foreach (var packageId in packageIds) { config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase)); config.Behaviors.Remove(packageId); } SaveConfiguration(); refresh(); });
-        var header = new Grid { ColumnSpacing = 8 };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(iconView.Host);
-        var labels = new StackPanel { Spacing = 2, Children = { new TextBlock { Text = family, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap }, new TextBlock { Text = $"{packageIds.Count} packages", FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") } } };
-        Grid.SetColumn(labels, 1); header.Children.Add(labels); Grid.SetColumn(removeAll, 2); header.Children.Add(removeAll);
-        var children = new StackPanel { Spacing = 6 };
-        foreach (var packageId in packageIds.OrderBy(id => GetAppDisplayName(config, id), StringComparer.OrdinalIgnoreCase))
-        {
-            var row = new Grid { ColumnSpacing = 6 }; row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = GetAppDisplayName(config, packageId), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
-            var delete = IconActionButton("\uE74D", "Delete app", () => { config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase)); config.Behaviors.Remove(packageId); SaveConfiguration(); refresh(); });
-            var settings = IconActionButton("\uE713", "App settings", async () => await ShowAppBehaviorDialogAsync(config, packageId));
-            Grid.SetColumn(delete, 1); Grid.SetColumn(settings, 2); row.Children.Add(delete); row.Children.Add(settings); children.Children.Add(row);
-        }
-        return new Border { Width = 250, Margin = new Thickness(0, 0, 8, 8), Background = ResourceBrush("WinstallerCardBrush"), BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14), Child = new Expander { Header = header, Content = children } };
-    }
     private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
     {
+        var displayName = GetAppDisplayName(config, packageId);
         Uri? installerUrl = null;
         var download = IconActionButton("\uE896", "Direct download unavailable", () => OpenExternalUri(installerUrl));
         download.IsEnabled = false;
@@ -640,8 +621,10 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             Children =
             {
-                IconActionButton("\uE74D", "Delete app", () =>
+                IconActionButton("\uE74D", "Delete app", async () =>
                 {
+                    if (!await ConfirmAsync("Delete app?", $"Remove {displayName} from App Installer? This only removes its Winstaller configuration; it does not uninstall the app.", "Delete"))
+                        return;
                     config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase));
                     config.Behaviors.Remove(packageId);
                     SaveConfiguration();
@@ -652,7 +635,6 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var displayName = GetAppDisplayName(config, packageId);
         var iconView = CreateAppIconView(packageId, 40, displayName);
         var title = CreateAppTileTitle(displayName);
         var version = new TextBlock
@@ -1470,8 +1452,11 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(box, 1);
         row.Children.Add(box);
 
-        var removeButton = CompactRemoveButton(() =>
+        var removeButton = CompactRemoveButton(async () =>
         {
+            var currentValue = list[index]?.ToString() ?? string.Empty;
+            if (!await ConfirmSymlinkRemovalAsync(currentValue, SplitName(property.Name)))
+                return;
             list.RemoveAt(index);
             SaveConfiguration();
             refresh();
@@ -1594,8 +1579,11 @@ public sealed partial class MainWindow : Window
         fields.Children.Add(typeToggle);
         outer.Children.Add(fields);
 
-        var removeButton = CompactRemoveButton(() =>
+        var removeButton = CompactRemoveButton(async () =>
         {
+            var name = GetItemTitle(symlink, typeof(SpecialSymlink), index);
+            if (!await ConfirmSymlinkRemovalAsync(name, "Special"))
+                return;
             list.RemoveAt(index);
             SaveConfiguration();
             refresh();
@@ -1666,7 +1654,7 @@ public sealed partial class MainWindow : Window
         return button;
     }
 
-    private Button CompactRemoveButton(Action remove)
+    private Button CompactRemoveButton(Func<Task> remove)
     {
         var button = new Button
         {
@@ -1679,7 +1667,23 @@ public sealed partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
         ToolTipService.SetToolTip(button, "Remove");
-        button.Click += (_, _) => remove();
+        button.Click += async (_, _) =>
+        {
+            button.IsEnabled = false;
+            try
+            {
+                await remove();
+            }
+            catch (Exception ex)
+            {
+                RunLog.WriteException("UI", "Remove failed", ex);
+                AppendOutput($"Remove failed: {ex.Message}");
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        };
         return button;
     }
 
@@ -2965,6 +2969,15 @@ public sealed partial class MainWindow : Window
     private static string GetSpecialSymlinkGlyph(SpecialSymlink symlink)
     {
         return symlink.IsDirectory ? "\uE8B7" : "\uE8A5";
+    }
+
+    private Task<bool> ConfirmSymlinkRemovalAsync(string name, string category)
+    {
+        var label = string.IsNullOrWhiteSpace(name) ? "this entry" : $"\"{name}\"";
+        return ConfirmAsync(
+            "Remove symlink?",
+            $"Remove {label} from {category} symlink configuration? Existing files and symlinks stay untouched.",
+            "Remove");
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
