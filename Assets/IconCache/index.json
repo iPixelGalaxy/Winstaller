@@ -3,15 +3,6 @@
   "icons": [
     {
       "packageIds": [
-        "MicaForEveryone.MicaForEveryone",
-        "MicaForEveryone.MicaForEveryone2"
-      ],
-      "file": "png/micaforeveryone.png",
-      "sha256": "126cb4654ad3225642ccd122bdc89ab99aa9f1d7db44718026f99f4aaccb931b",
-      "source": "Mica For Everyone"
-    },
-    {
-      "packageIds": [
         "7zip.7zip"
       ],
       "file": "png/7zip-7zip.png",
@@ -71,6 +62,14 @@
       "file": "png/9wzdncrfhvn5.png",
       "sha256": "7382c3e00784c0c669934b63f457af18001cca0df62e27a4284d09d7b74bf3da",
       "source": "Installed Microsoft Store Calculator"
+    },
+    {
+      "packageIds": [
+        "Anthropic.Claude"
+      ],
+      "file": "png/anthropic-claude.png",
+      "sha256": "bf0806229b9fdb17223139452ac29abc458ba75086697b52ec3e6795a2f9fc30",
+      "source": "Anthropic Claude"
     },
     {
       "packageIds": [
@@ -135,6 +134,15 @@
       "file": "png/medalb-v-medal.png",
       "sha256": "bf416420a237850968cd49f5368681d8ead597589f9384087763b29a5a08e257",
       "source": "Installed Medal"
+    },
+    {
+      "packageIds": [
+        "MicaForEveryone.MicaForEveryone",
+        "MicaForEveryone.MicaForEveryone2"
+      ],
+      "file": "png/micaforeveryone.png",
+      "sha256": "126cb4654ad3225642ccd122bdc89ab99aa9f1d7db44718026f99f4aaccb931b",
+      "source": "Mica For Everyone"
     },
     {
       "packageIds": [
