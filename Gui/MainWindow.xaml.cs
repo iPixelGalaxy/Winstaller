@@ -231,6 +231,12 @@ public sealed partial class MainWindow : Window
     private void LoadConfiguration()
     {
         _config = ConfigurationManager.LoadConfiguration();
+        _appInstallerGroupExpanded.Clear();
+        foreach (var (groupName, isExpanded) in ConfigurationManager.LoadAppInstallerGroupExpanded())
+        {
+            if (Enum.TryParse<RecommendedAppGroup>(groupName, ignoreCase: true, out var group))
+                _appInstallerGroupExpanded[group] = isExpanded;
+        }
         _modules =
         [
             new("Symlinks", "Restore configured profile symlinks", "\uE71B", _config.Symlinks, () => new SymlinksModule(_config), SystemInfoImportScope.Symlinks),
@@ -605,8 +611,14 @@ public sealed partial class MainWindow : Window
                 body.Visibility = isExpanded ? Visibility.Visible : Visibility.Collapsed;
             }
 
-            SetExpanded(_appInstallerGroupExpanded.TryGetValue(group.Group, out var isExpanded) && isExpanded);
-            header.Click += (_, _) => SetExpanded(!_appInstallerGroupExpanded[group.Group]);
+            var defaultExpanded = group.Group == RecommendedAppGroup.None;
+            SetExpanded(_appInstallerGroupExpanded.TryGetValue(group.Group, out var isExpanded) ? isExpanded : defaultExpanded);
+            header.Click += (_, _) =>
+            {
+                SetExpanded(!_appInstallerGroupExpanded[group.Group]);
+                ConfigurationManager.SaveAppInstallerGroupExpanded(
+                    _appInstallerGroupExpanded.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value));
+            };
             return (group, tiles, section);
         }).ToList();
 

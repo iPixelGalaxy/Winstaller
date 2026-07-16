@@ -107,6 +107,20 @@ public static class ConfigurationManager
         SaveJson(DefaultConfigPath, general);
     }
 
+    public static Dictionary<string, bool> LoadAppInstallerGroupExpanded()
+    {
+        var general = LoadJson(DefaultConfigPath, new GeneralConfig());
+        return new Dictionary<string, bool>(general.AppInstallerGroupExpanded, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static void SaveAppInstallerGroupExpanded(IReadOnlyDictionary<string, bool> expanded)
+    {
+        Directory.CreateDirectory(ConfigDirectory);
+        var general = LoadJson(DefaultConfigPath, new GeneralConfig());
+        general.AppInstallerGroupExpanded = new Dictionary<string, bool>(expanded, StringComparer.OrdinalIgnoreCase);
+        SaveJson(DefaultConfigPath, general);
+    }
+
     public static WinstallerConfig CreateDefaultConfiguration()
     {
         return new WinstallerConfig
