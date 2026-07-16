@@ -151,10 +151,7 @@ public static class ConfigurationManager
                 Enabled = false,
                 SetupInfoDirectory = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "SetupInfo"),
                 DefaultTimeoutSeconds = 300,
-                BulkTimeoutSeconds = 3600,
-                ManualTimeoutSeconds = 1800,
-                PreparedInstallers = [],
-                ManualInstalls = [],
+                InstallerTimeoutSeconds = 1800,
                 CustomScripts = [],
                 Behaviors = new(StringComparer.OrdinalIgnoreCase),
                 DefaultInstalls = []
@@ -306,7 +303,10 @@ public static class ConfigurationManager
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<WinstallerConfig>(json, JsonOptions) ?? CreateDefaultConfiguration();
+            var root = JsonNode.Parse(json)?.AsObject();
+            if (root?["appInstaller"] is JsonObject appInstaller)
+                MigrateAppInstallerJson(appInstaller);
+            return JsonSerializer.Deserialize<WinstallerConfig>(root?.ToJsonString() ?? json, JsonOptions) ?? CreateDefaultConfiguration();
         }
         catch
         {
@@ -360,7 +360,13 @@ public static class ConfigurationManager
 
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllText(path), type, JsonOptions) ?? fallback;
+            var json = File.ReadAllText(path);
+            if (type == typeof(AppInstallerConfig) && JsonNode.Parse(json) is JsonObject appInstaller)
+            {
+                MigrateAppInstallerJson(appInstaller);
+                json = appInstaller.ToJsonString();
+            }
+            return JsonSerializer.Deserialize(json, type, JsonOptions) ?? fallback;
         }
         catch
         {
@@ -398,6 +404,34 @@ public static class ConfigurationManager
             if (File.Exists(temporaryPath))
                 File.Delete(temporaryPath);
         }
+    }
+
+    private static void MigrateAppInstallerJson(JsonObject appInstaller)
+    {
+        if (appInstaller["manualTimeoutSeconds"] is JsonNode timeout && appInstaller["installerTimeoutSeconds"] is null)
+            appInstaller["installerTimeoutSeconds"] = timeout.DeepClone();
+
+        var defaults = appInstaller["defaultInstalls"] as JsonArray ?? [];
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new JsonArray();
+        foreach (var source in new[] { defaults, appInstaller["preparedInstallers"] as JsonArray, appInstaller["manualInstalls"] as JsonArray })
+        {
+            if (source is null) continue;
+            foreach (var entry in source)
+            {
+                var id = entry?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(id) && seen.Add(id))
+                    merged.Add(id);
+            }
+        }
+        appInstaller["defaultInstalls"] = merged;
+        appInstaller.Remove("preparedInstallers");
+        appInstaller.Remove("manualInstalls");
+        appInstaller.Remove("manualTimeoutSeconds");
+        appInstaller.Remove("bulkTimeoutSeconds");
+        if (appInstaller["behaviors"] is JsonObject behaviors)
+            foreach (var behavior in behaviors.Select(pair => pair.Value).OfType<JsonObject>())
+                behavior.Remove("installMode");
     }
 
     private static bool GetEnabled(object config)

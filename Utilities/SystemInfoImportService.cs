@@ -1042,10 +1042,6 @@ public static class SystemInfoImportService
     {
         var packageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var packageId in config.AppInstaller.PreparedInstallers)
-            packageIds.Add(packageId);
-        foreach (var packageId in config.AppInstaller.ManualInstalls)
-            packageIds.Add(packageId);
         foreach (var packageId in config.AppInstaller.DefaultInstalls)
             packageIds.Add(packageId);
         foreach (var script in config.AppInstaller.CustomScripts)

@@ -3,6 +3,7 @@ using Winstaller.Models;
 using Winstaller.Utilities;
 using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Winstaller.Modules;
 
@@ -16,7 +17,7 @@ public class AppInstallerModule : ModuleBase
     public AppInstallerModule(WinstallerConfig config) : base(config) { }
 
     public override string Name => "App Installer";
-    public override string Description => "Installs applications using winget with prepared configurations, manual installers, and bulk installs";
+    public override string Description => "Installs configured applications with automatic per-app installers";
     public override bool IsEnabled => Config.AppInstaller.Enabled;
 
     public override async Task<bool> ExecuteAsync()
@@ -45,36 +46,9 @@ public class AppInstallerModule : ModuleBase
             Console.WriteLine();
         }
 
-        // Phase 1: Prepared Installers (with INF files)
-        if (Config.AppInstaller.PreparedInstallers.Count > 0)
-        {
-            ConsoleHelper.WriteSubHeader("Phase 1: Prepared Installers");
-            foreach (var packageId in Config.AppInstaller.PreparedInstallers)
-            {
-                totalCount++;
-                if (await InstallPreparedPackageAsync(packageId))
-                    successCount++;
-                Console.WriteLine();
-            }
-        }
-
-        // Phase 2: Manual Installs
-        if (Config.AppInstaller.ManualInstalls.Count > 0)
-        {
-            ConsoleHelper.WriteSubHeader("Phase 2: Manual Installations");
-            foreach (var packageId in Config.AppInstaller.ManualInstalls)
-            {
-                totalCount++;
-                if (await InstallManualPackageAsync(packageId))
-                    successCount++;
-                Console.WriteLine();
-            }
-        }
-
-        // Phase 3: Custom Scripts
         if (Config.AppInstaller.CustomScripts.Count > 0)
         {
-            ConsoleHelper.WriteSubHeader("Phase 3: Custom Installations");
+            ConsoleHelper.WriteSubHeader("Custom Installations");
             foreach (var script in Config.AppInstaller.CustomScripts)
             {
                 totalCount++;
@@ -196,17 +170,14 @@ public class AppInstallerModule : ModuleBase
     }
     private async Task<bool> InstallConfiguredPackageAsync(string packageId)
     {
-        if (!Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior))
-        {
-            return await InstallDefaultPackageAsync(packageId);
-        }
+        Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior);
+        behavior ??= new AppInstallBehavior();
 
-        var success = behavior.InstallMode.ToLowerInvariant() switch
-        {
-            "prepared" => await InstallPreparedPackageAsync(packageId),
-            "manual" => await InstallManualPackageAsync(packageId),
-            _ => await InstallDefaultPackageAsync(packageId)
-        };
+        var success = packageId.Equals("Microsoft.VisualStudioCode", StringComparison.OrdinalIgnoreCase)
+            ? await InstallVisualStudioCodeAsync()
+            : packageId.Equals("Git.Git", StringComparison.OrdinalIgnoreCase)
+                ? await InstallGitAsync(behavior.Git)
+                : await InstallDefaultPackageAsync(packageId);
 
         if (!success)
             return false;
@@ -280,98 +251,92 @@ public class AppInstallerModule : ModuleBase
         return true;
     }
 
-    private async Task<bool> InstallPreparedPackageAsync(string packageId)
+    private async Task<bool> InstallVisualStudioCodeAsync()
     {
-        var setupInfoDir = ExpandEnvironmentVariables(Config.AppInstaller.SetupInfoDirectory);
-        var infFileName = packageId.Replace(".", "-") + ".inf";
-        var infFile = Path.Combine(setupInfoDir, infFileName);
-
-        if (!File.Exists(infFile))
+        var architecture = RuntimeInformation.ProcessArchitecture switch
         {
-            ConsoleHelper.WriteWarning($"INF file not found for {packageId}: {infFile}");
-            Console.WriteLine("Falling back to default installation...");
-            return await InstallDefaultPackageAsync(packageId);
-        }
-
-        Console.WriteLine($"Installing {packageId} with INF file...");
-        Console.WriteLine("Opening new console window for winget output...");
-
-        var overrideArgs = $"/LOADINF=\"{infFile}\" /SILENT /NOCANCEL";
-        var consoleCmd = $"winget install {packageId} --override '{overrideArgs}'";
-
-        try
-        {
-            var result = await RunCmdAsync(
-                $"start /wait powershell /c \"{consoleCmd}\"",
-                Config.AppInstaller.DefaultTimeoutSeconds * 1000
-            );
-
-            if (result == 0)
-            {
-                ConsoleHelper.WriteSuccess($"Successfully installed {packageId}");
-                return true;
-            }
-            else
-            {
-                ConsoleHelper.WriteError($"Installation failed for {packageId} (exit code: {result})");
-                return false;
-            }
-        }
-        catch (Exception ex)
-        {
-            ConsoleHelper.WriteError($"Error installing {packageId}: {ex.Message}");
-            return false;
-        }
-    }
-
-    private async Task<bool> InstallManualPackageAsync(string packageId)
-    {
-        Console.WriteLine($"Manual installation for {packageId}");
-        Console.WriteLine("Downloading package...");
-
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Architecture.Arm64 => "win32-arm64-user",
+            Architecture.X86 => "win32-user",
+            _ => "win32-x64-user"
+        };
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-
         try
         {
-            // Download using winget
-            var downloadResult = await RunCmdAsync(
-                $"winget download {packageId} -d \"{tempDir}\"",
-                Config.AppInstaller.DefaultTimeoutSeconds * 1000
-            );
-
-            if (downloadResult != 0)
-            {
-                ConsoleHelper.WriteError($"Failed to download {packageId}");
-                return false;
-            }
-
-            // Find the downloaded executable
-            var installerPath = FindInstaller(tempDir);
-            if (installerPath == null)
-            {
-                ConsoleHelper.WriteError($"No executable found for {packageId}");
-                return false;
-            }
-
-            Console.WriteLine($"Running installer: {Path.GetFileName(installerPath)}");
-            Console.WriteLine("Please complete the installation manually...");
-
-            var result = await RunProcessAsync(installerPath, "", Config.AppInstaller.ManualTimeoutSeconds * 1000);
-
-            ConsoleHelper.WriteSuccess($"Manual installation process finished for {packageId}");
-            return true;
+            var installer = Path.Combine(tempDir, "VSCodeUserSetup.exe");
+            var url = $"https://update.code.visualstudio.com/latest/{architecture}/stable";
+            Console.WriteLine("Downloading Visual Studio Code User Setup...");
+            using var response = await HttpClient.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+            await using (var output = File.Create(installer))
+                await response.Content.CopyToAsync(output);
+            var arguments = "/VERYSILENT /NORESTART /SP- /MERGETASKS=\"addcontextmenufiles,addcontextmenufolders,addtopath,!runcode\"";
+            var result = await RunProcessAsync(installer, arguments, Config.AppInstaller.InstallerTimeoutSeconds * 1000);
+            if (result != 0) ConsoleHelper.WriteError($"VS Code installer failed (exit code: {result})");
+            return result == 0;
         }
         catch (Exception ex)
         {
-            ConsoleHelper.WriteError($"Error during manual installation of {packageId}: {ex.Message}");
+            ConsoleHelper.WriteError($"VS Code installation failed: {ex.Message}");
             return false;
         }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
+
+    private async Task<bool> InstallGitAsync(GitInstallOptions options)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            Console.WriteLine("Downloading Git for Windows...");
+            var download = await RunProcessAsync("winget", $"download --id Git.Git --exact --source winget --download-directory \"{tempDir}\" --accept-source-agreements --accept-package-agreements --disable-interactivity", Config.AppInstaller.DefaultTimeoutSeconds * 1000);
+            if (download != 0) { ConsoleHelper.WriteError($"Git download failed (exit code: {download})"); return false; }
+            var installer = FindInstaller(tempDir);
+            if (installer is null) { ConsoleHelper.WriteError("Git installer was not downloaded."); return false; }
+            var infPath = Path.Combine(tempDir, "git-install.inf");
+            await File.WriteAllTextAsync(infPath, BuildGitInf(options));
+            var result = await RunProcessAsync(installer, $"/VERYSILENT /NORESTART /NOCANCEL /SP- /LOADINF=\"{infPath}\"", Config.AppInstaller.InstallerTimeoutSeconds * 1000);
+            if (result != 0) ConsoleHelper.WriteError($"Git installer failed (exit code: {result})");
+            return result == 0;
+        }
+        catch (Exception ex)
+        {
+            ConsoleHelper.WriteError($"Git installation failed: {ex.Message}");
+            return false;
+        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
+    }
+
+    internal static string BuildGitInf(GitInstallOptions options)
+    {
+        static string Value<T>(T value) where T : Enum => value.ToString();
+        static string Enabled(bool value) => value ? "Enabled" : "Disabled";
+        static string TriState(GitTriState value) => value == GitTriState.Auto ? string.Empty : Value(value);
+        static void RejectNewlines(string value, string name)
+        {
+            if (value.Contains('\r') || value.Contains('\n')) throw new ArgumentException($"{name} cannot contain newlines.");
+        }
+        RejectNewlines(options.CustomEditorPath, nameof(options.CustomEditorPath));
+        RejectNewlines(options.PlinkPath, nameof(options.PlinkPath));
+        var components = new List<string>();
+        if (options.DesktopIcon) components.Add("icons");
+        if (options.GitBashHere) components.Add("ext\\reg\\shellhere");
+        if (options.GitGuiHere) components.Add("ext\\reg\\guihere");
+        if (options.GitLfs) components.Add("gitlfs");
+        if (options.AssociateGitFiles) components.Add("assoc");
+        if (options.AssociateShellFiles) components.Add("assoc_sh");
+        if (options.WindowsTerminalProfile) components.Add("windowsterminal");
+        if (options.Scalar) components.Add("scalar");
+        var lines = new List<string> { "[Setup]", "Lang=default", $"Components={string.Join(',', components)}", $"EditorOption={Value(options.Editor)}", $"PathOption={Value(options.Path)}", $"SSHOption={Value(options.Ssh)}", $"CURLOption={Value(options.Https)}", $"CRLFOption={Value(options.LineEndings)}", $"BashTerminalOption={Value(options.Terminal)}", $"GitPullBehaviorOption={Value(options.PullBehavior)}", $"UseCredentialManager={Enabled(options.CredentialManager)}", $"PerformanceTweaksFSCache={Enabled(options.FileSystemCache)}", $"EnableSymlinks={Enabled(options.Symlinks)}", $"EnableAutoUpdate={Enabled(options.CheckForUpdates)}" };
+        if (options.DefaultBranch != GitDefaultBranch.InstallerDefault) lines.Add($"DefaultBranchOption={Value(options.DefaultBranch)}");
+        if (options.Editor == GitEditor.Custom) lines.Add($"CustomEditorPath={options.CustomEditorPath}");
+        if (options.Ssh == GitSsh.ExternalPlink) lines.Add($"PlinkPath={options.PlinkPath}");
+        foreach (var (key, value) in new[] { ("EnableASLR", options.MandatoryAslr), ("EnableBuiltinDiffTool", options.BuiltinDifftool), ("EnableBuiltinRebase", options.BuiltinRebase), ("EnableBuiltinStash", options.BuiltinStash), ("EnableBuiltinAdd", options.BuiltinInteractiveAdd), ("EnablePseudoConsoleSupport", options.PseudoConsole), ("EnableFSMonitor", options.FileSystemMonitor) })
+            if (TriState(value) is { Length: > 0 } setting) lines.Add($"{key}={setting}");
+        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
+    }
+
 
     private async Task<bool> RunCustomInstallerAsync(CustomInstaller script)
     {
@@ -456,7 +421,7 @@ public class AppInstallerModule : ModuleBase
             Console.WriteLine($"Running installer: {filePath}");
             Console.WriteLine("Please complete the installation manually...");
 
-            var result = await RunProcessAsync(filePath, "", Config.AppInstaller.ManualTimeoutSeconds * 1000);
+            var result = await RunProcessAsync(filePath, "", Config.AppInstaller.InstallerTimeoutSeconds * 1000);
 
             ConsoleHelper.WriteSuccess($"Installation process finished for {script.Name}");
             return true;
@@ -550,41 +515,11 @@ public class AppInstallerModule : ModuleBase
         return
         [
             new MenuOption("Run Full Installation", ExecuteAsync),
-            new MenuOption("Install Prepared Packages Only", InstallPreparedOnlyAsync),
-            new MenuOption("Install Manual Packages Only", InstallManualOnlyAsync),
             new MenuOption("Install Custom Scripts Only", InstallCustomOnlyAsync),
-            new MenuOption("Install Default Packages (Bulk)", InstallDefaultOnlyAsync),
+            new MenuOption("Install Configured Packages", InstallDefaultOnlyAsync),
             new MenuOption("Install Single Package", InstallSinglePackageAsync),
             new MenuOption("List All Configured Packages", ListPackages)
         ];
-    }
-
-    private async Task InstallPreparedOnlyAsync()
-    {
-        EnsureAdministrator();
-
-        if (!await EnsurePackageServicesAsync())
-            return;
-        ConsoleHelper.WriteSubHeader("Prepared Installers");
-        foreach (var packageId in Config.AppInstaller.PreparedInstallers)
-        {
-            await InstallPreparedPackageAsync(packageId);
-            Console.WriteLine();
-        }
-    }
-
-    private async Task InstallManualOnlyAsync()
-    {
-        EnsureAdministrator();
-
-        if (!await EnsurePackageServicesAsync())
-            return;
-        ConsoleHelper.WriteSubHeader("Manual Installations");
-        foreach (var packageId in Config.AppInstaller.ManualInstalls)
-        {
-            await InstallManualPackageAsync(packageId);
-            Console.WriteLine();
-        }
     }
 
     private async Task InstallCustomOnlyAsync()
@@ -627,14 +562,6 @@ public class AppInstallerModule : ModuleBase
     private Task ListPackages()
     {
         ConsoleHelper.WriteSubHeader("Configured Packages");
-
-        Console.WriteLine($"\nPrepared Installers ({Config.AppInstaller.PreparedInstallers.Count}):");
-        foreach (var pkg in Config.AppInstaller.PreparedInstallers)
-            Console.WriteLine($"  - {pkg}");
-
-        Console.WriteLine($"\nManual Installs ({Config.AppInstaller.ManualInstalls.Count}):");
-        foreach (var pkg in Config.AppInstaller.ManualInstalls)
-            Console.WriteLine($"  - {pkg}");
 
         Console.WriteLine($"\nCustom Scripts ({Config.AppInstaller.CustomScripts.Count}):");
         foreach (var script in Config.AppInstaller.CustomScripts)

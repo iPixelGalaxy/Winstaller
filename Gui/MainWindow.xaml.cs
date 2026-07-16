@@ -2055,6 +2055,18 @@ public sealed partial class MainWindow : Window
             };
             editor = box;
         }
+        else if (effectiveType.IsEnum)
+        {
+            var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+            foreach (var enumValue in Enum.GetValues(effectiveType)) combo.Items.Add(enumValue);
+            combo.SelectedItem = value;
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (!_isLoadingUi && combo.SelectedItem is not null)
+                    property.SetValue(target, combo.SelectedItem);
+            };
+            editor = combo;
+        }
         else
         {
             var box = new TextBox
@@ -3485,20 +3497,17 @@ public sealed partial class MainWindow : Window
             await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, iconPreview.Spinner, () => iconPreviewActive && generation == iconGeneration, name.Text);
         }
         id.TextChanged += (_, _) => _ = RefreshIconPreviewAsync();
-        var mode = new ComboBox { MinWidth = 180 };
-        mode.Items.Add("Default");
-        mode.Items.Add("Prepared");
-        mode.Items.Add("Manual");
-        mode.SelectedItem = string.IsNullOrWhiteSpace(behavior.InstallMode) ? "Default" : behavior.InstallMode;
+        var mode = new ComboBox { MinWidth = 260, IsEnabled = false };
+        mode.Items.Add($"Auto ({GetAutoInstallDescription(id.Text)})");
+        mode.SelectedIndex = 0;
         var lockVersion = new ToggleSwitch { Header = "Lock version", IsOn = behavior.LockVersion };
         var version = new TextBox { Text = behavior.Version, PlaceholderText = "Version" };
         EnableAppSettingsTextCopy(version);
         void UpdateVersionState()
         {
-            version.IsEnabled = lockVersion.IsOn && string.Equals(mode.SelectedItem?.ToString(), "Default", StringComparison.OrdinalIgnoreCase);
+            version.IsEnabled = lockVersion.IsOn;
         }
         lockVersion.Toggled += (_, _) => UpdateVersionState();
-        mode.SelectionChanged += (_, _) => UpdateVersionState();
         UpdateVersionState();
 
         var panel = new StackPanel { Spacing = 10 };
@@ -3539,6 +3548,14 @@ public sealed partial class MainWindow : Window
                 customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.SidebarConfig))!));
                 customOptions.Children.Add(BuildListSection(behavior.Spotify, typeof(SpotifyInstallOptions).GetProperty(nameof(SpotifyInstallOptions.CustomApps))!));
             }
+            else if (typedId.Equals("Microsoft.VisualStudioCode", StringComparison.OrdinalIgnoreCase))
+            {
+                customOptions.Children.Add(new TextBlock { Text = "Auto downloads official User Setup. Enables Open with Code menus and PATH. File associations stay unchanged.", TextWrapping = TextWrapping.Wrap, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
+            }
+            else if (typedId.Equals("Git.Git", StringComparison.OrdinalIgnoreCase))
+            {
+                customOptions.Children.Add(BuildGitInstallOptions(behavior.Git));
+            }
             EnableAppSettingsTextCopyInTree(customOptions);
         }
         id.TextChanged += (_, _) => RefreshCustomOptions();
@@ -3549,8 +3566,7 @@ public sealed partial class MainWindow : Window
         {
             var draft = CloneAppBehavior(behavior);
             draft.DisplayName = string.IsNullOrWhiteSpace(name.Text) ? GetKnownPackageName(id.Text.Trim()) : name.Text.Trim();
-            draft.InstallMode = mode.SelectedItem?.ToString() ?? "Default";
-            draft.LockVersion = lockVersion.IsOn && draft.InstallMode.Equals("Default", StringComparison.OrdinalIgnoreCase);
+            draft.LockVersion = lockVersion.IsOn;
             draft.Version = draft.LockVersion ? version.Text.Trim() : string.Empty;
             return draft;
         }
@@ -3649,7 +3665,6 @@ public sealed partial class MainWindow : Window
         return new AppInstallBehavior
         {
             DisplayName = source.DisplayName,
-            InstallMode = source.InstallMode,
             LockVersion = source.LockVersion,
             Version = source.Version,
             Discord = new DiscordInstallOptions
@@ -3667,9 +3682,33 @@ public sealed partial class MainWindow : Window
                 BlockUpdates = source.Spotify.BlockUpdates,
                 SidebarConfig = source.Spotify.SidebarConfig,
                 CustomApps = [.. source.Spotify.CustomApps]
-            }
+            },
+            Git = CloneGitInstallOptions(source.Git)
         };
     }
+
+    private static string GetAutoInstallDescription(string packageId) => packageId.Trim() switch
+    {
+        "Microsoft.VisualStudioCode" => "VS Code User Setup",
+        "Git.Git" => "Git installer",
+        _ => "WinGet"
+    };
+
+    private FrameworkElement BuildGitInstallOptions(GitInstallOptions options)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        var basic = new[] { nameof(GitInstallOptions.DesktopIcon), nameof(GitInstallOptions.GitBashHere), nameof(GitInstallOptions.GitGuiHere), nameof(GitInstallOptions.GitLfs), nameof(GitInstallOptions.AssociateGitFiles), nameof(GitInstallOptions.AssociateShellFiles), nameof(GitInstallOptions.WindowsTerminalProfile), nameof(GitInstallOptions.Scalar), nameof(GitInstallOptions.CheckForUpdates), nameof(GitInstallOptions.Editor), nameof(GitInstallOptions.CustomEditorPath), nameof(GitInstallOptions.DefaultBranch), nameof(GitInstallOptions.Path), nameof(GitInstallOptions.Ssh), nameof(GitInstallOptions.PlinkPath), nameof(GitInstallOptions.Https), nameof(GitInstallOptions.LineEndings), nameof(GitInstallOptions.Terminal), nameof(GitInstallOptions.PullBehavior), nameof(GitInstallOptions.CredentialManager), nameof(GitInstallOptions.FileSystemCache), nameof(GitInstallOptions.Symlinks) };
+        foreach (var property in basic) panel.Children.Add(BuildInlineObjectPropertyEditor(options, typeof(GitInstallOptions).GetProperty(property)!));
+        var advanced = new StackPanel { Spacing = 8 };
+        foreach (var property in new[] { nameof(GitInstallOptions.MandatoryAslr), nameof(GitInstallOptions.BuiltinDifftool), nameof(GitInstallOptions.BuiltinRebase), nameof(GitInstallOptions.BuiltinStash), nameof(GitInstallOptions.BuiltinInteractiveAdd), nameof(GitInstallOptions.PseudoConsole), nameof(GitInstallOptions.FileSystemMonitor) }) advanced.Children.Add(BuildInlineObjectPropertyEditor(options, typeof(GitInstallOptions).GetProperty(property)!));
+        panel.Children.Add(new Expander { Header = "Advanced", Content = advanced, IsExpanded = false });
+        return panel;
+    }
+
+    private static GitInstallOptions CloneGitInstallOptions(GitInstallOptions source) => new()
+    {
+        DesktopIcon = source.DesktopIcon, GitBashHere = source.GitBashHere, GitGuiHere = source.GitGuiHere, GitLfs = source.GitLfs, AssociateGitFiles = source.AssociateGitFiles, AssociateShellFiles = source.AssociateShellFiles, WindowsTerminalProfile = source.WindowsTerminalProfile, Scalar = source.Scalar, CheckForUpdates = source.CheckForUpdates, Editor = source.Editor, CustomEditorPath = source.CustomEditorPath, DefaultBranch = source.DefaultBranch, Path = source.Path, Ssh = source.Ssh, PlinkPath = source.PlinkPath, Https = source.Https, LineEndings = source.LineEndings, Terminal = source.Terminal, PullBehavior = source.PullBehavior, CredentialManager = source.CredentialManager, FileSystemCache = source.FileSystemCache, Symlinks = source.Symlinks, MandatoryAslr = source.MandatoryAslr, BuiltinDifftool = source.BuiltinDifftool, BuiltinRebase = source.BuiltinRebase, BuiltinStash = source.BuiltinStash, BuiltinInteractiveAdd = source.BuiltinInteractiveAdd, PseudoConsole = source.PseudoConsole, FileSystemMonitor = source.FileSystemMonitor
+    };
     private async Task ShowIgnoredItemsAsync(ModuleDescriptor module)
     {
         var panel = new StackPanel { Spacing = 12 };
@@ -4586,7 +4625,7 @@ public sealed partial class MainWindow : Window
             "Programs" or "ProcessesToRun" => "\uE768",
             "FilesToImport" or "Modifications" => "\uE7B8",
             "Operations" => "\uE8C8",
-            "PreparedInstallers" or "ManualInstalls" or "CustomScripts" or "DefaultInstalls" => "\uE896",
+            "CustomScripts" or "DefaultInstalls" => "\uE896",
             "RoamingDirectories" => "\uE8B7",
             "LocalDirectories" => "\uE8B7",
             "LocalLowDirectories" => "\uE8B7",

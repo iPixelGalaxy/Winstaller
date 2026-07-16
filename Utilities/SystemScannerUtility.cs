@@ -261,12 +261,6 @@ public class SystemScannerUtility
     {
         var packageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var packageId in _config.AppInstaller.PreparedInstallers)
-            packageIds.Add(packageId);
-
-        foreach (var packageId in _config.AppInstaller.ManualInstalls)
-            packageIds.Add(packageId);
-
         foreach (var packageId in _config.AppInstaller.DefaultInstalls)
             packageIds.Add(packageId);
 

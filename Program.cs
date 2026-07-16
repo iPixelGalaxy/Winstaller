@@ -474,8 +474,6 @@ internal class Program
         Console.WriteLine($"  Special symlinks: {_config.Symlinks.SpecialSymlinks.Count}");
 
         Console.WriteLine($"\nAPP INSTALLER:");
-        Console.WriteLine($"  Prepared installers: {_config.AppInstaller.PreparedInstallers.Count}");
-        Console.WriteLine($"  Manual installs: {_config.AppInstaller.ManualInstalls.Count}");
         Console.WriteLine($"  Custom scripts: {_config.AppInstaller.CustomScripts.Count}");
         Console.WriteLine($"  Default installs: {_config.AppInstaller.DefaultInstalls.Count}");
 
