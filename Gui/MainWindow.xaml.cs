@@ -114,6 +114,7 @@ public sealed partial class MainWindow : Window
 
         SetTitleBar(null);
         var titleBar = BuildTitleBar();
+        SetTitleBar(titleBar);
         RootGrid.Children.Add(titleBar);
 
         _busyBar.IsIndeterminate = true;
