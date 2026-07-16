@@ -29,8 +29,6 @@ internal static class RecommendedAppCatalog
     private static readonly string[] AdditionalRuntimePackageIds =
     [
         "Microsoft.DotNet.Native.Runtime",
-        "Microsoft.UI.Xaml.2.8",
-        "Microsoft.CLRTypesSQLServer.2019",
         "Microsoft.WindowsAppRuntime.1.8"
     ];
     private static readonly string[] VcLibsPackageIds =
