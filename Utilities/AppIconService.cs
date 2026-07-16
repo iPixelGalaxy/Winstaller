@@ -16,7 +16,7 @@ internal static partial class AppIconService
     private const int PreferredIconPixels = 128;
     private const double MinIconRatio = 0.75;
     private const double MaxIconRatio = 1.33;
-    private const string IconCacheVersionFileName = ".icon-resolver-v7";
+    private const string IconCacheVersionFileName = ".icon-resolver-v8";
     private const string GitHubIndexFileName = "github-icon-index.json";
     private const string GitHubIconBaseUrl = "https://raw.githubusercontent.com/iPixelGalaxy/Winstaller/master/Assets/IconCache";
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
@@ -65,7 +65,10 @@ internal static partial class AppIconService
 
     private static string GetSharedIconKey(string packageId) =>
         packageId.StartsWith("Microsoft.DotNet.DesktopRuntime.", StringComparison.OrdinalIgnoreCase) ? "Microsoft.DotNet.DesktopRuntime.6" :
-        packageId.StartsWith("Microsoft.VCRedist.", StringComparison.OrdinalIgnoreCase) ? "Microsoft.VCRedist.2015+.x64" : packageId;
+        packageId.StartsWith("Microsoft.VCRedist.", StringComparison.OrdinalIgnoreCase) ||
+        packageId.Equals("Microsoft.VCLibs.Desktop.14", StringComparison.OrdinalIgnoreCase) ||
+        packageId.Equals("Microsoft.VCLibs.14", StringComparison.OrdinalIgnoreCase) ? "Microsoft.VCRedist.2015+.x64" :
+        RecommendedAppCatalog.IsVideoCodecPackage(packageId) ? RecommendedAppCatalog.VideoCodecIconPackageId : packageId;
     public static void Invalidate(string packageId, string path)
     {
         Requests.TryRemove(packageId.Trim(), out _);

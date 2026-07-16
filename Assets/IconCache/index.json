@@ -3,11 +3,12 @@
   "icons": [
     {
       "packageIds": [
-        "'MicaForEveryone.MicaForEveryone','MicaForEveryone.MicaForEveryone2'"
+        "MicaForEveryone.MicaForEveryone",
+        "MicaForEveryone.MicaForEveryone2"
       ],
-      "file": "png/micaforeveryone-micaforeveryone-micaforeveryone-micaforeveryone2.png",
+      "file": "png/micaforeveryone.png",
       "sha256": "126cb4654ad3225642ccd122bdc89ab99aa9f1d7db44718026f99f4aaccb931b",
-      "source": "Installed Mica For Everyone"
+      "source": "Mica For Everyone"
     },
     {
       "packageIds": [
@@ -40,6 +41,20 @@
       "file": "png/9nblggh4z1jc.png",
       "sha256": "700755b900cf2ad5d5e70bbe67c2e4f9644b76fbb5e50bb8b820da42861bf1e7",
       "source": "Installed Microsoft Store Speedtest"
+    },
+    {
+      "packageIds": [
+        "9NMZLZ57R3T7",
+        "9N95Q1ZZPMH4",
+        "9MVZQVXJBQ9V",
+        "9N4D0MSMP0PT",
+        "9PB0TRCNRHFX",
+        "9PG2DK419DRG",
+        "9PMMSR1CGPWG"
+      ],
+      "file": "png/9nmzlz57r3t7.png",
+      "sha256": "03eb5ebb8fc7c8fc26c54d9974f62bec9c21a40def9a35b8882c6918cb9a9c1a",
+      "source": "Installed Microsoft HEVC Video Extensions"
     },
     {
       "packageIds": [
@@ -162,11 +177,13 @@
         "Microsoft.VCRedist.2013.x86",
         "Microsoft.VCRedist.2013.x64",
         "Microsoft.VCRedist.2015+.x86",
-        "Microsoft.VCRedist.2015+.x64"
+        "Microsoft.VCRedist.2015+.x64",
+        "Microsoft.VCLibs.Desktop.14",
+        "Microsoft.VCLibs.14"
       ],
       "file": "png/microsoft-vcredist-2005-x86.png",
-      "sha256": "1112236a61aaafe2533d936affa21639f0c6b7d2d17b5092156380be29faa51c",
-      "source": "Shared Microsoft runtime icon"
+      "sha256": "896b67d82e3889eb470fda1b090398726f3088d1438847a701fc140d7ba5e8d3",
+      "source": "Microsoft logo"
     },
     {
       "packageIds": [

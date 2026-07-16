@@ -555,40 +555,55 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
     {
-        var runtimeGrid = new VariableSizedWrapGrid
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
         var grid = new VariableSizedWrapGrid
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Left
         };
-        var runtimeTitle = new TextBlock { Text = "Runtimes", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } };
-        var runtimeCount = new TextBlock { FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") };
-        var runtimeSection = new Expander
+        var groupedSections = RecommendedAppCatalog.Groups.Select(group =>
         {
-            Header = new StackPanel { Spacing = 2, Children = { runtimeTitle, runtimeCount } },
-            Content = runtimeGrid,
-            IsExpanded = true
-        };
+            var tiles = new VariableSizedWrapGrid
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            var count = new TextBlock { FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") };
+            var section = new Expander
+            {
+                Header = new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = group.Title, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
+                        count
+                    }
+                },
+                Content = tiles,
+                IsExpanded = true
+            };
+            return (group, tiles, count, section);
+        }).ToList();
 
         void Refresh()
         {
-            runtimeGrid.Children.Clear();
             grid.Children.Clear();
-            var runtimes = config.DefaultInstalls
-                .Where(app => RecommendedAppCatalog.GetFamilyName(app) is not null)
-                .OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            runtimeCount.Text = $"{runtimes.Count} packages";
-            runtimeSection.Visibility = runtimes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            foreach (var packageId in runtimes)
-                runtimeGrid.Children.Add(BuildAppTile(packageId, config, Refresh));
+            foreach (var (group, tiles, count, section) in groupedSections)
+            {
+                tiles.Children.Clear();
+                var packageIds = config.DefaultInstalls
+                    .Where(app => RecommendedAppCatalog.GetGroup(app) == group.Group)
+                    .OrderBy(RecommendedAppCatalog.GetGroupSortOrder)
+                    .ThenBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                count.Text = $"{packageIds.Count} packages";
+                section.Visibility = packageIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                foreach (var packageId in packageIds)
+                    tiles.Children.Add(BuildAppTile(packageId, config, Refresh));
+            }
 
             foreach (var packageId in config.DefaultInstalls
-                         .Where(app => RecommendedAppCatalog.GetFamilyName(app) is null)
+                         .Where(app => RecommendedAppCatalog.GetGroup(app) == RecommendedAppGroup.None)
                          .OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase))
             {
                 grid.Children.Add(BuildAppTile(packageId, config, Refresh));
@@ -596,16 +611,12 @@ public sealed partial class MainWindow : Window
         }
 
         Refresh();
-        return new StackPanel
-        {
-            Spacing = 12,
-            Children =
-            {
-                runtimeSection,
-                grid,
-                ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null))
-            }
-        };
+        var content = new StackPanel { Spacing = 12 };
+        foreach (var (_, _, _, section) in groupedSections)
+            content.Children.Add(section);
+        content.Children.Add(grid);
+        content.Children.Add(ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null)));
+        return content;
     }
 
     private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
