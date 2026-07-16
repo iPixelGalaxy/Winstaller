@@ -8,6 +8,8 @@ using Winstaller.Configuration;
 
 namespace Winstaller.Utilities;
 
+internal sealed record IconCacheClearResult(int DeletedFileCount, string? Error);
+
 internal static partial class AppIconService
 {
     private const int MaxIconBytes = 2 * 1024 * 1024;
@@ -25,9 +27,12 @@ internal static partial class AppIconService
     private static readonly SemaphoreSlim HttpGate = new(8, 8);
     private static readonly SemaphoreSlim StoreSearchGate = new(2, 2);
     private static readonly SemaphoreSlim GitHubIndexGate = new(1, 1);
+    private static readonly SemaphoreSlim CacheMutationGate = new(1, 1);
     private static readonly object GitHubIndexTaskLock = new();
+    private static readonly object CacheStateLock = new();
     private static Task<Dictionary<string, GitHubIconEntry>>? gitHubIndexTask;
     private static int iconCacheVersionChecked;
+    private static long cacheGeneration;
 
     private sealed record IconCandidate(Uri Uri, int Priority, string Source);
     private sealed record IconAsset(byte[] Bytes, string Extension, int Width, int Height, IconCandidate Candidate);
@@ -41,7 +46,11 @@ internal static partial class AppIconService
             return Task.FromResult<string?>(null);
 
         var sharedKey = GetSharedIconKey(normalized);
-        return Requests.GetOrAdd(sharedKey, _ => FetchAndCacheAsync(sharedKey, displayName));
+        lock (CacheStateLock)
+        {
+            var generation = Interlocked.Read(ref cacheGeneration);
+            return Requests.GetOrAdd(sharedKey, _ => FetchAndCacheAsync(sharedKey, displayName, generation));
+        }
     }
 
     public static void WarmCache(IEnumerable<string> packageIds)
@@ -50,17 +59,33 @@ internal static partial class AppIconService
             .Select(id => GetIconPathAsync(id)));
     }
 
-    public static void ClearCache()
+    public static async Task<IconCacheClearResult> ClearCacheAsync()
     {
-        Requests.Clear();
-        lock (GitHubIndexTaskLock) gitHubIndexTask = null;
-        Interlocked.Exchange(ref iconCacheVersionChecked, 0);
+        lock (CacheStateLock)
+        {
+            Interlocked.Increment(ref cacheGeneration);
+            Requests.Clear();
+            lock (GitHubIndexTaskLock) gitHubIndexTask = null;
+            Interlocked.Exchange(ref iconCacheVersionChecked, 0);
+        }
+
+        await CacheMutationGate.WaitAsync();
         try
         {
             var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
+            var fileCount = Directory.Exists(directory)
+                ? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Count()
+                : 0;
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            RunLog.Write("AppIcon", $"Cleared {fileCount} cached icon files.");
+            return new IconCacheClearResult(fileCount, null);
         }
-        catch (Exception ex) { RunLog.WriteException("AppIcon", "Failed clearing icon cache", ex); }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("AppIcon", "Failed clearing icon cache", ex);
+            return new IconCacheClearResult(0, ex.Message);
+        }
+        finally { CacheMutationGate.Release(); }
     }
 
     private static string GetSharedIconKey(string packageId) =>
@@ -75,12 +100,11 @@ internal static partial class AppIconService
         try { File.Delete(path); } catch { }
     }
 
-    private static async Task<string?> FetchAndCacheAsync(string packageId, string? displayName)
+    private static async Task<string?> FetchAndCacheAsync(string packageId, string? displayName, long generation)
     {
         var directory = Path.Combine(BootstrapManager.CacheDirectory, "app-icons");
-        Directory.CreateDirectory(directory);
-        EnsureCurrentIconCache(directory);
-        var customPath = await GetGitHubIconPathAsync(directory, packageId);
+        if (!await PrepareCacheAsync(directory, generation)) return null;
+        var customPath = await GetGitHubIconPathAsync(directory, packageId, generation);
         if (customPath is not null) return customPath;
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(packageId))).ToLowerInvariant();
         var missPath = Path.Combine(directory, key + ".miss-v2");
@@ -99,8 +123,7 @@ internal static partial class AppIconService
             if (selected is not null)
             {
                 var iconPath = Path.Combine(directory, key + selected.Extension);
-                await File.WriteAllBytesAsync(iconPath, selected.Bytes);
-                if (File.Exists(missPath)) File.Delete(missPath);
+                if (!await WriteBytesIfCurrentAsync(iconPath, selected.Bytes, missPath, generation)) return null;
                 RunLog.Write("AppIcon", $"Selected {packageId} {selected.Candidate.Source}: {selected.Width}x{selected.Height}");
                 return iconPath;
             }
@@ -110,20 +133,20 @@ internal static partial class AppIconService
             RunLog.WriteException("AppIcon", $"Lookup failed for {packageId}", ex);
         }
 
-        try { File.WriteAllText(missPath, DateTime.UtcNow.ToString("O")); } catch { }
+        await WriteTextIfCurrentAsync(missPath, DateTime.UtcNow.ToString("O"), generation);
         RunLog.Write("AppIcon", $"No usable official icon for {packageId}");
         return null;
     }
 
-    private static Task<Dictionary<string, GitHubIconEntry>> GetGitHubIndexAsync(string directory)
+    private static Task<Dictionary<string, GitHubIconEntry>> GetGitHubIndexAsync(string directory, long generation)
     {
         lock (GitHubIndexTaskLock)
-            return gitHubIndexTask ??= LoadGitHubIndexAsync(directory);
+            return gitHubIndexTask ??= LoadGitHubIndexAsync(directory, generation);
     }
 
-    private static async Task<string?> GetGitHubIconPathAsync(string directory, string packageId)
+    private static async Task<string?> GetGitHubIconPathAsync(string directory, string packageId, long generation)
     {
-        var index = await GetGitHubIndexAsync(directory);
+        var index = await GetGitHubIndexAsync(directory, generation);
         if (!index.TryGetValue(packageId, out var entry)) return null;
         var path = Path.Combine(directory, $"github-{entry.Sha256.ToLowerInvariant()}.png");
         if (TryGetVerifiedCachedGitHubIcon(path, entry)) return path;
@@ -135,12 +158,12 @@ internal static partial class AppIconService
             return null;
         }
 
-        await File.WriteAllBytesAsync(path, asset.Bytes);
+        if (!await WriteBytesIfCurrentAsync(path, asset.Bytes, null, generation)) return null;
         RunLog.Write("AppIcon", $"Selected {packageId} Winstaller icon cache: {asset.Width}x{asset.Height}");
         return path;
     }
 
-    private static async Task<Dictionary<string, GitHubIconEntry>> LoadGitHubIndexAsync(string directory)
+    private static async Task<Dictionary<string, GitHubIconEntry>> LoadGitHubIndexAsync(string directory, long generation)
     {
         var path = Path.Combine(directory, GitHubIndexFileName);
         if (File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromHours(24))
@@ -154,13 +177,52 @@ internal static partial class AppIconService
             var downloaded = await DownloadTextAsync(new Uri($"{GitHubIconBaseUrl}/index.json"));
             if (downloaded is not null)
             {
-                await File.WriteAllTextAsync(path, downloaded);
+                if (!await WriteTextIfCurrentAsync(path, downloaded, generation)) return new(StringComparer.OrdinalIgnoreCase);
                 return ParseGitHubIndex(downloaded);
             }
             return File.Exists(path) ? ParseGitHubIndex(await File.ReadAllTextAsync(path)) : new(StringComparer.OrdinalIgnoreCase);
         }
         catch { return new(StringComparer.OrdinalIgnoreCase); }
         finally { GitHubIndexGate.Release(); }
+    }
+
+    private static async Task<bool> PrepareCacheAsync(string directory, long generation)
+    {
+        await CacheMutationGate.WaitAsync();
+        try
+        {
+            if (generation != Interlocked.Read(ref cacheGeneration)) return false;
+            Directory.CreateDirectory(directory);
+            EnsureCurrentIconCache(directory);
+            return true;
+        }
+        finally { CacheMutationGate.Release(); }
+    }
+
+    private static async Task<bool> WriteBytesIfCurrentAsync(string path, byte[] bytes, string? deletePath, long generation)
+    {
+        await CacheMutationGate.WaitAsync();
+        try
+        {
+            if (generation != Interlocked.Read(ref cacheGeneration)) return false;
+            await File.WriteAllBytesAsync(path, bytes);
+            if (deletePath is not null && File.Exists(deletePath)) File.Delete(deletePath);
+            return true;
+        }
+        finally { CacheMutationGate.Release(); }
+    }
+
+    private static async Task<bool> WriteTextIfCurrentAsync(string path, string text, long generation)
+    {
+        await CacheMutationGate.WaitAsync();
+        try
+        {
+            if (generation != Interlocked.Read(ref cacheGeneration)) return false;
+            await File.WriteAllTextAsync(path, text);
+            return true;
+        }
+        catch { return false; }
+        finally { CacheMutationGate.Release(); }
     }
 
     private static Dictionary<string, GitHubIconEntry> ParseGitHubIndex(string json)

@@ -2168,11 +2168,11 @@ public sealed partial class MainWindow : Window
             catch (Exception ex)
             {
                 RunLog.WriteException("UI", $"{text} failed", ex);
-                AppendOutput($"{text} failed: {ex.Message}");
+                await RunOnUiThreadAsync(() => AppendOutput($"{text} failed: {ex.Message}"));
             }
             finally
             {
-                button.IsEnabled = true;
+                await RunOnUiThreadAsync(() => button.IsEnabled = true);
             }
         };
         return button;
@@ -3399,11 +3399,21 @@ public sealed partial class MainWindow : Window
         if (module.Config is AppInstallerConfig)
         {
             panel.Children.Add(new TextBlock { Text = "Setup info is managed automatically. Installation time limits use built-in defaults.", TextWrapping = TextWrapping.Wrap, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
-            panel.Children.Add(ActionButton("Clear Icon Cache", () =>
+            var clearStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") };
+            panel.Children.Add(ActionButton("Clear Icon Cache", async () =>
             {
-                AppIconService.ClearCache();
-                RenderModule(module);
+                var result = await AppIconService.ClearCacheAsync();
+                await RunOnUiThreadAsync(() =>
+                {
+                    clearStatus.Text = result.Error is null
+                        ? $"Cleared {result.DeletedFileCount} cached icon files."
+                        : $"Could not clear icon cache: {result.Error}";
+                    if (result.Error is not null) return;
+                    InvalidateCachedPage(module.Name);
+                    RenderModule(module);
+                });
             }));
+            panel.Children.Add(clearStatus);
         }
         if (panel.Children.Count == 0)
         {
