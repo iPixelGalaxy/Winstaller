@@ -372,10 +372,22 @@ public static class ConfigurationManager
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
 
+        var json = JsonSerializer.Serialize(value, JsonOptions);
+        try
+        {
+            if (File.Exists(path) && string.Equals(File.ReadAllText(path), json, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+        catch
+        {
+        }
+
         var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(value, JsonOptions));
+            File.WriteAllText(temporaryPath, json);
             if (File.Exists(path))
                 File.Replace(temporaryPath, path, $"{path}.bak", ignoreMetadataErrors: true);
             else

@@ -43,6 +43,8 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel _topBarActions = new();
     private readonly List<TextBlock> _topBarActionLabels = [];
     private readonly Dictionary<RecommendedAppGroup, bool> _appInstallerGroupExpanded = [];
+    private readonly Dictionary<string, FrameworkElement> _pageCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _pageScrollOffsets = new(StringComparer.Ordinal);
 
     private WinstallerConfig _config = null!;
     private List<ModuleDescriptor> _modules = [];
@@ -54,6 +56,9 @@ public sealed partial class MainWindow : Window
     private int _busyDepth;
     private bool _isRunning;
     private bool _isLoadingUi;
+    private string? _currentPageKey;
+
+    private const string DashboardPageKey = "Dashboard";
 
     public MainWindow()
     {
@@ -69,7 +74,6 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
-            StartIconWarmup();
         }
         else
         {
@@ -230,6 +234,9 @@ public sealed partial class MainWindow : Window
 
     private void LoadConfiguration()
     {
+        _pageCache.Clear();
+        _pageScrollOffsets.Clear();
+        _currentPageKey = null;
         _config = ConfigurationManager.LoadConfiguration();
         _appInstallerGroupExpanded.Clear();
         foreach (var (groupName, isExpanded) in ConfigurationManager.LoadAppInstallerGroupExpanded())
@@ -334,7 +341,6 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
-            StartIconWarmup();
             _ = ShowGuidedSetupPromptAsync();
         };
         return card;
@@ -344,16 +350,18 @@ public sealed partial class MainWindow : Window
     {
         _isLoadingUi = true;
         SetDashboardTopBarActions();
-        _content.Children.Clear();
-        _content.Children.Add(PageTitle("Dashboard", "Choose what Winstaller should restore or install."));
-        _content.Children.Add(GuidedSetupCard());
-
-        var list = new StackPanel { Spacing = 8 };
-        foreach (var module in _modules)
+        ShowCachedPage(DashboardPageKey, () =>
         {
-            list.Children.Add(ModuleCard(module));
-        }
-        _content.Children.Add(list);
+            var page = new StackPanel { Spacing = 12 };
+            page.Children.Add(PageTitle("Dashboard", "Choose what Winstaller should restore or install."));
+            page.Children.Add(GuidedSetupCard());
+
+            var list = new StackPanel { Spacing = 8 };
+            foreach (var module in _modules)
+                list.Children.Add(ModuleCard(module));
+            page.Children.Add(list);
+            return page;
+        });
 
         _isLoadingUi = false;
     }
@@ -362,11 +370,39 @@ public sealed partial class MainWindow : Window
     {
         _isLoadingUi = true;
         SetModuleTopBarActions(module);
-        _content.Children.Clear();
-        _content.Children.Add(ModulePageHeader(module));
-
-        _content.Children.Add(BuildModuleContent(module));
+        ShowCachedPage(module.Name, () => new StackPanel
+        {
+            Spacing = 12,
+            Children = { ModulePageHeader(module), BuildModuleContent(module) }
+        });
         _isLoadingUi = false;
+    }
+
+    private void ShowCachedPage(string key, Func<FrameworkElement> createPage)
+    {
+        if (_currentPageKey is not null)
+            _pageScrollOffsets[_currentPageKey] = _contentScroll.VerticalOffset;
+
+        if (!_pageCache.TryGetValue(key, out var page))
+        {
+            page = createPage();
+            _pageCache[key] = page;
+        }
+
+        if (_content.Children.Count == 1 && ReferenceEquals(_content.Children[0], page))
+            return;
+
+        _content.Children.Clear();
+        _content.Children.Add(page);
+        _currentPageKey = key;
+        var verticalOffset = _pageScrollOffsets.GetValueOrDefault(key);
+        DispatcherQueue.TryEnqueue(() => _contentScroll.ChangeView(null, verticalOffset, null, disableAnimation: true));
+    }
+
+    private void InvalidateCachedPage(string key)
+    {
+        _pageCache.Remove(key);
+        _pageScrollOffsets.Remove(key);
     }
 
     private void SetDashboardTopBarActions()
@@ -379,7 +415,6 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RebuildNavigation();
             RenderDashboard();
-            StartIconWarmup();
             AppendOutput("Configuration reloaded.");
         }));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Folder, "Open Config Directory", OpenConfig));
@@ -468,6 +503,7 @@ public sealed partial class MainWindow : Window
 
             module.SetEnabled(toggle.IsOn);
             SaveConfiguration();
+            InvalidateCachedPage(DashboardPageKey);
         };
         row.Children.Add(toggle);
 
@@ -503,6 +539,7 @@ public sealed partial class MainWindow : Window
 
             module.SetEnabled(toggle.IsOn);
             SaveConfiguration();
+            InvalidateCachedPage(module.Name);
         };
         toggle.Tapped += (sender, args) => args.Handled = true;
         Grid.SetColumn(toggle, 0);
@@ -566,15 +603,38 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
     {
-        var groupedSections = RecommendedAppCatalog.Groups
-            .Append(new RecommendedAppGroupInfo(RecommendedAppGroup.None, "Apps"))
-            .Select(group =>
+        var groupedSections = new List<AppGroupSection>();
+        foreach (var group in RecommendedAppCatalog.Groups.Append(new RecommendedAppGroupInfo(RecommendedAppGroup.None, "Apps")))
         {
-            var tiles = new VariableSizedWrapGrid
+            var packageIds = new List<string>();
+            var tiles = new ItemsRepeater
             {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Left
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalCacheLength = 0.5,
+                Layout = new UniformGridLayout
+                {
+                    MinItemWidth = 258,
+                    MinItemHeight = 136,
+                    MaximumRowsOrColumns = 0,
+                    MinColumnSpacing = 0,
+                    MinRowSpacing = 0,
+                    ItemsStretch = UniformGridLayoutItemsStretch.None
+                }
             };
+            tiles.ItemTemplate = new CallbackElementFactory(
+                data =>
+                {
+                    var packageId = (string)data!;
+                    var lifetime = new TileLifetime();
+                    var tile = BuildAppTile(packageId, config, Refresh, () => lifetime.IsCurrent);
+                    tile.Tag = lifetime;
+                    return tile;
+                },
+                element =>
+                {
+                    if (element is FrameworkElement { Tag: TileLifetime lifetime })
+                        lifetime.IsCurrent = false;
+                });
             var chevron = new FontIcon
             {
                 FontSize = 12,
@@ -608,11 +668,19 @@ public sealed partial class MainWindow : Window
 
             var body = new StackPanel { Spacing = 8, Children = { tiles } };
             var section = new StackPanel { Spacing = 8, Children = { header, body } };
+            void RefreshTiles()
+            {
+                tiles.ItemsSource = packageIds.Count == 0 ? null : packageIds.ToArray();
+            }
             void SetExpanded(bool isExpanded)
             {
                 _appInstallerGroupExpanded[group.Group] = isExpanded;
                 chevron.Glyph = isExpanded ? "\uE70D" : "\uE76C";
                 body.Visibility = isExpanded ? Visibility.Visible : Visibility.Collapsed;
+                if (isExpanded)
+                    RefreshTiles();
+                else
+                    tiles.ItemsSource = null;
             }
 
             var defaultExpanded = group.Group == RecommendedAppGroup.None;
@@ -623,29 +691,31 @@ public sealed partial class MainWindow : Window
                 ConfigurationManager.SaveAppInstallerGroupExpanded(
                     _appInstallerGroupExpanded.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value));
             };
-            return (group, tiles, section);
-        }).ToList();
+            groupedSections.Add(new AppGroupSection(group, packageIds, tiles, RefreshTiles, section));
+        }
 
         void Refresh()
         {
-            foreach (var (group, tiles, section) in groupedSections)
+            foreach (var section in groupedSections)
             {
-                tiles.Children.Clear();
-                var packageIds = config.DefaultInstalls
-                    .Where(app => RecommendedAppCatalog.GetGroup(app) == group.Group)
+                section.PackageIds.Clear();
+                section.PackageIds.AddRange(config.DefaultInstalls
+                    .Where(app => RecommendedAppCatalog.GetGroup(app) == section.Group.Group)
                     .OrderBy(RecommendedAppCatalog.GetGroupSortOrder)
                     .ThenBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                section.Visibility = packageIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-                foreach (var packageId in packageIds)
-                    tiles.Children.Add(BuildAppTile(packageId, config, Refresh));
+                    .ToList());
+                section.Section.Visibility = section.PackageIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                if (_appInstallerGroupExpanded.TryGetValue(section.Group.Group, out var isExpanded) && isExpanded)
+                    section.RefreshTiles();
+                else
+                    section.Tiles.ItemsSource = null;
             }
         }
 
         Refresh();
         var content = new StackPanel { Spacing = 12 };
-        foreach (var (_, _, section) in groupedSections)
-            content.Children.Add(section);
+        foreach (var section in groupedSections)
+            content.Children.Add(section.Section);
         content.Children.Add(ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null)));
         return content;
     }
@@ -700,25 +770,27 @@ public sealed partial class MainWindow : Window
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         });
 
-        foreach (var fontFile in fontFiles)
+        panel.Children.Add(new ItemsRepeater
         {
-            var row = new StackPanel
+            ItemsSource = fontFiles,
+            VerticalCacheLength = 1,
+            Layout = new StackLayout { Spacing = 10 },
+            ItemTemplate = new CallbackElementFactory(data => new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = 10,
                 Children =
                 {
                     new FontIcon { Glyph = "\uE8D2", FontSize = 16, VerticalAlignment = VerticalAlignment.Center },
-                    new TextBlock { Text = Path.GetFileName(fontFile), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap }
+                    new TextBlock { Text = Path.GetFileName((string)data!), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap }
                 }
-            };
-            panel.Children.Add(row);
-        }
+            })
+        });
 
         return Card(panel);
     }
 
-    private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
+    private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh, Func<bool>? isCurrent = null)
     {
         var displayName = GetAppDisplayName(config, packageId);
         Uri? installerUrl = null;
@@ -745,7 +817,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var iconView = CreateAppIconView(packageId, 40, displayName);
+        var iconView = CreateAppIconView(packageId, 40, displayName, isCurrent);
         var title = CreateAppTileTitle(displayName);
         var version = new TextBlock
         {
@@ -769,7 +841,7 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(footer, 1);
         content.Children.Add(footer);
 
-        _ = LoadAppMetadataAsync(packageId, version, download, url => installerUrl = url);
+        _ = LoadAppMetadataAsync(packageId, version, download, url => installerUrl = url, isCurrent);
 
         return new Border
         {
@@ -819,12 +891,6 @@ public sealed partial class MainWindow : Window
             title.FontSize = 12.5;
         ToolTipService.SetToolTip(title, name);
         return title;
-    }
-
-    private void StartIconWarmup()
-    {
-        if (_config?.AppInstaller is not { } appInstaller) return;
-        AppIconService.WarmCache(RecommendedAppCatalog.Apps.Select(app => app.PackageId).Concat(appInstaller.DefaultInstalls));
     }
 
     private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null, Func<bool>? isCurrent = null)
@@ -897,13 +963,15 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task LoadAppMetadataAsync(string packageId, TextBlock version, Button download, Action<Uri?> setInstallerUrl)
+    private async Task LoadAppMetadataAsync(string packageId, TextBlock version, Button download, Action<Uri?> setInstallerUrl, Func<bool>? isCurrent = null)
     {
         try
         {
             var metadata = await WingetPackageMetadataService.GetAsync(packageId);
+            if (isCurrent is not null && !isCurrent()) return;
             await RunOnUiThreadAsync(() =>
             {
+                if (isCurrent is not null && !isCurrent()) return;
                 version.Text = string.IsNullOrWhiteSpace(metadata.Version) ? "Version unavailable" : $"Version {metadata.Version}";
                 setInstallerUrl(metadata.InstallerUrl);
                 download.IsEnabled = metadata.InstallerUrl is not null;
@@ -917,7 +985,12 @@ public sealed partial class MainWindow : Window
             RunLog.WriteException("WingetMetadata", $"Failed showing metadata for {packageId}", ex);
             try
             {
-                await RunOnUiThreadAsync(() => version.Text = "Version unavailable");
+                if (isCurrent is not null && !isCurrent()) return;
+                await RunOnUiThreadAsync(() =>
+                {
+                    if (isCurrent is null || isCurrent())
+                        version.Text = "Version unavailable";
+                });
             }
             catch (Exception uiException)
             {
@@ -1018,37 +1091,36 @@ public sealed partial class MainWindow : Window
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center
         };
+        var emptyText = new TextBlock
+        {
+            Text = "No items configured.",
+            Opacity = 0.65,
+            FontSize = 12
+        };
+        var items = new ItemsRepeater
+        {
+            VerticalCacheLength = 0.75,
+            Layout = new StackLayout { Spacing = 8 }
+        };
+        items.ItemTemplate = new CallbackElementFactory(data =>
+        {
+            var item = (IndexedItem)data!;
+            return itemType == typeof(string)
+                ? BuildCompactStringListItem(config, property, list, item.Index, Refresh, placeholder)
+                : itemType == typeof(SpecialSymlink)
+                    ? BuildCompactSpecialSymlinkItem(config, list, item.Index, Refresh)
+                    : BuildListItemEditor(list, itemType, item.Index, Refresh, property);
+        });
+        panel.Children.Add(emptyText);
+        panel.Children.Add(items);
 
         void Refresh()
         {
-            panel.Children.Clear();
             countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
-
-            if (list.Count == 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "No items configured.",
-                    Opacity = 0.65,
-                    FontSize = 12
-                });
-            }
-
-            for (var index = 0; index < list.Count; index++)
-            {
-                panel.Children.Add(itemType == typeof(string)
-                    ? BuildCompactStringListItem(config, property, list, index, Refresh, placeholder)
-                    : itemType == typeof(SpecialSymlink)
-                        ? BuildCompactSpecialSymlinkItem(config, list, index, Refresh)
-                        : BuildListItemEditor(list, itemType, index, Refresh, property));
-            }
-
-            panel.Children.Add(ActionButton($"+ Add {title}", () =>
-            {
-                list.Add(CreateDefaultItem(itemType));
-                SaveConfiguration();
-                Refresh();
-            }));
+            emptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            items.ItemsSource = list.Cast<object>()
+                .Select((item, index) => new IndexedItem(item, index))
+                .ToList();
         }
 
         var header = new Grid { ColumnSpacing = 8 };
@@ -1071,6 +1143,13 @@ public sealed partial class MainWindow : Window
         text.Children.Add(countText);
         Grid.SetColumn(text, 1);
         header.Children.Add(text);
+
+        panel.Children.Add(ActionButton($"+ Add {title}", () =>
+        {
+            list.Add(CreateDefaultItem(itemType));
+            SaveConfiguration();
+            Refresh();
+        }));
 
         Refresh();
         return new StackPanel
@@ -1392,35 +1471,35 @@ public sealed partial class MainWindow : Window
 
         var itemType = property.PropertyType.GetGenericArguments()[0];
         var panel = new StackPanel { Spacing = 8 };
+        var emptyText = new TextBlock { Text = "No items configured.", Opacity = 0.65 };
+        var items = new ItemsRepeater
+        {
+            VerticalCacheLength = 0.75,
+            Layout = new StackLayout { Spacing = 8 }
+        };
+        items.ItemTemplate = new CallbackElementFactory(data =>
+        {
+            var item = (IndexedItem)data!;
+            return BuildListItemEditor(list, itemType, item.Index, Refresh, property);
+        });
+        panel.Children.Add(emptyText);
+        panel.Children.Add(items);
 
         void Refresh()
         {
-            panel.Children.Clear();
-
-            if (list.Count == 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "No items configured.",
-                    Opacity = 0.65
-                });
-            }
-
-            for (var index = 0; index < list.Count; index++)
-            {
-                panel.Children.Add(BuildListItemEditor(list, itemType, index, Refresh, property));
-            }
-
-            if (allowAdd)
-            {
-                panel.Children.Add(ActionButton($"+ Add {Singularize(SplitName(property.Name))}", () =>
-                {
-                    list.Add(CreateDefaultItem(itemType));
-                    SaveConfiguration();
-                    Refresh();
-                }));
-            }
+            emptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            items.ItemsSource = list.Cast<object>()
+                .Select((item, index) => new IndexedItem(item, index))
+                .ToList();
         }
+
+        if (allowAdd)
+            panel.Children.Add(ActionButton($"+ Add {Singularize(SplitName(property.Name))}", () =>
+            {
+                list.Add(CreateDefaultItem(itemType));
+                SaveConfiguration();
+                Refresh();
+            }));
 
         Refresh();
         return panel;
@@ -2162,8 +2241,10 @@ public sealed partial class MainWindow : Window
         {
             if (ReferenceEquals(item.Tag, module))
             {
-                _navigation.SelectedItem = item;
-                RenderModule(module);
+                if (ReferenceEquals(_navigation.SelectedItem, item))
+                    RenderModule(module);
+                else
+                    _navigation.SelectedItem = item;
                 return;
             }
         }
@@ -3198,7 +3279,6 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(ActionButton("Clear Icon Cache", () =>
             {
                 AppIconService.ClearCache();
-                StartIconWarmup();
                 RenderModule(module);
             }));
         }
@@ -3614,6 +3694,8 @@ public sealed partial class MainWindow : Window
     private void SaveConfiguration()
     {
         ConfigurationManager.SaveConfiguration(_config);
+        _pageCache.Clear();
+        _pageScrollOffsets.Clear();
     }
 
     private Task RunOnUiThreadAsync(Action action)
@@ -4326,6 +4408,18 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record AppIconView(Grid Host, Image Image, FontIcon Fallback, ProgressRing Spinner);
+    private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, ItemsRepeater Tiles, Action RefreshTiles, StackPanel Section);
+    private sealed record IndexedItem(object Value, int Index);
+    private sealed class TileLifetime { public bool IsCurrent { get; set; } = true; }
+    private sealed class CallbackElementFactory(Func<object?, UIElement> create, Action<UIElement>? recycle = null) : IElementFactory
+    {
+        public UIElement GetElement(ElementFactoryGetArgs args) => create(args.Data);
+
+        public void RecycleElement(ElementFactoryRecycleArgs args)
+        {
+            recycle?.Invoke(args.Element);
+        }
+    }
     private sealed record ShellFolderPreset(string Name, string RegistryValue, string DefaultPath);
     private sealed record SymlinkImportSelection(
         List<SystemInfoImportCandidate> Selected,
