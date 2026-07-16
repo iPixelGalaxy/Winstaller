@@ -2515,6 +2515,19 @@ public sealed partial class MainWindow : Window
         var uiLogLock = new object();
         var pendingLogText = new StringBuilder();
         var logFlushQueued = false;
+        void FlushLog()
+        {
+            string chunk;
+            lock (uiLogLock)
+            {
+                chunk = pendingLogText.ToString();
+                pendingLogText.Clear();
+                logFlushQueued = false;
+            }
+
+            if (!string.IsNullOrEmpty(chunk))
+                AppendTextToOutputBox(outputBox, chunk);
+        }
         void Log(string message)
         {
             RunLog.Write("Import", message);
@@ -2527,18 +2540,7 @@ public sealed partial class MainWindow : Window
                 logFlushQueued = true;
             }
 
-            if (!DispatcherQueue.TryEnqueue(() =>
-            {
-                string chunk;
-                lock (uiLogLock)
-                {
-                    chunk = pendingLogText.ToString();
-                    pendingLogText.Clear();
-                    logFlushQueued = false;
-                }
-
-                AppendTextToOutputBox(outputBox, chunk);
-            }))
+            if (!DispatcherQueue.TryEnqueue(FlushLog))
             {
                 lock (uiLogLock)
                     logFlushQueued = false;
@@ -2696,6 +2698,7 @@ public sealed partial class MainWindow : Window
         {
             await RunOnUiThreadAsync(() =>
             {
+                FlushLog();
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
@@ -3709,9 +3712,10 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            _activeOutputBox = null;
             await RunOnUiThreadAsync(() =>
             {
+                FlushOutputText(outputBox);
+                _activeOutputBox = null;
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
@@ -4133,6 +4137,11 @@ public sealed partial class MainWindow : Window
 
     private void FlushOutputText()
     {
+        FlushOutputText(_activeOutputBox);
+    }
+
+    private void FlushOutputText(TextBox? outputBox)
+    {
         if (!DispatcherQueue.HasThreadAccess)
         {
             DispatcherQueue.TryEnqueue(FlushOutputText);
@@ -4147,10 +4156,10 @@ public sealed partial class MainWindow : Window
             _outputFlushQueued = false;
         }
 
-        if (_activeOutputBox is null || string.IsNullOrEmpty(chunk))
+        if (outputBox is null || string.IsNullOrEmpty(chunk))
             return;
 
-        AppendTextToOutputBox(_activeOutputBox, chunk);
+        AppendTextToOutputBox(outputBox, chunk);
     }
 
     private static void AppendTextToOutputBox(TextBox outputBox, string text)
@@ -4260,12 +4269,22 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            SetClipboardText(WindowNative.GetWindowHandle(this), text);
+            var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            dataPackage.SetText(text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
         }
-        catch (Exception ex)
+        catch (Exception clipboardException)
         {
-            RunLog.WriteException("UI", "Clipboard copy failed", ex);
-            AppendOutput($"Copy failed: {ex.Message}");
+            try
+            {
+                SetClipboardText(WindowNative.GetWindowHandle(this), text);
+            }
+            catch (Exception fallbackException)
+            {
+                RunLog.WriteException("UI", "Clipboard copy failed", new AggregateException(clipboardException, fallbackException));
+                AppendOutput($"Copy failed: {fallbackException.Message}");
+            }
         }
     }
 
@@ -4285,13 +4304,26 @@ public sealed partial class MainWindow : Window
 
     private static void SetClipboardText(nint hwnd, string text)
     {
-        if (!OpenClipboard(hwnd))
+        var opened = false;
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            if (OpenClipboard(hwnd))
+            {
+                opened = true;
+                break;
+            }
+
+            Thread.Sleep(20);
+        }
+
+        if (!opened)
             throw new InvalidOperationException("Clipboard is unavailable.");
 
         var handle = nint.Zero;
         try
         {
-            EmptyClipboard();
+            if (!EmptyClipboard())
+                throw new InvalidOperationException("Could not clear clipboard.");
             var bytes = (text.Length + 1) * 2;
             handle = GlobalAlloc(GmemMoveable, (nuint)bytes);
             if (handle == nint.Zero)
