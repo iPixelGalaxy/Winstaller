@@ -61,7 +61,29 @@ public sealed partial class MainWindow : Window
 
     private const string DashboardPageKey = "Dashboard";
 
-private void BuildShell()
+    public MainWindow()
+    {
+        InitializeComponent();
+        SystemBackdrop = new MicaBackdrop();
+        BuildShell();
+        RegisterCloseGuard();
+
+        if (BootstrapManager.TryLoad())
+        {
+            LoadSavedTheme();
+            BootstrapManager.ImportLegacyConfigIfNeeded();
+            LoadConfiguration();
+            RebuildNavigation();
+            RenderDashboard();
+        }
+        else
+        {
+            ApplyTheme(ElementTheme.Default);
+            RenderInitialSetup();
+        }
+    }
+
+    private void BuildShell()
     {
         ExtendsContentIntoTitleBar = true;
 
