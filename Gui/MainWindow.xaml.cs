@@ -3639,10 +3639,7 @@ public sealed partial class MainWindow : Window
                 var popup = new Popup
                 {
                     XamlRoot = RootGrid.XamlRoot,
-                    IsLightDismissEnabled = true,
-                    LightDismissOverlayMode = LightDismissOverlayMode.On,
-                    HorizontalOffset = Math.Max(16, (RootGrid.ActualWidth - width) / 2),
-                    VerticalOffset = Math.Max(16, (RootGrid.ActualHeight - 620) / 2)
+                    IsLightDismissEnabled = false
                 };
                 var popupBackground = new SolidColorBrush(RootGrid.ActualTheme == ElementTheme.Dark
                     ? ColorHelper.FromArgb(255, 38, 38, 38)
@@ -3651,7 +3648,18 @@ public sealed partial class MainWindow : Window
                 var close = new Button { Content = "Close", MinWidth = 92 };
                 var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { close, save } };
                 var popupContent = new StackPanel { Spacing = 14, Children = { new TextBlock { Text = isNew ? "Add App" : "App Settings", FontSize = 20, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } }, new ScrollViewer { Content = panel, MaxHeight = 540 }, actions } };
-                popup.Child = new Border { Width = width, MaxHeight = 680, Padding = new Thickness(20), Background = popupBackground, BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Child = popupContent };
+                var card = new Border { Width = width, MaxHeight = 680, Padding = new Thickness(20), Background = popupBackground, BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Child = popupContent };
+                var overlay = new Grid { Width = RootGrid.ActualWidth, Height = RootGrid.ActualHeight, Background = new SolidColorBrush(Colors.Transparent), Children = { card } };
+                overlay.PointerPressed += (_, args) =>
+                {
+                    var point = args.GetCurrentPoint(card).Position;
+                    if (point.X < 0 || point.Y < 0 || point.X > card.ActualWidth || point.Y > card.ActualHeight)
+                    {
+                        args.Handled = true;
+                        popup.IsOpen = false;
+                    }
+                };
+                popup.Child = overlay;
                 close.Click += (_, _) => popup.IsOpen = false;
                 save.Click += async (_, _) =>
                 {
@@ -3765,7 +3773,23 @@ public sealed partial class MainWindow : Window
         {
             (nameof(GitInstallOptions.MandatoryAslr), "ASLR exceptions", "Compatibility exceptions for mandatory ASLR."), (nameof(GitInstallOptions.BuiltinDifftool), "Built-in difftool", "Use Git built-in difftool."), (nameof(GitInstallOptions.BuiltinRebase), "Built-in rebase", "Use Git built-in rebase."), (nameof(GitInstallOptions.BuiltinStash), "Built-in stash", "Use Git built-in stash."), (nameof(GitInstallOptions.BuiltinInteractiveAdd), "Built-in interactive add", "Use Git built-in interactive add."), (nameof(GitInstallOptions.PseudoConsole), "Pseudo console", "Use Windows pseudoconsole support."), (nameof(GitInstallOptions.FileSystemMonitor), "Filesystem monitor", "Watch repository changes." )
         }) advanced.Children.Add(BuildGitChoice(options, name, label, description));
-        panel.Children.Add(new Expander { Header = "Advanced", Content = advanced, IsExpanded = false });
+        var advancedChevron = new FontIcon { Glyph = "\uE76C", FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+        var advancedHeader = new Button
+        {
+            Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { advancedChevron, new TextBlock { Text = "Advanced", VerticalAlignment = VerticalAlignment.Center } } },
+            Padding = new Thickness(0), Background = new SolidColorBrush(Colors.Transparent), BorderBrush = new SolidColorBrush(Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Left
+        };
+        advancedHeader.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Colors.Transparent);
+        advancedHeader.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Colors.Transparent);
+        advanced.Visibility = Visibility.Collapsed;
+        advancedHeader.Click += (_, _) =>
+        {
+            var expanded = advanced.Visibility != Visibility.Visible;
+            advanced.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+            advancedChevron.Glyph = expanded ? "\uE70D" : "\uE76C";
+        };
+        panel.Children.Add(advancedHeader);
+        panel.Children.Add(advanced);
         return panel;
     }
 

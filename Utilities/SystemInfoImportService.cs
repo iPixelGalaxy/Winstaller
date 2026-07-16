@@ -128,7 +128,10 @@ public static class SystemInfoImportService
                         {
                             DisplayName = app.DisplayName,
                             Version = app.Version,
-                            LockVersion = false
+                            LockVersion = false,
+                            Git = app.PackageId.Equals("Git.Git", StringComparison.OrdinalIgnoreCase)
+                                ? ReadGitInstallOptions(log)
+                                : new GitInstallOptions()
                         };
                         added++;
                     }
@@ -202,6 +205,100 @@ public static class SystemInfoImportService
         }
 
         return new SystemInfoImportResult(added, failures);
+    }
+
+    private static GitInstallOptions ReadGitInstallOptions(Action<string>? log)
+    {
+        var options = new GitInstallOptions();
+        try
+        {
+            var installPath = ReadGitInstallPath();
+            if (string.IsNullOrWhiteSpace(installPath))
+            {
+                log?.Invoke("Git settings import: Git install path not found; using installer defaults.");
+                return options;
+            }
+
+            var optionFile = Path.Combine(installPath, "etc", "install-options.txt");
+            if (!File.Exists(optionFile))
+            {
+                log?.Invoke("Git settings import: install-options.txt not found; using installer defaults.");
+                return options;
+            }
+
+            var values = File.ReadLines(optionFile)
+                .Select(line => line.Split(':', 2))
+                .Where(parts => parts.Length == 2)
+                .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+            var components = values.TryGetValue("Components", out var componentValue)
+                ? componentValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : null;
+            if (components is not null)
+            {
+                options.DesktopIcon = components.Contains("icons\\desktop");
+                options.GitBashHere = components.Contains("ext\\shellhere") || components.Contains("ext\\reg\\shellhere");
+                options.GitGuiHere = components.Contains("ext\\guihere") || components.Contains("ext\\reg\\guihere");
+                options.GitLfs = components.Contains("gitlfs");
+                options.AssociateGitFiles = components.Contains("assoc");
+                options.AssociateShellFiles = components.Contains("assoc_sh");
+                options.WindowsTerminalProfile = components.Contains("windowsterminal");
+                options.Scalar = components.Contains("scalar");
+                options.CheckForUpdates = components.Contains("autoupdate");
+            }
+            if (values.TryGetValue("Editor Option", out var editor)) options.Editor = editor switch
+            {
+                "VIM" => GitEditor.Vim, "Notepad++" => GitEditor.NotepadPlusPlus, "VisualStudioCode" => GitEditor.VisualStudioCode,
+                "VisualStudioCodeInsiders" => GitEditor.VisualStudioCodeInsiders, "SublimeText" => GitEditor.SublimeText,
+                "VSCodium" => GitEditor.VSCodium, "MicrosoftEdit" => GitEditor.MicrosoftEdit, "CustomEditor" => GitEditor.CustomEditor,
+                _ when Enum.TryParse<GitEditor>(editor, true, out var parsed) => parsed, _ => options.Editor
+            };
+            SetIfPresent(values, "Custom Editor Path", value => options.CustomEditorPath = value);
+            SetIfPresent(values, "Default Branch Option", value => options.DefaultBranch = value.Trim());
+            if (values.TryGetValue("Path Option", out var path)) options.Path = path == "CmdTools" ? GitPath.CmdTools : path == "BashOnly" ? GitPath.BashOnly : GitPath.Cmd;
+            if (values.TryGetValue("SSH Option", out var ssh)) options.Ssh = ssh == "Plink" ? GitSsh.Plink : ssh == "ExternalOpenSSH" ? GitSsh.ExternalOpenSsh : GitSsh.OpenSsh;
+            SetIfPresent(values, "Plink Path", value => options.PlinkPath = value);
+            if (values.TryGetValue("Tortoise Option", out var tortoise)) options.UseTortoisePlink = tortoise.Equals("true", StringComparison.OrdinalIgnoreCase);
+            if (values.TryGetValue("Curl Option", out var curl)) options.Https = curl == "WinSSL" ? GitHttps.WinSsl : GitHttps.OpenSsl;
+            if (values.TryGetValue("CRLF Option", out var crlf)) options.LineEndings = crlf == "LFOnly" ? GitLineEndings.LFOnly : crlf == "CRLFCommitAsIs" ? GitLineEndings.CRLFCommitAsIs : GitLineEndings.CRLFAlways;
+            if (values.TryGetValue("Bash Terminal Option", out var terminal)) options.Terminal = terminal == "ConHost" ? GitTerminal.ConHost : GitTerminal.MinTTY;
+            if (values.TryGetValue("Git Pull Behavior Option", out var pull)) options.PullBehavior = pull == "Rebase" ? GitPullBehavior.Rebase : pull == "FFOnly" ? GitPullBehavior.FFOnly : GitPullBehavior.Merge;
+            if (values.TryGetValue("Use Credential Manager", out var credentials)) options.CredentialManager = !credentials.Equals("Disabled", StringComparison.OrdinalIgnoreCase);
+            if (values.TryGetValue("Performance Tweaks FSCache", out var cache)) options.FileSystemCache = !cache.Equals("Disabled", StringComparison.OrdinalIgnoreCase);
+            SetTriState(values, "Enable Symlinks", value => options.Symlinks = value);
+            SetTriState(values, "Add mandatory ASLR security exceptions", value => options.MandatoryAslr = value);
+            SetTriState(values, "Enable Builtin Difftool", value => options.BuiltinDifftool = value);
+            SetTriState(values, "Enable Builtin Rebase", value => options.BuiltinRebase = value);
+            SetTriState(values, "Enable Builtin Stash", value => options.BuiltinStash = value);
+            SetTriState(values, "Enable Builtin Interactive Add", value => options.BuiltinInteractiveAdd = value);
+            SetTriState(values, "Enable PseudoConsole Support", value => options.PseudoConsole = value);
+            SetTriState(values, "Enable FSMonitor", value => options.FileSystemMonitor = value);
+            log?.Invoke($"Imported Git settings from {optionFile}.");
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Git settings import failed; using installer defaults. {ex.Message}");
+        }
+        return options;
+    }
+
+    private static string? ReadGitInstallPath()
+    {
+        foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
+        {
+            using var key = root.OpenSubKey(@"Software\GitForWindows");
+            if (key?.GetValue("InstallPath") is string path && Directory.Exists(path)) return path;
+        }
+        return null;
+    }
+
+    private static void SetIfPresent(IReadOnlyDictionary<string, string> values, string key, Action<string> apply)
+    {
+        if (values.TryGetValue(key, out var value)) apply(value);
+    }
+
+    private static void SetTriState(IReadOnlyDictionary<string, string> values, string key, Action<GitTriState> apply)
+    {
+        if (values.TryGetValue(key, out var value) && Enum.TryParse<GitTriState>(value, true, out var parsed)) apply(parsed);
     }
 
     public static void IgnoreCandidates(WinstallerConfig config, IEnumerable<SystemInfoImportCandidate> candidates)
