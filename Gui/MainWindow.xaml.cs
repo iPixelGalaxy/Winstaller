@@ -607,34 +607,13 @@ public sealed partial class MainWindow : Window
         foreach (var group in RecommendedAppCatalog.Groups.Append(new RecommendedAppGroupInfo(RecommendedAppGroup.None, "Apps")))
         {
             var packageIds = new List<string>();
-            var tiles = new ItemsRepeater
+            var tiles = new VariableSizedWrapGrid
             {
+                Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalCacheLength = 0.5,
-                Layout = new UniformGridLayout
-                {
-                    MinItemWidth = 258,
-                    MinItemHeight = 136,
-                    MaximumRowsOrColumns = 0,
-                    MinColumnSpacing = 0,
-                    MinRowSpacing = 0,
-                    ItemsStretch = UniformGridLayoutItemsStretch.None
-                }
             };
-            tiles.ItemTemplate = new CallbackElementFactory(
-                data =>
-                {
-                    var packageId = (string)data!;
-                    var lifetime = new TileLifetime();
-                    var tile = BuildAppTile(packageId, config, Refresh, () => lifetime.IsCurrent);
-                    tile.Tag = lifetime;
-                    return tile;
-                },
-                element =>
-                {
-                    if (element is FrameworkElement { Tag: TileLifetime lifetime })
-                        lifetime.IsCurrent = false;
-                });
+            var tileByPackageId = new Dictionary<string, FrameworkElement>(StringComparer.OrdinalIgnoreCase);
+            var isMaterialized = false;
             var chevron = new FontIcon
             {
                 FontSize = 12,
@@ -670,7 +649,39 @@ public sealed partial class MainWindow : Window
             var section = new StackPanel { Spacing = 8, Children = { header, body } };
             void RefreshTiles()
             {
-                tiles.ItemsSource = packageIds.Count == 0 ? null : packageIds.ToArray();
+                if (!isMaterialized)
+                    return;
+
+                var wanted = packageIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var packageId in tileByPackageId.Keys.Where(packageId => !wanted.Contains(packageId)).ToList())
+                {
+                    tiles.Children.Remove(tileByPackageId[packageId]);
+                    tileByPackageId.Remove(packageId);
+                }
+
+                for (var index = 0; index < packageIds.Count; index++)
+                {
+                    var packageId = packageIds[index];
+                    if (!tileByPackageId.TryGetValue(packageId, out var tile))
+                    {
+                        tile = BuildAppTile(packageId, config, Refresh);
+                        tileByPackageId.Add(packageId, tile);
+                    }
+
+                    if (tiles.Children.IndexOf(tile) != index)
+                    {
+                        tiles.Children.Remove(tile);
+                        tiles.Children.Insert(index, tile);
+                    }
+                }
+            }
+            void MaterializeTiles()
+            {
+                if (isMaterialized)
+                    return;
+
+                isMaterialized = true;
+                RefreshTiles();
             }
             void SetExpanded(bool isExpanded)
             {
@@ -678,9 +689,7 @@ public sealed partial class MainWindow : Window
                 chevron.Glyph = isExpanded ? "\uE70D" : "\uE76C";
                 body.Visibility = isExpanded ? Visibility.Visible : Visibility.Collapsed;
                 if (isExpanded)
-                    RefreshTiles();
-                else
-                    tiles.ItemsSource = null;
+                    MaterializeTiles();
             }
 
             var defaultExpanded = group.Group == RecommendedAppGroup.None;
@@ -707,8 +716,6 @@ public sealed partial class MainWindow : Window
                 section.Section.Visibility = section.PackageIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 if (_appInstallerGroupExpanded.TryGetValue(section.Group.Group, out var isExpanded) && isExpanded)
                     section.RefreshTiles();
-                else
-                    section.Tiles.ItemsSource = null;
             }
         }
 
@@ -790,7 +797,7 @@ public sealed partial class MainWindow : Window
         return Card(panel);
     }
 
-    private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh, Func<bool>? isCurrent = null)
+    private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
     {
         var displayName = GetAppDisplayName(config, packageId);
         Uri? installerUrl = null;
@@ -817,7 +824,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var iconView = CreateAppIconView(packageId, 40, displayName, isCurrent);
+        var iconView = CreateAppIconView(packageId, 40, displayName, loadImmediately: false);
         var title = CreateAppTileTitle(displayName);
         var version = new TextBlock
         {
@@ -841,9 +848,7 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(footer, 1);
         content.Children.Add(footer);
 
-        _ = LoadAppMetadataAsync(packageId, version, download, url => installerUrl = url, isCurrent);
-
-        return new Border
+        var tile = new Border
         {
             Width = 250,
             Height = 128,
@@ -855,6 +860,17 @@ public sealed partial class MainWindow : Window
             Padding = new Thickness(14),
             Child = content
         };
+        var detailsLoaded = false;
+        tile.EffectiveViewportChanged += (sender, args) =>
+        {
+            if (detailsLoaded || args.EffectiveViewport.IsEmpty)
+                return;
+
+            detailsLoaded = true;
+            _ = LoadAppIconAsync(packageId, iconView.Image, iconView.Fallback, iconView.Spinner, displayName: displayName);
+            _ = LoadAppMetadataAsync(packageId, version, download, url => installerUrl = url);
+        };
+        return tile;
     }
 
     private static TextBlock CreateAppTileTitle(string name)
@@ -893,7 +909,7 @@ public sealed partial class MainWindow : Window
         return title;
     }
 
-    private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null, Func<bool>? isCurrent = null)
+    private AppIconView CreateAppIconView(string packageId, double size, string? displayName = null, Func<bool>? isCurrent = null, bool loadImmediately = true)
     {
         var host = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left };
         var fallback = new FontIcon { Glyph = "\uE896", FontSize = size * 0.65, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
@@ -902,7 +918,8 @@ public sealed partial class MainWindow : Window
         host.Children.Add(fallback);
         host.Children.Add(spinner);
         host.Children.Add(image);
-        _ = LoadAppIconAsync(packageId, image, fallback, spinner, isCurrent, displayName);
+        if (loadImmediately)
+            _ = LoadAppIconAsync(packageId, image, fallback, spinner, isCurrent, displayName);
         return new AppIconView(host, image, fallback, spinner);
     }
 
@@ -1099,18 +1116,18 @@ public sealed partial class MainWindow : Window
         };
         var items = new ItemsRepeater
         {
-            VerticalCacheLength = 0.75,
+            VerticalCacheLength = 0.25,
             Layout = new StackLayout { Spacing = 8 }
         };
-        items.ItemTemplate = new CallbackElementFactory(data =>
-        {
-            var item = (IndexedItem)data!;
-            return itemType == typeof(string)
-                ? BuildCompactStringListItem(config, property, list, item.Index, Refresh, placeholder)
-                : itemType == typeof(SpecialSymlink)
-                    ? BuildCompactSpecialSymlinkItem(config, list, item.Index, Refresh)
-                    : BuildListItemEditor(list, itemType, item.Index, Refresh, property);
-        });
+        items.ItemTemplate = itemType == typeof(string)
+            ? new RecyclableRowFactory(() => BuildCompactStringListItem(config, property, list, Refresh, placeholder))
+            : itemType == typeof(SpecialSymlink)
+                ? new RecyclableRowFactory(() => BuildCompactSpecialSymlinkItem(config, list, Refresh))
+                : new CallbackElementFactory(data =>
+                {
+                    var item = (IndexedItem)data!;
+                    return BuildListItemEditor(list, itemType, item.Index, Refresh, property);
+                });
         panel.Children.Add(emptyText);
         panel.Children.Add(items);
 
@@ -1578,21 +1595,26 @@ public sealed partial class MainWindow : Window
         return Card(row);
     }
 
-    private FrameworkElement BuildCompactStringListItem(SymlinksConfig config, PropertyInfo property, IList list, int index, Action refresh, string placeholder)
+    private ReusableSymlinkRow BuildCompactStringListItem(SymlinksConfig config, PropertyInfo property, IList list, Action refresh, string placeholder)
     {
-        var row = new Grid { ColumnSpacing = 8 };
+        var row = new ReusableSymlinkRow { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var value = list[index]?.ToString() ?? string.Empty;
+        var isBinding = false;
+        var isDirty = false;
         Button? iconButton = null;
         TextBox? box = null;
         iconButton = SymlinkOpenButton(
             "\uE8B7",
             async () =>
             {
-                var currentValue = list[index]?.ToString() ?? string.Empty;
+                var item = row.Item;
+                if (item is null)
+                    return;
+
+                var currentValue = list[item.Index]?.ToString() ?? string.Empty;
                 if (IsShiftDown())
                 {
                     OpenFolder(GetManagedAppDataSymlinkTarget(config, property.Name, currentValue));
@@ -1605,11 +1627,14 @@ public sealed partial class MainWindow : Window
 
                 await RunOnUiThreadAsync(() =>
                 {
-                    list[index] = picked;
-                    if (box is not null)
-                        box.Text = picked;
-                    if (iconButton is not null)
-                        iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
+                    if (!ReferenceEquals(row.Item, item))
+                        return;
+                    list[item.Index] = picked;
+                    isBinding = true;
+                    box!.Text = picked;
+                    isBinding = false;
+                    isDirty = false;
+                    iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
                     SaveConfiguration();
                 });
             });
@@ -1617,18 +1642,24 @@ public sealed partial class MainWindow : Window
 
         box = new TextBox
         {
-            Text = value,
             PlaceholderText = placeholder,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             MinWidth = 0
         };
-        void SaveBox()
+        void SaveBox(bool defocus = true)
         {
-            list[index] = box.Text.Trim();
-            iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
+            var item = row.Item;
+            if (item is null || !isDirty)
+                return;
+
+            list[item.Index] = box!.Text.Trim();
+            iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
             SaveConfiguration();
-            DefocusTextBox(box);
+            isDirty = false;
+            if (defocus)
+                DefocusTextBox(box);
         }
+        box.TextChanged += (_, _) => { if (!isBinding) isDirty = true; };
         box.LostFocus += (_, _) => SaveBox();
         box.KeyDown += (_, args) =>
         {
@@ -1643,36 +1674,54 @@ public sealed partial class MainWindow : Window
 
         var removeButton = CompactRemoveButton(async () =>
         {
-            var currentValue = list[index]?.ToString() ?? string.Empty;
+            var item = row.Item;
+            if (item is null)
+                return;
+
+            var currentValue = list[item.Index]?.ToString() ?? string.Empty;
             if (!await ConfirmSymlinkRemovalAsync(currentValue, SplitName(property.Name)))
                 return;
-            list.RemoveAt(index);
+            list.RemoveAt(item.Index);
             SaveConfiguration();
             refresh();
         });
         Grid.SetColumn(removeButton, 2);
         row.Children.Add(removeButton);
 
+        row.BindAction = item =>
+        {
+            isBinding = true;
+            box.Text = item.Value?.ToString() ?? string.Empty;
+            isBinding = false;
+            isDirty = false;
+            iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
+        };
+        row.RecycleAction = () => SaveBox(false);
         return row;
     }
 
-    private FrameworkElement BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, int index, Action refresh)
+    private ReusableSymlinkRow BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, Action refresh)
     {
-        var symlink = (SpecialSymlink)list[index]!;
-        var outer = new Grid { ColumnSpacing = 8 };
+        var outer = new ReusableSymlinkRow { ColumnSpacing = 8 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        Button? sourceButton = null;
-        Button? targetButton = null;
+        var isBinding = false;
+        var sourceDirty = false;
+        var targetDirty = false;
         TextBox? sourceBox = null;
         TextBox? targetBox = null;
-        ToggleSwitch? typeToggle = null;
-
+        Button? sourceButton = null;
+        Button? targetButton = null;
+        SpecialSymlink? Current() => outer.Item?.Value as SpecialSymlink;
         sourceButton = SymlinkOpenButton(
-            GetSpecialSymlinkGlyph(symlink),
+            "\uE8B7",
             async () =>
             {
+                var item = outer.Item;
+                var symlink = Current();
+                if (item is null || symlink is null)
+                    return;
                 if (IsShiftDown())
                 {
                     OpenFolder(ExpandConfigPath(symlink.Source));
@@ -1685,22 +1734,25 @@ public sealed partial class MainWindow : Window
 
                 await RunOnUiThreadAsync(() =>
                 {
+                    if (!ReferenceEquals(outer.Item, item))
+                        return;
                     symlink.Source = picked;
-                    if (sourceBox is not null)
-                        sourceBox.Text = picked;
-                    if (sourceButton is not null)
-                        sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-                    if (targetButton is not null)
-                        targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-                    if (typeToggle is not null)
-                        typeToggle.IsOn = symlink.IsDirectory;
+                    isBinding = true;
+                    sourceBox!.Text = picked;
+                    isBinding = false;
+                    sourceDirty = false;
+                    SetSpecialSymlinkGlyphs(symlink);
                     SaveConfiguration();
                 });
             });
         targetButton = SymlinkOpenButton(
-            GetSpecialSymlinkGlyph(symlink),
+            "\uE8B7",
             async () =>
             {
+                var item = outer.Item;
+                var symlink = Current();
+                if (item is null || symlink is null)
+                    return;
                 if (IsShiftDown())
                 {
                     OpenFolder(GetSpecialSymlinkTarget(config, symlink));
@@ -1713,11 +1765,14 @@ public sealed partial class MainWindow : Window
 
                 await RunOnUiThreadAsync(() =>
                 {
+                    if (!ReferenceEquals(outer.Item, item))
+                        return;
                     symlink.Target = picked;
-                    if (targetBox is not null)
-                        targetBox.Text = picked;
-                    if (targetButton is not null)
-                        targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+                    isBinding = true;
+                    targetBox!.Text = picked;
+                    isBinding = false;
+                    targetDirty = false;
+                    SetSpecialSymlinkGlyphs(symlink);
                     SaveConfiguration();
                 });
             });
@@ -1726,13 +1781,17 @@ public sealed partial class MainWindow : Window
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sourceRow.Children.Add(sourceButton);
-        sourceBox = CompactTextBox(symlink.Source, "Source", value =>
+        sourceBox = CompactTextBox(string.Empty, "Source", value =>
         {
+            var symlink = Current();
+            if (symlink is null || !sourceDirty)
+                return;
             symlink.Source = value;
-            sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-            targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            sourceDirty = false;
+            SetSpecialSymlinkGlyphs(symlink);
             SaveConfiguration();
         });
+        sourceBox.TextChanged += (_, _) => { if (!isBinding) sourceDirty = true; };
         Grid.SetColumn(sourceBox, 1);
         sourceRow.Children.Add(sourceBox);
 
@@ -1740,27 +1799,36 @@ public sealed partial class MainWindow : Window
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         targetRow.Children.Add(targetButton);
-        targetBox = CompactTextBox(symlink.Target, "Target override", value =>
+        targetBox = CompactTextBox(string.Empty, "Target override", value =>
         {
+            var symlink = Current();
+            if (symlink is null || !targetDirty)
+                return;
             symlink.Target = value;
-            targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            targetDirty = false;
+            SetSpecialSymlinkGlyphs(symlink);
             SaveConfiguration();
         });
+        targetBox.TextChanged += (_, _) => { if (!isBinding) targetDirty = true; };
         Grid.SetColumn(targetBox, 1);
         targetRow.Children.Add(targetBox);
 
-        typeToggle = new ToggleSwitch
+        var typeToggle = new ToggleSwitch
         {
-            IsOn = symlink.IsDirectory,
+            IsOn = false,
             OnContent = "Directory",
             OffContent = "File",
             MinWidth = 0
         };
         typeToggle.Toggled += (_, _) =>
         {
+            if (isBinding)
+                return;
+            var symlink = Current();
+            if (symlink is null)
+                return;
             symlink.IsDirectory = typeToggle.IsOn;
-            sourceButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-            targetButton.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            SetSpecialSymlinkGlyphs(symlink);
             SaveConfiguration();
         };
         fields.Children.Add(sourceRow);
@@ -1770,16 +1838,56 @@ public sealed partial class MainWindow : Window
 
         var removeButton = CompactRemoveButton(async () =>
         {
-            var name = GetItemTitle(symlink, typeof(SpecialSymlink), index);
+            var item = outer.Item;
+            var symlink = Current();
+            if (item is null || symlink is null)
+                return;
+            var name = GetItemTitle(symlink, typeof(SpecialSymlink), item.Index);
             if (!await ConfirmSymlinkRemovalAsync(name, "Special"))
                 return;
-            list.RemoveAt(index);
+            list.RemoveAt(item.Index);
             SaveConfiguration();
             refresh();
         });
         Grid.SetColumn(removeButton, 1);
         outer.Children.Add(removeButton);
 
+        void SetSpecialSymlinkGlyphs(SpecialSymlink symlink)
+        {
+            sourceButton!.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            targetButton!.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+        }
+
+        outer.BindAction = item =>
+        {
+            var symlink = (SpecialSymlink)item.Value;
+            isBinding = true;
+            sourceBox.Text = symlink.Source;
+            targetBox.Text = symlink.Target;
+            typeToggle.IsOn = symlink.IsDirectory;
+            isBinding = false;
+            sourceDirty = false;
+            targetDirty = false;
+            SetSpecialSymlinkGlyphs(symlink);
+        };
+        outer.RecycleAction = () =>
+        {
+            var symlink = Current();
+            if (symlink is null)
+                return;
+            if (sourceDirty)
+            {
+                symlink.Source = sourceBox.Text.Trim();
+                sourceDirty = false;
+                SaveConfiguration();
+            }
+            if (targetDirty)
+            {
+                symlink.Target = targetBox.Text.Trim();
+                targetDirty = false;
+                SaveConfiguration();
+            }
+        };
         return outer;
     }
 
@@ -4408,9 +4516,48 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record AppIconView(Grid Host, Image Image, FontIcon Fallback, ProgressRing Spinner);
-    private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, ItemsRepeater Tiles, Action RefreshTiles, StackPanel Section);
+    private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, VariableSizedWrapGrid Tiles, Action RefreshTiles, StackPanel Section);
     private sealed record IndexedItem(object Value, int Index);
-    private sealed class TileLifetime { public bool IsCurrent { get; set; } = true; }
+    private sealed class ReusableSymlinkRow : Grid
+    {
+        public IndexedItem? Item { get; private set; }
+        public Action<IndexedItem>? BindAction { get; set; }
+        public Action? RecycleAction { get; set; }
+
+        public void Bind(IndexedItem item)
+        {
+            Item = item;
+            BindAction?.Invoke(item);
+        }
+
+        public void Recycle()
+        {
+            RecycleAction?.Invoke();
+            Item = null;
+        }
+    }
+
+    private sealed class RecyclableRowFactory(Func<ReusableSymlinkRow> create) : IElementFactory
+    {
+        private readonly Stack<ReusableSymlinkRow> _pool = new();
+
+        public UIElement GetElement(ElementFactoryGetArgs args)
+        {
+            var row = _pool.Count > 0 ? _pool.Pop() : create();
+            row.Bind((IndexedItem)args.Data!);
+            return row;
+        }
+
+        public void RecycleElement(ElementFactoryRecycleArgs args)
+        {
+            if (args.Element is not ReusableSymlinkRow row)
+                return;
+
+            row.Recycle();
+            _pool.Push(row);
+        }
+    }
+
     private sealed class CallbackElementFactory(Func<object?, UIElement> create, Action<UIElement>? recycle = null) : IElementFactory
     {
         public UIElement GetElement(ElementFactoryGetArgs args) => create(args.Data);
