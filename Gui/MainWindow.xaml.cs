@@ -802,7 +802,7 @@ public sealed partial class MainWindow : Window
     {
         var displayName = GetAppDisplayName(config, packageId);
         Uri? installerUrl = null;
-        var download = IconActionButton("\uE896", "Direct download unavailable", () => OpenExternalUri(installerUrl));
+        var download = IconActionButton("\uE896", "Direct download unavailable", () => OpenPackageUriAsync(installerUrl));
         download.IsEnabled = false;
         var footer = new StackPanel
         {
@@ -993,7 +993,11 @@ public sealed partial class MainWindow : Window
                 version.Text = string.IsNullOrWhiteSpace(metadata.Version) ? "Version unavailable" : $"Version {metadata.Version}";
                 setInstallerUrl(metadata.InstallerUrl);
                 download.IsEnabled = metadata.InstallerUrl is not null;
-                var label = metadata.InstallerUrl is null ? "Direct download unavailable" : "Open direct download";
+                var label = metadata.InstallerUrl is null
+                    ? "Direct download unavailable"
+                    : RecommendedAppCatalog.IsMicrosoftStorePackage(packageId)
+                        ? "Open in Microsoft Store"
+                        : "Open direct download";
                 ToolTipService.SetToolTip(download, label);
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(download, label);
             });
@@ -1017,11 +1021,18 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OpenExternalUri(Uri? uri)
+    private async Task OpenPackageUriAsync(Uri? uri)
     {
-        if (uri is null || uri.Scheme != Uri.UriSchemeHttps) return;
+        if (uri is null || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != "ms-windows-store")) return;
         try
         {
+            if (uri.Scheme == "ms-windows-store")
+            {
+                if (!await Windows.System.Launcher.LaunchUriAsync(uri))
+                    throw new InvalidOperationException("Windows could not open Microsoft Store.");
+                return;
+            }
+
             Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true });
         }
         catch (Exception ex)
