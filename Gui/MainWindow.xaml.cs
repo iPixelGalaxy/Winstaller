@@ -3492,12 +3492,19 @@ public sealed partial class MainWindow : Window
         UpdateVersionState();
 
         var panel = new StackPanel { Spacing = 10 };
-        panel.Children.Add(new TextBlock { Text = "App name" });
-        panel.Children.Add(name);
+        var appNameRow = new Grid { ColumnSpacing = 12 };
+        appNameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        appNameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        iconPreview.Host.VerticalAlignment = VerticalAlignment.Top;
+        appNameRow.Children.Add(iconPreview.Host);
+        var appNameEditor = new StackPanel { Spacing = 6 };
+        appNameEditor.Children.Add(new TextBlock { Text = "App name" });
+        appNameEditor.Children.Add(name);
+        Grid.SetColumn(appNameEditor, 1);
+        appNameRow.Children.Add(appNameEditor);
+        panel.Children.Add(appNameRow);
         panel.Children.Add(new TextBlock { Text = "Winget package ID" });
         panel.Children.Add(id);
-        panel.Children.Add(new TextBlock { Text = "App icon" });
-        panel.Children.Add(iconPreview.Host);
         panel.Children.Add(new TextBlock { Text = "Install mode" });
         panel.Children.Add(mode);
         panel.Children.Add(lockVersion);
@@ -3527,18 +3534,95 @@ public sealed partial class MainWindow : Window
         id.TextChanged += (_, _) => RefreshCustomOptions();
         panel.Children.Add(customOptions);
         RefreshCustomOptions();
+
+        AppInstallBehavior BuildDraft()
+        {
+            var draft = CloneAppBehavior(behavior);
+            draft.DisplayName = string.IsNullOrWhiteSpace(name.Text) ? GetKnownPackageName(id.Text.Trim()) : name.Text.Trim();
+            draft.InstallMode = mode.SelectedItem?.ToString() ?? "Default";
+            draft.LockVersion = lockVersion.IsOn && draft.InstallMode.Equals("Default", StringComparison.OrdinalIgnoreCase);
+            draft.Version = draft.LockVersion ? version.Text.Trim() : string.Empty;
+            return draft;
+        }
+
+        string GetDraftState() => JsonSerializer.Serialize(new AppBehaviorDialogState(id.Text.Trim(), BuildDraft()), JsonOptions);
+        var initialDraftState = GetDraftState();
+
+        async Task<bool> SaveDraftAsync()
+        {
+            var newId = id.Text.Trim();
+            if (string.IsNullOrWhiteSpace(newId))
+            {
+                await ShowMessageAsync("App Settings", "Winget package ID is required.");
+                return false;
+            }
+            if (lockVersion.IsOn && string.IsNullOrWhiteSpace(version.Text))
+            {
+                await ShowMessageAsync("App Settings", "Version is required when version locking is enabled.");
+                return false;
+            }
+            if ((isNew || !newId.Equals(packageId, StringComparison.OrdinalIgnoreCase)) &&
+                config.DefaultInstalls.Contains(newId, StringComparer.OrdinalIgnoreCase))
+            {
+                await ShowMessageAsync("App Settings", "That package ID is already configured.");
+                return false;
+            }
+
+            var draft = BuildDraft();
+            if (isNew)
+                config.DefaultInstalls.Add(newId);
+            else if (!newId.Equals(packageId, StringComparison.OrdinalIgnoreCase))
+            {
+                var index = config.DefaultInstalls.FindIndex(existingId => existingId.Equals(packageId, StringComparison.OrdinalIgnoreCase));
+                if (index >= 0)
+                    config.DefaultInstalls[index] = newId;
+                config.Behaviors.Remove(packageId!);
+            }
+            config.Behaviors[newId] = draft;
+            SaveConfiguration();
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            return true;
+        }
+
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = isNew ? "Add App" : "App Settings",
             Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
             PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel"
+            CloseButtonText = "Close"
         };
-        ContentDialogResult dialogResult;
+
         try
         {
-            dialogResult = await dialog.ShowAsync();
+            while (true)
+            {
+                var dialogResult = await dialog.ShowAsync();
+                if (dialogResult == ContentDialogResult.Primary)
+                {
+                    if (await SaveDraftAsync())
+                        return;
+                    continue;
+                }
+
+                if (GetDraftState().Equals(initialDraftState, StringComparison.Ordinal))
+                    return;
+
+                var closePrompt = new ContentDialog
+                {
+                    XamlRoot = RootGrid.XamlRoot,
+                    Title = "Save changes?",
+                    Content = new TextBlock { Text = "Save changes to this app before closing?", TextWrapping = TextWrapping.Wrap },
+                    PrimaryButtonText = "Save",
+                    SecondaryButtonText = "Discard",
+                    CloseButtonText = "Keep Editing"
+                };
+                var closeResult = await closePrompt.ShowAsync();
+                if (closeResult == ContentDialogResult.Secondary)
+                    return;
+                if (closeResult == ContentDialogResult.Primary && await SaveDraftAsync())
+                    return;
+            }
         }
         finally
         {
@@ -3547,43 +3631,6 @@ public sealed partial class MainWindow : Window
             iconPreviewCancellation?.Cancel();
             iconPreviewCancellation?.Dispose();
         }
-        if (dialogResult != ContentDialogResult.Primary)
-            return;
-
-        var newId = id.Text.Trim();
-        if (string.IsNullOrWhiteSpace(newId))
-        {
-            await ShowMessageAsync("App Settings", "Winget package ID is required.");
-            return;
-        }
-        if (lockVersion.IsOn && string.IsNullOrWhiteSpace(version.Text))
-        {
-            await ShowMessageAsync("App Settings", "Version is required when version locking is enabled.");
-            return;
-        }
-        if ((isNew || !newId.Equals(packageId, StringComparison.OrdinalIgnoreCase)) &&
-            config.DefaultInstalls.Contains(newId, StringComparer.OrdinalIgnoreCase))
-        {
-            await ShowMessageAsync("App Settings", "That package ID is already configured.");
-            return;
-        }
-
-        behavior.DisplayName = string.IsNullOrWhiteSpace(name.Text) ? GetKnownPackageName(newId) : name.Text.Trim();
-        behavior.InstallMode = mode.SelectedItem?.ToString() ?? "Default";
-        behavior.LockVersion = lockVersion.IsOn && behavior.InstallMode.Equals("Default", StringComparison.OrdinalIgnoreCase);
-        behavior.Version = behavior.LockVersion ? version.Text.Trim() : string.Empty;
-        if (isNew)
-            config.DefaultInstalls.Add(newId);
-        else if (!newId.Equals(packageId, StringComparison.OrdinalIgnoreCase))
-        {
-            var index = config.DefaultInstalls.FindIndex(existingId => existingId.Equals(packageId, StringComparison.OrdinalIgnoreCase));
-            if (index >= 0)
-                config.DefaultInstalls[index] = newId;
-            config.Behaviors.Remove(packageId!);
-        }
-        config.Behaviors[newId] = behavior;
-        SaveConfiguration();
-        RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
     }
 
     private static AppInstallBehavior CloneAppBehavior(AppInstallBehavior source)
@@ -4560,6 +4607,7 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record AppIconView(Grid Host, Image Image, FontIcon Fallback, ProgressRing Spinner);
+    private sealed record AppBehaviorDialogState(string PackageId, AppInstallBehavior Behavior);
     private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, VariableSizedWrapGrid Tiles, Action RefreshTiles, StackPanel Section);
     private sealed record IndexedItem(object Value, int Index);
     private sealed class ReusableSymlinkRow : Grid
