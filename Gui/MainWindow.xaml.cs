@@ -548,6 +548,10 @@ public sealed partial class MainWindow : Window
         {
             return BuildAppInstallerTiles(appInstaller);
         }
+        if (module.Config is FontsConfig fonts)
+        {
+            return BuildFontsContent(fonts);
+        }
         if (module.Config is ShellFoldersConfig shellFolders)
         {
             return BuildShellFoldersContent(shellFolders);
@@ -644,6 +648,74 @@ public sealed partial class MainWindow : Window
             content.Children.Add(section);
         content.Children.Add(ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null)));
         return content;
+    }
+
+    private FrameworkElement BuildFontsContent(FontsConfig config)
+    {
+        var fontsDirectory = Environment.ExpandEnvironmentVariables(config.FontsDirectory)
+            .Replace("{USERNAME}", Environment.UserName, StringComparison.OrdinalIgnoreCase);
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Fonts to install",
+            FontSize = 17,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+
+        if (!Directory.Exists(fontsDirectory))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"Fonts folder not found: {fontsDirectory}",
+                Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            return Card(panel);
+        }
+
+        IReadOnlyList<string> fontFiles;
+        try
+        {
+            fontFiles = Directory.GetFiles(fontsDirectory, "*.ttf")
+                .Concat(Directory.GetFiles(fontsDirectory, "*.otf"))
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"Could not read fonts folder: {ex.Message}",
+                Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            return Card(panel);
+        }
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = fontFiles.Count == 0
+                ? "No .ttf or .otf fonts found."
+                : $"{fontFiles.Count} font{(fontFiles.Count == 1 ? string.Empty : "s")}",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
+        });
+
+        foreach (var fontFile in fontFiles)
+        {
+            var row = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                Children =
+                {
+                    new FontIcon { Glyph = "\uE8D2", FontSize = 16, VerticalAlignment = VerticalAlignment.Center },
+                    new TextBlock { Text = Path.GetFileName(fontFile), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap }
+                }
+            };
+            panel.Children.Add(row);
+        }
+
+        return Card(panel);
     }
 
     private FrameworkElement BuildAppTile(string packageId, AppInstallerConfig config, Action refresh)
