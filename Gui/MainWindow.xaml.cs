@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window
     private readonly ProgressBar _busyBar = new();
     private readonly StackPanel _topBarActions = new();
     private readonly List<TextBlock> _topBarActionLabels = [];
+    private readonly Dictionary<RecommendedAppGroup, bool> _appInstallerGroupExpanded = [];
 
     private WinstallerConfig _config = null!;
     private List<ModuleDescriptor> _modules = [];
@@ -567,28 +568,55 @@ public sealed partial class MainWindow : Window
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Left
             };
-            var count = new TextBlock { FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") };
-            var section = new Expander
+            var chevron = new FontIcon
             {
-                Header = new StackPanel
-                {
-                    Spacing = 2,
-                    Children =
-                    {
-                        new TextBlock { Text = group.Title, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
-                        count
-                    }
-                },
-                Content = tiles,
-                IsExpanded = true
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            return (group, tiles, count, section);
+            var headerContent = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children =
+                {
+                    chevron,
+                    new TextBlock { Text = group.Title, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, VerticalAlignment = VerticalAlignment.Center }
+                }
+            };
+            var header = new Button
+            {
+                Content = headerContent,
+                Padding = new Thickness(0),
+                MinHeight = 32,
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderBrush = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                HorizontalContentAlignment = HorizontalAlignment.Left
+            };
+            header.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Colors.Transparent);
+            header.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Colors.Transparent);
+            header.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Colors.Transparent);
+            header.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Colors.Transparent);
+
+            var body = new StackPanel { Spacing = 8, Children = { tiles } };
+            var section = new StackPanel { Spacing = 8, Children = { header, body } };
+            void SetExpanded(bool isExpanded)
+            {
+                _appInstallerGroupExpanded[group.Group] = isExpanded;
+                chevron.Glyph = isExpanded ? "\uE70D" : "\uE76C";
+                body.Visibility = isExpanded ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            SetExpanded(_appInstallerGroupExpanded.TryGetValue(group.Group, out var isExpanded) && isExpanded);
+            header.Click += (_, _) => SetExpanded(!_appInstallerGroupExpanded[group.Group]);
+            return (group, tiles, section);
         }).ToList();
 
         void Refresh()
         {
             grid.Children.Clear();
-            foreach (var (group, tiles, count, section) in groupedSections)
+            foreach (var (group, tiles, section) in groupedSections)
             {
                 tiles.Children.Clear();
                 var packageIds = config.DefaultInstalls
@@ -596,7 +624,6 @@ public sealed partial class MainWindow : Window
                     .OrderBy(RecommendedAppCatalog.GetGroupSortOrder)
                     .ThenBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase)
                     .ToList();
-                count.Text = $"{packageIds.Count} packages";
                 section.Visibility = packageIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 foreach (var packageId in packageIds)
                     tiles.Children.Add(BuildAppTile(packageId, config, Refresh));
@@ -612,7 +639,7 @@ public sealed partial class MainWindow : Window
 
         Refresh();
         var content = new StackPanel { Spacing = 12 };
-        foreach (var (_, _, _, section) in groupedSections)
+        foreach (var (_, _, section) in groupedSections)
             content.Children.Add(section);
         content.Children.Add(grid);
         content.Children.Add(ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null)));
