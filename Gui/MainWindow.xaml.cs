@@ -3602,6 +3602,7 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = "Save",
             CloseButtonText = "Close"
         };
+        dialog.Resources["ContentDialogMinWidth"] = 720;
 
         try
         {
