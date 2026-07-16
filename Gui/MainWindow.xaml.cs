@@ -3644,12 +3644,17 @@ public sealed partial class MainWindow : Window
                 var popupBackground = new SolidColorBrush(RootGrid.ActualTheme == ElementTheme.Dark
                     ? ColorHelper.FromArgb(255, 38, 38, 38)
                     : ColorHelper.FromArgb(255, 250, 250, 250));
-                var save = new Button { Content = "Save", MinWidth = 92 };
+                var save = new Button
+                {
+                    Content = "Save",
+                    MinWidth = 92,
+                    Style = (Style)Application.Current.Resources["AccentButtonStyle"]
+                };
                 var close = new Button { Content = "Close", MinWidth = 92 };
                 var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { close, save } };
                 var popupContent = new StackPanel { Spacing = 14, Children = { new TextBlock { Text = isNew ? "Add App" : "App Settings", FontSize = 20, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } }, new ScrollViewer { Content = panel, MaxHeight = 540 }, actions } };
                 var card = new Border { Width = width, MaxHeight = 680, Padding = new Thickness(20), Background = popupBackground, BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Child = popupContent };
-                var overlay = new Grid { Width = RootGrid.ActualWidth, Height = RootGrid.ActualHeight, Background = new SolidColorBrush(Colors.Transparent), Children = { card } };
+                var overlay = new Grid { Width = RootGrid.ActualWidth, Height = RootGrid.ActualHeight, Background = ResourceBrush("WinstallerModalOverlayBrush"), Children = { card } };
                 overlay.PointerPressed += (_, args) =>
                 {
                     var point = args.GetCurrentPoint(card).Position;
@@ -3735,6 +3740,7 @@ public sealed partial class MainWindow : Window
         _ => "WinGet"
     };
 
+#if false // Moved to MainWindow.AppInstaller.cs.
     private FrameworkElement BuildGitInstallOptions(GitInstallOptions options)
     {
         var panel = new StackPanel { Spacing = 12 };
@@ -3807,9 +3813,19 @@ public sealed partial class MainWindow : Window
     {
         var property = typeof(GitInstallOptions).GetProperty(propertyName)!;
         var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var value in Enum.GetValues(property.PropertyType)) combo.Items.Add(value);
-        combo.SelectedItem = property.GetValue(options);
-        combo.SelectionChanged += (_, _) => { if (combo.SelectedItem is not null) property.SetValue(options, combo.SelectedItem); };
+        var selectedValue = property.GetValue(options);
+        foreach (var value in Enum.GetValues(property.PropertyType))
+        {
+            var item = new ComboBoxItem { Content = GetGitChoiceLabel((Enum)value), Tag = value };
+            combo.Items.Add(item);
+            if (Equals(value, selectedValue))
+                combo.SelectedItem = item;
+        }
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedItem is ComboBoxItem { Tag: not null } item)
+                property.SetValue(options, item.Tag);
+        };
         return BuildGitRow(label, description, combo);
     }
 
@@ -3830,6 +3846,8 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(editor, 1); grid.Children.Add(editor);
         return grid;
     }
+
+#endif
 
     private static GitInstallOptions CloneGitInstallOptions(GitInstallOptions source) => new()
     {

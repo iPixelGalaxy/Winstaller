@@ -17,6 +17,7 @@
                     <SolidColorBrush x:Key="WinstallerDashboardCardBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="WinstallerDashboardCardHoverBrush" Color="#18FFFFFF" />
                     <SolidColorBrush x:Key="WinstallerSecondaryTextBrush" Color="#C5C5C5" />
+                    <SolidColorBrush x:Key="WinstallerModalOverlayBrush" Color="#66000000" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="WinstallerPageBrush" Color="Transparent" />
@@ -27,6 +28,7 @@
                     <SolidColorBrush x:Key="WinstallerDashboardCardBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="WinstallerDashboardCardHoverBrush" Color="#99FFFFFF" />
                     <SolidColorBrush x:Key="WinstallerSecondaryTextBrush" Color="#5D5D5D" />
+                    <SolidColorBrush x:Key="WinstallerModalOverlayBrush" Color="#33000000" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="WinstallerPageBrush" Color="{ThemeResource SystemColorWindowColor}" />
@@ -37,6 +39,7 @@
                     <SolidColorBrush x:Key="WinstallerDashboardCardBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="WinstallerDashboardCardHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="WinstallerSecondaryTextBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="WinstallerModalOverlayBrush" Color="Transparent" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
