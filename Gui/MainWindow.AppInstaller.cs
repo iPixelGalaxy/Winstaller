@@ -172,7 +172,7 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
                         return;
                     config.DefaultInstalls.RemoveAll(id => id.Equals(packageId, StringComparison.OrdinalIgnoreCase));
                     config.Behaviors.Remove(packageId);
-                    SaveConfiguration();
+                    SaveModuleConfiguration("appInstaller");
                     refresh();
                 }),
                 download,
@@ -577,8 +577,10 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
                 config.Behaviors.Remove(packageId!);
             }
             config.Behaviors[newId] = draft;
-            SaveConfiguration();
-            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            SaveModuleConfiguration("appInstaller");
+            var module = _modules.First(module => ReferenceEquals(module.Config, config));
+            InvalidateCachedPage(module.Name);
+            RenderModule(module);
             return true;
         }
 

@@ -99,6 +99,23 @@ public static class ConfigurationManager
         SaveJson(DefaultConfigPath, general);
     }
 
+    public static void SaveModuleConfiguration(WinstallerConfig config, string moduleId)
+    {
+        var descriptor = ModuleConfigs.FirstOrDefault(candidate => candidate.Id.Equals(moduleId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException($"Unknown module configuration: {moduleId}", nameof(moduleId));
+
+        Directory.CreateDirectory(ConfigDirectory);
+        Directory.CreateDirectory(ModuleConfigDirectory);
+
+        var value = descriptor.GetProperty().GetValue(config)
+            ?? throw new InvalidOperationException($"Missing module configuration: {descriptor.PropertyName}");
+        SaveJson(Path.Combine(ModuleConfigDirectory, descriptor.FileName), ToJsonWithoutEnabled(value));
+
+        var general = LoadJson(DefaultConfigPath, CreateDefaultGeneralConfig(config));
+        general.Modules[descriptor.Id] = GetEnabled(value);
+        SaveJson(DefaultConfigPath, general);
+    }
+
     public static void SaveTheme(string theme)
     {
         Directory.CreateDirectory(ConfigDirectory);

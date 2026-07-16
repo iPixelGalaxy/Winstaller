@@ -325,8 +325,11 @@ public sealed partial class MainWindow : Window
     private void SaveConfiguration()
     {
         ConfigurationManager.SaveConfiguration(_config);
-        _pageCache.Clear();
-        _pageScrollOffsets.Clear();
+    }
+
+    private void SaveModuleConfiguration(string moduleId)
+    {
+        ConfigurationManager.SaveModuleConfiguration(_config, moduleId);
     }
 
     private Task RunOnUiThreadAsync(Action action)

@@ -123,7 +123,8 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         panel.Children.Add(ActionButton($"+ Add {title}", () =>
         {
             list.Add(CreateDefaultItem(itemType));
-            SaveConfiguration();
+            if (itemType != typeof(string))
+                SaveModuleConfiguration("symlinks");
             Refresh();
         }));
 
@@ -145,10 +146,10 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
 
         var isBinding = false;
         var isDirty = false;
+        var icon = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
         Button? iconButton = null;
         TextBox? box = null;
-        iconButton = SymlinkOpenButton(
-            "\uE8B7",
+        iconButton = SymlinkOpenButton(icon,
             async () =>
             {
                 var item = row.Item;
@@ -175,8 +176,8 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                     box!.Text = picked;
                     isBinding = false;
                     isDirty = false;
-                    iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
-                    SaveConfiguration();
+                    icon.Glyph = "\uE8B7";
+                    SaveModuleConfiguration("symlinks");
                 });
             });
         row.Children.Add(iconButton);
@@ -193,10 +194,14 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (item is null || !isDirty)
                 return;
 
-            list[item.Index] = box!.Text.Trim();
-            iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
-            SaveConfiguration();
+            var value = box!.Text.Trim();
             isDirty = false;
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            list[item.Index] = value;
+            icon.Glyph = "\uE8B7";
+            SaveModuleConfiguration("symlinks");
             if (defocus)
                 DefocusTextBox(box);
         }
@@ -223,7 +228,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (!await ConfirmSymlinkRemovalAsync(currentValue, SplitName(property.Name)))
                 return;
             list.RemoveAt(item.Index);
-            SaveConfiguration();
+            SaveModuleConfiguration("symlinks");
             refresh();
         });
         Grid.SetColumn(removeButton, 2);
@@ -235,9 +240,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             box.Text = item.Value?.ToString() ?? string.Empty;
             isBinding = false;
             isDirty = false;
-            iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
+            icon.Glyph = "\uE8B7";
         };
-        row.RecycleAction = () => SaveBox(false);
+        row.RecycleAction = () => { };
         return row;
     }
 
@@ -252,11 +257,12 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         var targetDirty = false;
         TextBox? sourceBox = null;
         TextBox? targetBox = null;
+        var sourceIcon = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
+        var targetIcon = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
         Button? sourceButton = null;
         Button? targetButton = null;
         SpecialSymlink? Current() => outer.Item?.Value as SpecialSymlink;
-        sourceButton = SymlinkOpenButton(
-            "\uE8B7",
+        sourceButton = SymlinkOpenButton(sourceIcon,
             async () =>
             {
                 var item = outer.Item;
@@ -283,11 +289,10 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                     isBinding = false;
                     sourceDirty = false;
                     SetSpecialSymlinkGlyphs(symlink);
-                    SaveConfiguration();
+                    SaveModuleConfiguration("symlinks");
                 });
             });
-        targetButton = SymlinkOpenButton(
-            "\uE8B7",
+        targetButton = SymlinkOpenButton(targetIcon,
             async () =>
             {
                 var item = outer.Item;
@@ -314,7 +319,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                     isBinding = false;
                     targetDirty = false;
                     SetSpecialSymlinkGlyphs(symlink);
-                    SaveConfiguration();
+                    SaveModuleConfiguration("symlinks");
                 });
             });
         var fields = new StackPanel { Spacing = 6 };
@@ -330,7 +335,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             symlink.Source = value;
             sourceDirty = false;
             SetSpecialSymlinkGlyphs(symlink);
-            SaveConfiguration();
+            SaveModuleConfiguration("symlinks");
         });
         sourceBox.TextChanged += (_, _) => { if (!isBinding) sourceDirty = true; };
         Grid.SetColumn(sourceBox, 1);
@@ -348,7 +353,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             symlink.Target = value;
             targetDirty = false;
             SetSpecialSymlinkGlyphs(symlink);
-            SaveConfiguration();
+            SaveModuleConfiguration("symlinks");
         });
         targetBox.TextChanged += (_, _) => { if (!isBinding) targetDirty = true; };
         Grid.SetColumn(targetBox, 1);
@@ -370,7 +375,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                 return;
             symlink.IsDirectory = typeToggle.IsOn;
             SetSpecialSymlinkGlyphs(symlink);
-            SaveConfiguration();
+            SaveModuleConfiguration("symlinks");
         };
         fields.Children.Add(sourceRow);
         fields.Children.Add(targetRow);
@@ -387,7 +392,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (!await ConfirmSymlinkRemovalAsync(name, "Special"))
                 return;
             list.RemoveAt(item.Index);
-            SaveConfiguration();
+            SaveModuleConfiguration("symlinks");
             refresh();
         });
         Grid.SetColumn(removeButton, 1);
@@ -395,8 +400,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
 
         void SetSpecialSymlinkGlyphs(SpecialSymlink symlink)
         {
-            sourceButton!.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
-            targetButton!.Content = new FontIcon { Glyph = GetSpecialSymlinkGlyph(symlink), FontSize = 16 };
+            var glyph = GetSpecialSymlinkGlyph(symlink);
+            sourceIcon.Glyph = glyph;
+            targetIcon.Glyph = glyph;
         }
 
         outer.BindAction = item =>
@@ -411,24 +417,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             targetDirty = false;
             SetSpecialSymlinkGlyphs(symlink);
         };
-        outer.RecycleAction = () =>
-        {
-            var symlink = Current();
-            if (symlink is null)
-                return;
-            if (sourceDirty)
-            {
-                symlink.Source = sourceBox.Text.Trim();
-                sourceDirty = false;
-                SaveConfiguration();
-            }
-            if (targetDirty)
-            {
-                symlink.Target = targetBox.Text.Trim();
-                targetDirty = false;
-                SaveConfiguration();
-            }
-        };
+        outer.RecycleAction = () => { };
         return outer;
     }
 
@@ -458,11 +447,11 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         return box;
     }
 
-    private Button SymlinkOpenButton(string glyph, Func<Task> open)
+    private Button SymlinkOpenButton(FontIcon icon, Func<Task> open)
     {
         var button = new Button
         {
-            Content = new FontIcon { Glyph = glyph, FontSize = 16 },
+            Content = icon,
             Width = 30,
             Height = 32,
             MinWidth = 30,

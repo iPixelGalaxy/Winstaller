@@ -135,7 +135,6 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
     private void InvalidateCachedPage(string key)
     {
         _pageCache.Remove(key);
-        _pageScrollOffsets.Remove(key);
     }
 
     private void SetDashboardTopBarActions()
