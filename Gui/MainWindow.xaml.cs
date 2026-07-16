@@ -3644,11 +3644,14 @@ public sealed partial class MainWindow : Window
                     HorizontalOffset = Math.Max(16, (RootGrid.ActualWidth - width) / 2),
                     VerticalOffset = Math.Max(16, (RootGrid.ActualHeight - 620) / 2)
                 };
+                var popupBackground = new SolidColorBrush(RootGrid.ActualTheme == ElementTheme.Dark
+                    ? ColorHelper.FromArgb(255, 38, 38, 38)
+                    : ColorHelper.FromArgb(255, 250, 250, 250));
                 var save = new Button { Content = "Save", MinWidth = 92 };
                 var close = new Button { Content = "Close", MinWidth = 92 };
                 var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { close, save } };
                 var popupContent = new StackPanel { Spacing = 14, Children = { new TextBlock { Text = isNew ? "Add App" : "App Settings", FontSize = 20, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } }, new ScrollViewer { Content = panel, MaxHeight = 540 }, actions } };
-                popup.Child = new Border { Width = width, MaxHeight = 680, Padding = new Thickness(20), Background = ResourceBrush("WinstallerCardBrush"), BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Child = popupContent };
+                popup.Child = new Border { Width = width, MaxHeight = 680, Padding = new Thickness(20), Background = popupBackground, BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Child = popupContent };
                 close.Click += (_, _) => popup.IsOpen = false;
                 save.Click += async (_, _) =>
                 {
