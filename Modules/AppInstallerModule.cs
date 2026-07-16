@@ -173,11 +173,15 @@ public class AppInstallerModule : ModuleBase
         Config.AppInstaller.Behaviors.TryGetValue(packageId, out var behavior);
         behavior ??= new AppInstallBehavior();
 
-        var success = packageId.Equals("Microsoft.VisualStudioCode", StringComparison.OrdinalIgnoreCase)
-            ? await InstallVisualStudioCodeAsync()
-            : packageId.Equals("Git.Git", StringComparison.OrdinalIgnoreCase)
-                ? await InstallGitAsync(behavior.Git)
-                : await InstallDefaultPackageAsync(packageId);
+        var success = behavior.InstallMode switch
+        {
+            AppInstallMode.Prepared => await InstallPreparedPackageAsync(packageId, behavior),
+            AppInstallMode.Manual => await InstallManualPackageAsync(packageId, behavior),
+            AppInstallMode.Winget => await InstallDefaultPackageAsync(packageId),
+            _ when packageId.Equals("Microsoft.VisualStudioCode", StringComparison.OrdinalIgnoreCase) => await InstallVisualStudioCodeAsync(behavior),
+            _ when packageId.Equals("Git.Git", StringComparison.OrdinalIgnoreCase) => await InstallGitAsync(behavior),
+            _ => await InstallDefaultPackageAsync(packageId)
+        };
 
         if (!success)
             return false;
@@ -251,7 +255,7 @@ public class AppInstallerModule : ModuleBase
         return true;
     }
 
-    private async Task<bool> InstallVisualStudioCodeAsync()
+    private async Task<bool> InstallVisualStudioCodeAsync(AppInstallBehavior behavior)
     {
         var architecture = RuntimeInformation.ProcessArchitecture switch
         {
@@ -264,7 +268,8 @@ public class AppInstallerModule : ModuleBase
         try
         {
             var installer = Path.Combine(tempDir, "VSCodeUserSetup.exe");
-            var url = $"https://update.code.visualstudio.com/latest/{architecture}/stable";
+            var version = behavior.LockVersion ? behavior.Version : "latest";
+            var url = $"https://update.code.visualstudio.com/{version}/{architecture}/stable";
             Console.WriteLine("Downloading Visual Studio Code User Setup...");
             using var response = await HttpClient.GetAsync(url);
             response.EnsureSuccessStatusCode();
@@ -283,19 +288,20 @@ public class AppInstallerModule : ModuleBase
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    private async Task<bool> InstallGitAsync(GitInstallOptions options)
+    private async Task<bool> InstallGitAsync(AppInstallBehavior behavior)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         try
         {
             Console.WriteLine("Downloading Git for Windows...");
-            var download = await RunProcessAsync("winget", $"download --id Git.Git --exact --source winget --download-directory \"{tempDir}\" --accept-source-agreements --accept-package-agreements --disable-interactivity", Config.AppInstaller.DefaultTimeoutSeconds * 1000);
+            var version = behavior.LockVersion ? $" --version \"{behavior.Version}\"" : string.Empty;
+            var download = await RunProcessAsync("winget", $"download --id Git.Git --exact --source winget{version} --download-directory \"{tempDir}\" --accept-source-agreements --accept-package-agreements --disable-interactivity", Config.AppInstaller.DefaultTimeoutSeconds * 1000);
             if (download != 0) { ConsoleHelper.WriteError($"Git download failed (exit code: {download})"); return false; }
             var installer = FindInstaller(tempDir);
             if (installer is null) { ConsoleHelper.WriteError("Git installer was not downloaded."); return false; }
             var infPath = Path.Combine(tempDir, "git-install.inf");
-            await File.WriteAllTextAsync(infPath, BuildGitInf(options));
+            await File.WriteAllTextAsync(infPath, BuildGitInf(behavior.Git));
             var result = await RunProcessAsync(installer, $"/VERYSILENT /NORESTART /NOCANCEL /SP- /LOADINF=\"{infPath}\"", Config.AppInstaller.InstallerTimeoutSeconds * 1000);
             if (result != 0) ConsoleHelper.WriteError($"Git installer failed (exit code: {result})");
             return result == 0;
@@ -310,9 +316,14 @@ public class AppInstallerModule : ModuleBase
 
     internal static string BuildGitInf(GitInstallOptions options)
     {
-        static string Value<T>(T value) where T : Enum => value.ToString();
+        static string Editor(GitEditor value) => value switch { GitEditor.Vim => "VIM", GitEditor.NotepadPlusPlus => "Notepad++", GitEditor.CustomEditor => "CustomEditor", _ => value.ToString() };
+        static string Path(GitPath value) => value switch { GitPath.CmdTools => "CmdTools", _ => value.ToString() };
+        static string Ssh(GitSsh value) => value switch { GitSsh.OpenSsh => "OpenSSH", GitSsh.ExternalOpenSsh => "ExternalOpenSSH", GitSsh.Plink => "Plink", _ => throw new ArgumentOutOfRangeException(nameof(value)) };
+        static string Https(GitHttps value) => value == GitHttps.OpenSsl ? "OpenSSL" : "WinSSL";
+        static string LineEndings(GitLineEndings value) => value.ToString();
+        static string Terminal(GitTerminal value) => value == GitTerminal.MinTTY ? "MinTTY" : "ConHost";
+        static string Pull(GitPullBehavior value) => value == GitPullBehavior.FFOnly ? "FFOnly" : value.ToString();
         static string Enabled(bool value) => value ? "Enabled" : "Disabled";
-        static string TriState(GitTriState value) => value == GitTriState.Auto ? string.Empty : Value(value);
         static void RejectNewlines(string value, string name)
         {
             if (value.Contains('\r') || value.Contains('\n')) throw new ArgumentException($"{name} cannot contain newlines.");
@@ -320,21 +331,51 @@ public class AppInstallerModule : ModuleBase
         RejectNewlines(options.CustomEditorPath, nameof(options.CustomEditorPath));
         RejectNewlines(options.PlinkPath, nameof(options.PlinkPath));
         var components = new List<string>();
-        if (options.DesktopIcon) components.Add("icons");
-        if (options.GitBashHere) components.Add("ext\\reg\\shellhere");
-        if (options.GitGuiHere) components.Add("ext\\reg\\guihere");
+        if (options.DesktopIcon) components.Add("icons\\desktop");
+        if (options.GitBashHere) components.Add("ext\\shellhere");
+        if (options.GitGuiHere) components.Add("ext\\guihere");
         if (options.GitLfs) components.Add("gitlfs");
         if (options.AssociateGitFiles) components.Add("assoc");
         if (options.AssociateShellFiles) components.Add("assoc_sh");
         if (options.WindowsTerminalProfile) components.Add("windowsterminal");
         if (options.Scalar) components.Add("scalar");
-        var lines = new List<string> { "[Setup]", "Lang=default", $"Components={string.Join(',', components)}", $"EditorOption={Value(options.Editor)}", $"PathOption={Value(options.Path)}", $"SSHOption={Value(options.Ssh)}", $"CURLOption={Value(options.Https)}", $"CRLFOption={Value(options.LineEndings)}", $"BashTerminalOption={Value(options.Terminal)}", $"GitPullBehaviorOption={Value(options.PullBehavior)}", $"UseCredentialManager={Enabled(options.CredentialManager)}", $"PerformanceTweaksFSCache={Enabled(options.FileSystemCache)}", $"EnableSymlinks={Enabled(options.Symlinks)}", $"EnableAutoUpdate={Enabled(options.CheckForUpdates)}" };
-        if (options.DefaultBranch != GitDefaultBranch.InstallerDefault) lines.Add($"DefaultBranchOption={Value(options.DefaultBranch)}");
-        if (options.Editor == GitEditor.Custom) lines.Add($"CustomEditorPath={options.CustomEditorPath}");
-        if (options.Ssh == GitSsh.ExternalPlink) lines.Add($"PlinkPath={options.PlinkPath}");
-        foreach (var (key, value) in new[] { ("EnableASLR", options.MandatoryAslr), ("EnableBuiltinDiffTool", options.BuiltinDifftool), ("EnableBuiltinRebase", options.BuiltinRebase), ("EnableBuiltinStash", options.BuiltinStash), ("EnableBuiltinAdd", options.BuiltinInteractiveAdd), ("EnablePseudoConsoleSupport", options.PseudoConsole), ("EnableFSMonitor", options.FileSystemMonitor) })
-            if (TriState(value) is { Length: > 0 } setting) lines.Add($"{key}={setting}");
+        if (options.CheckForUpdates) components.Add("autoupdate");
+        var lines = new List<string> { "[Setup]", "Lang=default", $"Components={string.Join(',', components)}", $"EditorOption={Editor(options.Editor)}", $"PathOption={Path(options.Path)}", $"SSHOption={Ssh(options.Ssh)}", $"CURLOption={Https(options.Https)}", $"CRLFOption={LineEndings(options.LineEndings)}", $"BashTerminalOption={Terminal(options.Terminal)}", $"GitPullBehaviorOption={Pull(options.PullBehavior)}", $"UseCredentialManager={Enabled(options.CredentialManager)}", $"PerformanceTweaksFSCache={Enabled(options.FileSystemCache)}", $"EnableSymlinks={options.Symlinks}", $"AddmandatoryASLRsecurityexceptions={options.MandatoryAslr}", $"EnableBuiltinDifftool={options.BuiltinDifftool}", $"EnableBuiltinRebase={options.BuiltinRebase}", $"EnableBuiltinStash={options.BuiltinStash}", $"EnableBuiltinInteractiveAdd={options.BuiltinInteractiveAdd}", $"EnablePseudoConsoleSupport={options.PseudoConsole}", $"EnableFSMonitor={options.FileSystemMonitor}" };
+        if (!string.IsNullOrWhiteSpace(options.DefaultBranch)) lines.Add($"DefaultBranchOption={options.DefaultBranch}");
+        if (options.Editor == GitEditor.CustomEditor) lines.Add($"CustomEditorPath={options.CustomEditorPath}");
+        if (options.Ssh == GitSsh.Plink) { lines.Add($"PlinkPath={options.PlinkPath}"); lines.Add($"TortoiseOption={options.UseTortoisePlink.ToString().ToLowerInvariant()}"); }
         return string.Join(Environment.NewLine, lines) + Environment.NewLine;
+    }
+
+    private async Task<bool> InstallPreparedPackageAsync(string packageId, AppInstallBehavior behavior)
+    {
+        var infFile = Path.Combine(ExpandEnvironmentVariables(Config.AppInstaller.SetupInfoDirectory), packageId.Replace('.', '-') + ".inf");
+        if (!File.Exists(infFile))
+        {
+            ConsoleHelper.WriteWarning($"INF file not found for {packageId}: {infFile}. Falling back to WinGet.");
+            return await InstallDefaultPackageAsync(packageId);
+        }
+        var version = behavior.LockVersion ? $" --version \"{behavior.Version}\"" : string.Empty;
+        var arguments = $"install --id \"{packageId}\" --exact --source winget{version} --override \"/LOADINF=\\\"{infFile}\\\" /SILENT /NOCANCEL\" --accept-source-agreements --accept-package-agreements --disable-interactivity";
+        var result = await RunProcessAsync("winget", arguments, Config.AppInstaller.InstallerTimeoutSeconds * 1000);
+        return result == 0;
+    }
+
+    private async Task<bool> InstallManualPackageAsync(string packageId, AppInstallBehavior behavior)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var version = behavior.LockVersion ? $" --version \"{behavior.Version}\"" : string.Empty;
+            var download = await RunProcessAsync("winget", $"download --id \"{packageId}\" --exact --source winget{version} --download-directory \"{tempDir}\" --accept-source-agreements --accept-package-agreements --disable-interactivity", Config.AppInstaller.DefaultTimeoutSeconds * 1000);
+            if (download != 0) return false;
+            var installer = FindInstaller(tempDir);
+            if (installer is null) { ConsoleHelper.WriteError($"No installer downloaded for {packageId}."); return false; }
+            return await RunProcessAsync(installer, string.Empty, Config.AppInstaller.InstallerTimeoutSeconds * 1000) == 0;
+        }
+        catch (Exception ex) { ConsoleHelper.WriteError($"Manual installation failed for {packageId}: {ex.Message}"); return false; }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
 

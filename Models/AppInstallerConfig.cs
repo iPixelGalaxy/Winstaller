@@ -19,6 +19,7 @@ public class AppInstallerConfig
 public class AppInstallBehavior
 {
     public string DisplayName { get; set; } = string.Empty;
+    public AppInstallMode InstallMode { get; set; } = AppInstallMode.Auto;
     public bool LockVersion { get; set; }
     public string Version { get; set; } = string.Empty;
     public DiscordInstallOptions Discord { get; set; } = new();
@@ -26,14 +27,14 @@ public class AppInstallBehavior
     public GitInstallOptions Git { get; set; } = new();
 }
 
-public enum GitEditor { Vim, Nano, Notepad, VisualStudioCode, Custom }
-public enum GitDefaultBranch { InstallerDefault, Master, Main }
-public enum GitPath { BashOnly, Cmd, CmdAndTools }
-public enum GitSsh { OpenSsh, ExternalPlink }
-public enum GitHttps { OpenSsl, WindowsSecureChannel }
-public enum GitLineEndings { CRLFAlways, CRLFCommitAsIs, LFAlways }
-public enum GitTerminal { MinTTY, WindowsConsole }
-public enum GitPullBehavior { Merge, Rebase, FastForwardOnly }
+public enum AppInstallMode { Auto, Winget, Prepared, Manual }
+public enum GitEditor { Nano, Vim, NotepadPlusPlus, VisualStudioCode, VisualStudioCodeInsiders, SublimeText, Atom, VSCodium, Notepad, Wordpad, MicrosoftEdit, CustomEditor }
+public enum GitPath { BashOnly, Cmd, CmdTools }
+public enum GitSsh { OpenSsh, ExternalOpenSsh, Plink }
+public enum GitHttps { OpenSsl, WinSsl }
+public enum GitLineEndings { LFOnly, CRLFAlways, CRLFCommitAsIs }
+public enum GitTerminal { MinTTY, ConHost }
+public enum GitPullBehavior { Merge, Rebase, FFOnly }
 public enum GitTriState { Auto, Enabled, Disabled }
 
 public class GitInstallOptions
@@ -45,21 +46,22 @@ public class GitInstallOptions
     public bool AssociateGitFiles { get; set; } = true;
     public bool AssociateShellFiles { get; set; } = true;
     public bool WindowsTerminalProfile { get; set; } = true;
-    public bool Scalar { get; set; }
-    public bool CheckForUpdates { get; set; } = true;
+    public bool Scalar { get; set; } = true;
+    public bool CheckForUpdates { get; set; }
     public GitEditor Editor { get; set; } = GitEditor.Vim;
     public string CustomEditorPath { get; set; } = string.Empty;
-    public GitDefaultBranch DefaultBranch { get; set; } = GitDefaultBranch.InstallerDefault;
+    public string DefaultBranch { get; set; } = string.Empty;
     public GitPath Path { get; set; } = GitPath.Cmd;
     public GitSsh Ssh { get; set; } = GitSsh.OpenSsh;
     public string PlinkPath { get; set; } = string.Empty;
+    public bool UseTortoisePlink { get; set; }
     public GitHttps Https { get; set; } = GitHttps.OpenSsl;
     public GitLineEndings LineEndings { get; set; } = GitLineEndings.CRLFAlways;
     public GitTerminal Terminal { get; set; } = GitTerminal.MinTTY;
     public GitPullBehavior PullBehavior { get; set; } = GitPullBehavior.Merge;
     public bool CredentialManager { get; set; } = true;
     public bool FileSystemCache { get; set; } = true;
-    public bool Symlinks { get; set; }
+    public GitTriState Symlinks { get; set; } = GitTriState.Auto;
     public GitTriState MandatoryAslr { get; set; } = GitTriState.Auto;
     public GitTriState BuiltinDifftool { get; set; } = GitTriState.Auto;
     public GitTriState BuiltinRebase { get; set; } = GitTriState.Auto;

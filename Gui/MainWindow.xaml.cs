@@ -10,6 +10,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -3497,17 +3498,28 @@ public sealed partial class MainWindow : Window
             await LoadAppIconAsync(typedId, iconPreview.Image, iconPreview.Fallback, iconPreview.Spinner, () => iconPreviewActive && generation == iconGeneration, name.Text);
         }
         id.TextChanged += (_, _) => _ = RefreshIconPreviewAsync();
-        var mode = new ComboBox { MinWidth = 260, IsEnabled = false };
-        mode.Items.Add($"Auto ({GetAutoInstallDescription(id.Text)})");
-        mode.SelectedIndex = 0;
-        var lockVersion = new ToggleSwitch { Header = "Lock version", IsOn = behavior.LockVersion };
+        var mode = new ComboBox { MinWidth = 260 };
+        void RefreshModes()
+        {
+            var selected = behavior.InstallMode;
+            mode.Items.Clear();
+            mode.Items.Add($"Auto ({GetAutoInstallDescription(id.Text)})");
+            mode.Items.Add("WinGet");
+            mode.Items.Add("Prepared (saved INF)");
+            mode.Items.Add("Manual (interactive installer)");
+            mode.SelectedIndex = (int)selected;
+        }
+        RefreshModes();
+        AppInstallMode SelectedMode() => (AppInstallMode)Math.Clamp(mode.SelectedIndex, 0, 3);
+        var lockVersion = new CheckBox { Content = "Lock version", IsChecked = behavior.LockVersion };
         var version = new TextBox { Text = behavior.Version, PlaceholderText = "Version" };
         EnableAppSettingsTextCopy(version);
         void UpdateVersionState()
         {
-            version.IsEnabled = lockVersion.IsOn;
+            version.IsEnabled = lockVersion.IsChecked is true;
         }
-        lockVersion.Toggled += (_, _) => UpdateVersionState();
+        lockVersion.Checked += (_, _) => UpdateVersionState();
+        lockVersion.Unchecked += (_, _) => UpdateVersionState();
         UpdateVersionState();
 
         var panel = new StackPanel { Spacing = 10 };
@@ -3534,6 +3546,11 @@ public sealed partial class MainWindow : Window
         {
             customOptions.Children.Clear();
             var typedId = id.Text.Trim();
+            if (SelectedMode() != AppInstallMode.Auto)
+            {
+                customOptions.Children.Add(new TextBlock { Text = "Custom app settings apply only in Auto mode.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
+                return;
+            }
             if (typedId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
             {
                 customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallVencord))!));
@@ -3558,7 +3575,8 @@ public sealed partial class MainWindow : Window
             }
             EnableAppSettingsTextCopyInTree(customOptions);
         }
-        id.TextChanged += (_, _) => RefreshCustomOptions();
+        id.TextChanged += (_, _) => { RefreshModes(); RefreshCustomOptions(); };
+        mode.SelectionChanged += (_, _) => RefreshCustomOptions();
         panel.Children.Add(customOptions);
         RefreshCustomOptions();
 
@@ -3566,7 +3584,8 @@ public sealed partial class MainWindow : Window
         {
             var draft = CloneAppBehavior(behavior);
             draft.DisplayName = string.IsNullOrWhiteSpace(name.Text) ? GetKnownPackageName(id.Text.Trim()) : name.Text.Trim();
-            draft.LockVersion = lockVersion.IsOn;
+            draft.InstallMode = SelectedMode();
+            draft.LockVersion = lockVersion.IsChecked is true;
             draft.Version = draft.LockVersion ? version.Text.Trim() : string.Empty;
             return draft;
         }
@@ -3582,7 +3601,7 @@ public sealed partial class MainWindow : Window
                 await ShowMessageAsync("App Settings", "Winget package ID is required.");
                 return false;
             }
-            if (lockVersion.IsOn && string.IsNullOrWhiteSpace(version.Text))
+            if (lockVersion.IsChecked is true && string.IsNullOrWhiteSpace(version.Text))
             {
                 await ShowMessageAsync("App Settings", "Version is required when version locking is enabled.");
                 return false;
@@ -3610,27 +3629,37 @@ public sealed partial class MainWindow : Window
             return true;
         }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = isNew ? "Add App" : "App Settings",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Close"
-        };
-        dialog.Resources["ContentDialogMinWidth"] = 720;
-
         try
         {
             while (true)
             {
-                var dialogResult = await dialog.ShowAsync();
-                if (dialogResult == ContentDialogResult.Primary)
+                var saved = false;
+                var dismissed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var width = Math.Min(720, Math.Max(360, RootGrid.ActualWidth - 32));
+                var popup = new Popup
                 {
-                    if (await SaveDraftAsync())
-                        return;
-                    continue;
-                }
+                    XamlRoot = RootGrid.XamlRoot,
+                    IsLightDismissEnabled = true,
+                    LightDismissOverlayMode = LightDismissOverlayMode.On,
+                    HorizontalOffset = Math.Max(16, (RootGrid.ActualWidth - width) / 2),
+                    VerticalOffset = Math.Max(16, (RootGrid.ActualHeight - 620) / 2)
+                };
+                var save = new Button { Content = "Save", MinWidth = 92 };
+                var close = new Button { Content = "Close", MinWidth = 92 };
+                var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { close, save } };
+                var popupContent = new StackPanel { Spacing = 14, Children = { new TextBlock { Text = isNew ? "Add App" : "App Settings", FontSize = 20, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } }, new ScrollViewer { Content = panel, MaxHeight = 540 }, actions } };
+                popup.Child = new Border { Width = width, MaxHeight = 680, Padding = new Thickness(20), Background = ResourceBrush("WinstallerCardBrush"), BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Child = popupContent };
+                close.Click += (_, _) => popup.IsOpen = false;
+                save.Click += async (_, _) =>
+                {
+                    save.IsEnabled = false;
+                    if (await SaveDraftAsync()) { saved = true; popup.IsOpen = false; }
+                    save.IsEnabled = true;
+                };
+                popup.Closed += (_, _) => dismissed.TrySetResult();
+                popup.IsOpen = true;
+                await dismissed.Task;
+                if (saved) return;
 
                 if (GetDraftState().Equals(initialDraftState, StringComparison.Ordinal))
                     return;
@@ -3665,6 +3694,7 @@ public sealed partial class MainWindow : Window
         return new AppInstallBehavior
         {
             DisplayName = source.DisplayName,
+            InstallMode = source.InstallMode,
             LockVersion = source.LockVersion,
             Version = source.Version,
             Discord = new DiscordInstallOptions
@@ -3696,18 +3726,87 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildGitInstallOptions(GitInstallOptions options)
     {
-        var panel = new StackPanel { Spacing = 8 };
-        var basic = new[] { nameof(GitInstallOptions.DesktopIcon), nameof(GitInstallOptions.GitBashHere), nameof(GitInstallOptions.GitGuiHere), nameof(GitInstallOptions.GitLfs), nameof(GitInstallOptions.AssociateGitFiles), nameof(GitInstallOptions.AssociateShellFiles), nameof(GitInstallOptions.WindowsTerminalProfile), nameof(GitInstallOptions.Scalar), nameof(GitInstallOptions.CheckForUpdates), nameof(GitInstallOptions.Editor), nameof(GitInstallOptions.CustomEditorPath), nameof(GitInstallOptions.DefaultBranch), nameof(GitInstallOptions.Path), nameof(GitInstallOptions.Ssh), nameof(GitInstallOptions.PlinkPath), nameof(GitInstallOptions.Https), nameof(GitInstallOptions.LineEndings), nameof(GitInstallOptions.Terminal), nameof(GitInstallOptions.PullBehavior), nameof(GitInstallOptions.CredentialManager), nameof(GitInstallOptions.FileSystemCache), nameof(GitInstallOptions.Symlinks) };
-        foreach (var property in basic) panel.Children.Add(BuildInlineObjectPropertyEditor(options, typeof(GitInstallOptions).GetProperty(property)!));
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(new TextBlock { Text = "Components", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        var components = new WrapPanel { Orientation = Orientation.Horizontal, HorizontalSpacing = 18, VerticalSpacing = 8 };
+        foreach (var (name, description) in new[]
+        {
+            (nameof(GitInstallOptions.DesktopIcon), "Create a desktop shortcut"), (nameof(GitInstallOptions.GitBashHere), "Add Git Bash Here to Explorer"), (nameof(GitInstallOptions.GitGuiHere), "Add Git GUI Here to Explorer"), (nameof(GitInstallOptions.GitLfs), "Install Git Large File Storage"), (nameof(GitInstallOptions.AssociateGitFiles), "Open .git* files in editor"), (nameof(GitInstallOptions.AssociateShellFiles), "Run .sh files with Git Bash"), (nameof(GitInstallOptions.WindowsTerminalProfile), "Add Git Bash to Windows Terminal"), (nameof(GitInstallOptions.Scalar), "Install Scalar for large repositories"), (nameof(GitInstallOptions.CheckForUpdates), "Check daily for Git updates")
+        }) components.Children.Add(BuildGitCheckBox(options, name, SplitName(name), description));
+        panel.Children.Add(components);
+
+        panel.Children.Add(new TextBlock { Text = "Git behavior", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        var behavior = new StackPanel { Spacing = 8 };
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.Editor), "Default editor", "Editor opened for commit messages."));
+        behavior.Children.Add(BuildGitText(options, nameof(GitInstallOptions.CustomEditorPath), "Custom editor command", "Used only for Custom editor."));
+        behavior.Children.Add(BuildGitText(options, nameof(GitInstallOptions.DefaultBranch), "Initial branch name", "Leave blank for Git installer default."));
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.Path), "PATH environment", "Where Git commands are available."));
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.Ssh), "SSH client", "Used for SSH remotes."));
+        behavior.Children.Add(BuildGitText(options, nameof(GitInstallOptions.PlinkPath), "Plink executable", "Used only when SSH client is Plink."));
+        behavior.Children.Add(BuildGitCheckBox(options, nameof(GitInstallOptions.UseTortoisePlink), "Use TortoisePlink", "Used only with Plink."));
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.Https), "HTTPS backend", "OpenSSL or Windows certificate store."));
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.LineEndings), "Line endings", "How Git converts LF and CRLF."));
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.Terminal), "Git Bash terminal", "MinTTY terminal or Windows console host."));
+        behavior.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.PullBehavior), "git pull behavior", "Merge, rebase, or fast-forward only."));
+        panel.Children.Add(behavior);
+
+        panel.Children.Add(new TextBlock { Text = "Performance", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        var performance = new WrapPanel { Orientation = Orientation.Horizontal, HorizontalSpacing = 18, VerticalSpacing = 8 };
+        performance.Children.Add(BuildGitCheckBox(options, nameof(GitInstallOptions.CredentialManager), "Git Credential Manager", "Store and refresh credentials."));
+        performance.Children.Add(BuildGitCheckBox(options, nameof(GitInstallOptions.FileSystemCache), "Filesystem cache", "Cache filesystem metadata."));
+        performance.Children.Add(BuildGitChoice(options, nameof(GitInstallOptions.Symlinks), "Symbolic links", "Auto uses installer default."));
+        panel.Children.Add(performance);
+
         var advanced = new StackPanel { Spacing = 8 };
-        foreach (var property in new[] { nameof(GitInstallOptions.MandatoryAslr), nameof(GitInstallOptions.BuiltinDifftool), nameof(GitInstallOptions.BuiltinRebase), nameof(GitInstallOptions.BuiltinStash), nameof(GitInstallOptions.BuiltinInteractiveAdd), nameof(GitInstallOptions.PseudoConsole), nameof(GitInstallOptions.FileSystemMonitor) }) advanced.Children.Add(BuildInlineObjectPropertyEditor(options, typeof(GitInstallOptions).GetProperty(property)!));
+        foreach (var (name, label, description) in new[]
+        {
+            (nameof(GitInstallOptions.MandatoryAslr), "ASLR exceptions", "Compatibility exceptions for mandatory ASLR."), (nameof(GitInstallOptions.BuiltinDifftool), "Built-in difftool", "Use Git built-in difftool."), (nameof(GitInstallOptions.BuiltinRebase), "Built-in rebase", "Use Git built-in rebase."), (nameof(GitInstallOptions.BuiltinStash), "Built-in stash", "Use Git built-in stash."), (nameof(GitInstallOptions.BuiltinInteractiveAdd), "Built-in interactive add", "Use Git built-in interactive add."), (nameof(GitInstallOptions.PseudoConsole), "Pseudo console", "Use Windows pseudoconsole support."), (nameof(GitInstallOptions.FileSystemMonitor), "Filesystem monitor", "Watch repository changes." )
+        }) advanced.Children.Add(BuildGitChoice(options, name, label, description));
         panel.Children.Add(new Expander { Header = "Advanced", Content = advanced, IsExpanded = false });
         return panel;
     }
 
+    private FrameworkElement BuildGitCheckBox(GitInstallOptions options, string propertyName, string label, string description)
+    {
+        var property = typeof(GitInstallOptions).GetProperty(propertyName)!;
+        var box = new CheckBox { Content = label, IsChecked = property.GetValue(options) is true, MinWidth = 225 };
+        ToolTipService.SetToolTip(box, description);
+        box.Checked += (_, _) => property.SetValue(options, true);
+        box.Unchecked += (_, _) => property.SetValue(options, false);
+        return box;
+    }
+
+    private FrameworkElement BuildGitChoice(GitInstallOptions options, string propertyName, string label, string description)
+    {
+        var property = typeof(GitInstallOptions).GetProperty(propertyName)!;
+        var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var value in Enum.GetValues(property.PropertyType)) combo.Items.Add(value);
+        combo.SelectedItem = property.GetValue(options);
+        combo.SelectionChanged += (_, _) => { if (combo.SelectedItem is not null) property.SetValue(options, combo.SelectedItem); };
+        return BuildGitRow(label, description, combo);
+    }
+
+    private FrameworkElement BuildGitText(GitInstallOptions options, string propertyName, string label, string description)
+    {
+        var property = typeof(GitInstallOptions).GetProperty(propertyName)!;
+        var box = new TextBox { Text = property.GetValue(options)?.ToString() ?? string.Empty, HorizontalAlignment = HorizontalAlignment.Stretch };
+        box.TextChanged += (_, _) => property.SetValue(options, box.Text);
+        return BuildGitRow(label, description, box);
+    }
+
+    private FrameworkElement BuildGitRow(string label, string description, FrameworkElement editor)
+    {
+        var grid = new Grid { ColumnSpacing = 12 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.Children.Add(new StackPanel { Spacing = 2, Children = { new TextBlock { Text = label }, new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush") } } });
+        Grid.SetColumn(editor, 1); grid.Children.Add(editor);
+        return grid;
+    }
+
     private static GitInstallOptions CloneGitInstallOptions(GitInstallOptions source) => new()
     {
-        DesktopIcon = source.DesktopIcon, GitBashHere = source.GitBashHere, GitGuiHere = source.GitGuiHere, GitLfs = source.GitLfs, AssociateGitFiles = source.AssociateGitFiles, AssociateShellFiles = source.AssociateShellFiles, WindowsTerminalProfile = source.WindowsTerminalProfile, Scalar = source.Scalar, CheckForUpdates = source.CheckForUpdates, Editor = source.Editor, CustomEditorPath = source.CustomEditorPath, DefaultBranch = source.DefaultBranch, Path = source.Path, Ssh = source.Ssh, PlinkPath = source.PlinkPath, Https = source.Https, LineEndings = source.LineEndings, Terminal = source.Terminal, PullBehavior = source.PullBehavior, CredentialManager = source.CredentialManager, FileSystemCache = source.FileSystemCache, Symlinks = source.Symlinks, MandatoryAslr = source.MandatoryAslr, BuiltinDifftool = source.BuiltinDifftool, BuiltinRebase = source.BuiltinRebase, BuiltinStash = source.BuiltinStash, BuiltinInteractiveAdd = source.BuiltinInteractiveAdd, PseudoConsole = source.PseudoConsole, FileSystemMonitor = source.FileSystemMonitor
+        DesktopIcon = source.DesktopIcon, GitBashHere = source.GitBashHere, GitGuiHere = source.GitGuiHere, GitLfs = source.GitLfs, AssociateGitFiles = source.AssociateGitFiles, AssociateShellFiles = source.AssociateShellFiles, WindowsTerminalProfile = source.WindowsTerminalProfile, Scalar = source.Scalar, CheckForUpdates = source.CheckForUpdates, Editor = source.Editor, CustomEditorPath = source.CustomEditorPath, DefaultBranch = source.DefaultBranch, Path = source.Path, Ssh = source.Ssh, PlinkPath = source.PlinkPath, UseTortoisePlink = source.UseTortoisePlink, Https = source.Https, LineEndings = source.LineEndings, Terminal = source.Terminal, PullBehavior = source.PullBehavior, CredentialManager = source.CredentialManager, FileSystemCache = source.FileSystemCache, Symlinks = source.Symlinks, MandatoryAslr = source.MandatoryAslr, BuiltinDifftool = source.BuiltinDifftool, BuiltinRebase = source.BuiltinRebase, BuiltinStash = source.BuiltinStash, BuiltinInteractiveAdd = source.BuiltinInteractiveAdd, PseudoConsole = source.PseudoConsole, FileSystemMonitor = source.FileSystemMonitor
     };
     private async Task ShowIgnoredItemsAsync(ModuleDescriptor module)
     {

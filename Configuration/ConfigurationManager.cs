@@ -412,9 +412,16 @@ public static class ConfigurationManager
             appInstaller["installerTimeoutSeconds"] = timeout.DeepClone();
 
         var defaults = appInstaller["defaultInstalls"] as JsonArray ?? [];
+        var behaviors = appInstaller["behaviors"] as JsonObject ?? new JsonObject();
+        appInstaller["behaviors"] = behaviors;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var merged = new JsonArray();
-        foreach (var source in new[] { defaults, appInstaller["preparedInstallers"] as JsonArray, appInstaller["manualInstalls"] as JsonArray })
+        foreach (var (source, mode) in new[]
+        {
+            (defaults, (string?)null),
+            (appInstaller["preparedInstallers"] as JsonArray, "Prepared"),
+            (appInstaller["manualInstalls"] as JsonArray, "Manual")
+        })
         {
             if (source is null) continue;
             foreach (var entry in source)
@@ -422,6 +429,8 @@ public static class ConfigurationManager
                 var id = entry?.GetValue<string>();
                 if (!string.IsNullOrWhiteSpace(id) && seen.Add(id))
                     merged.Add(id);
+                if (!string.IsNullOrWhiteSpace(id) && mode is not null && behaviors[id] is null)
+                    behaviors[id] = new JsonObject { ["installMode"] = mode };
             }
         }
         appInstaller["defaultInstalls"] = merged;
@@ -429,9 +438,31 @@ public static class ConfigurationManager
         appInstaller.Remove("manualInstalls");
         appInstaller.Remove("manualTimeoutSeconds");
         appInstaller.Remove("bulkTimeoutSeconds");
-        if (appInstaller["behaviors"] is JsonObject behaviors)
-            foreach (var behavior in behaviors.Select(pair => pair.Value).OfType<JsonObject>())
-                behavior.Remove("installMode");
+        foreach (var behavior in behaviors.Select(pair => pair.Value).OfType<JsonObject>())
+        {
+            var mode = behavior["installMode"]?.GetValue<string>();
+            behavior["installMode"] = mode?.Equals("Default", StringComparison.OrdinalIgnoreCase) is true ? "Winget" :
+                string.IsNullOrWhiteSpace(mode) ? "Auto" : mode;
+            if (behavior["git"] is not JsonObject git)
+                continue;
+            MapLegacyGitValue(git, "editor", "Custom", "CustomEditor");
+            MapLegacyGitValue(git, "path", "CmdAndTools", "CmdTools");
+            MapLegacyGitValue(git, "ssh", "ExternalPlink", "Plink");
+            MapLegacyGitValue(git, "https", "WindowsSecureChannel", "WinSsl");
+            MapLegacyGitValue(git, "lineEndings", "LFAlways", "LFOnly");
+            MapLegacyGitValue(git, "terminal", "WindowsConsole", "ConHost");
+            MapLegacyGitValue(git, "pullBehavior", "FastForwardOnly", "FFOnly");
+            if (git["symlinks"] is JsonValue symlinks && symlinks.TryGetValue<bool>(out var enabled))
+                git["symlinks"] = enabled ? "Enabled" : "Disabled";
+            if (git["defaultBranch"]?.GetValue<string>()?.Equals("InstallerDefault", StringComparison.OrdinalIgnoreCase) is true)
+                git["defaultBranch"] = string.Empty;
+        }
+    }
+
+    private static void MapLegacyGitValue(JsonObject git, string key, string oldValue, string newValue)
+    {
+        if (git[key]?.GetValue<string>()?.Equals(oldValue, StringComparison.OrdinalIgnoreCase) is true)
+            git[key] = newValue;
     }
 
     private static bool GetEnabled(object config)
