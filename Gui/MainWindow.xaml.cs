@@ -556,12 +556,9 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
     {
-        var grid = new VariableSizedWrapGrid
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
-        var groupedSections = RecommendedAppCatalog.Groups.Select(group =>
+        var groupedSections = RecommendedAppCatalog.Groups
+            .Append(new RecommendedAppGroupInfo(RecommendedAppGroup.None, "Apps"))
+            .Select(group =>
         {
             var tiles = new VariableSizedWrapGrid
             {
@@ -615,7 +612,6 @@ public sealed partial class MainWindow : Window
 
         void Refresh()
         {
-            grid.Children.Clear();
             foreach (var (group, tiles, section) in groupedSections)
             {
                 tiles.Children.Clear();
@@ -628,20 +624,12 @@ public sealed partial class MainWindow : Window
                 foreach (var packageId in packageIds)
                     tiles.Children.Add(BuildAppTile(packageId, config, Refresh));
             }
-
-            foreach (var packageId in config.DefaultInstalls
-                         .Where(app => RecommendedAppCatalog.GetGroup(app) == RecommendedAppGroup.None)
-                         .OrderBy(app => GetAppDisplayName(config, app), StringComparer.OrdinalIgnoreCase))
-            {
-                grid.Children.Add(BuildAppTile(packageId, config, Refresh));
-            }
         }
 
         Refresh();
         var content = new StackPanel { Spacing = 12 };
         foreach (var (_, _, section) in groupedSections)
             content.Children.Add(section);
-        content.Children.Add(grid);
         content.Children.Add(ActionButton("+ Add App", async () => await ShowAppBehaviorDialogAsync(config, null)));
         return content;
     }
