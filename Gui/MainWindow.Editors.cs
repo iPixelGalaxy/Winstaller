@@ -123,6 +123,7 @@ public sealed partial class MainWindow : Window
                     ItemsSource = category.ToList()
                 };
                 tiles.ItemTemplate = new CallbackElementFactory(data => BuildVRChatValueTile(config, backup, (VRChatRegistryValue)data!));
+                WarmItemsRepeater(tiles);
                 panel.Children.Add(tiles);
             }
         }
@@ -437,6 +438,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             ItemsSource = fontFiles
         };
         tiles.ItemTemplate = new CallbackElementFactory(data => BuildFontTile((string)data!, fontsDirectory, config));
+        WarmItemsRepeater(tiles);
         panel.Children.Add(tiles);
 
         return panel;
