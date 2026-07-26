@@ -411,32 +411,19 @@ private static void WriteDiagnosticLog(string message)
         return outputView;
     }
 
-    private Slider CreateLogScrollControl(Orientation orientation)
+    private LogScrollBar CreateLogScrollControl(Orientation orientation)
     {
-        var scrollBar = new Slider
-        {
-            Orientation = orientation,
-            IsTabStop = true,
-            IsEnabled = true,
-            Visibility = Visibility.Visible,
-            Opacity = 1,
-            Minimum = 0,
-            Maximum = 1,
-            StepFrequency = 1,
-            IsDirectionReversed = orientation == Orientation.Vertical,
-            IsThumbToolTipEnabled = false,
-            Background = ResourceBrush("WinstallerCardStrokeBrush"),
-            Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
-        };
-        return scrollBar;
+        return new LogScrollBar(
+            orientation,
+            ResourceBrush("WinstallerCardStrokeBrush"),
+            ResourceBrush("WinstallerSecondaryTextBrush"));
     }
 
-    private sealed class LogScrollState(TextBox outputBox, Slider verticalScrollBar, Slider horizontalScrollBar)
+    private sealed class LogScrollState(TextBox outputBox, LogScrollBar verticalScrollBar, LogScrollBar horizontalScrollBar)
     {
         private ScrollViewer? _scrollViewer;
         private bool _scrollScheduled;
         private bool _scrollToEndRequested;
-        private bool _updatingScrollControls;
         public bool FollowOutput { get; private set; } = true;
 
         public bool IsAtBottom => _scrollViewer is null ||
@@ -453,20 +440,14 @@ private static void WriteDiagnosticLog(string message)
             _scrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(PauseOutputFollowingForNavigation), true);
-            verticalScrollBar.ValueChanged += (_, args) =>
+            verticalScrollBar.ValueChanged += value =>
             {
-                if (_updatingScrollControls)
-                    return;
-
                 FollowOutput = false;
                 _scrollToEndRequested = false;
-                _scrollViewer.ChangeView(null, args.NewValue, null, true);
+                _scrollViewer.ChangeView(null, value, null, true);
             };
-            horizontalScrollBar.ValueChanged += (_, args) =>
-            {
-                if (!_updatingScrollControls)
-                    _scrollViewer.ChangeView(args.NewValue, null, null, true);
-            };
+            horizontalScrollBar.ValueChanged += value =>
+                _scrollViewer.ChangeView(value, null, null, true);
             _scrollViewer.ViewChanged += (_, _) =>
             {
                 UpdateExternalScrollBars();
@@ -527,18 +508,14 @@ private static void WriteDiagnosticLog(string message)
             if (_scrollViewer is null)
                 return;
 
-            _updatingScrollControls = true;
-            try
-            {
-                verticalScrollBar.Maximum = Math.Max(1, _scrollViewer.ScrollableHeight);
-                verticalScrollBar.Value = Math.Clamp(_scrollViewer.VerticalOffset, 0, verticalScrollBar.Maximum);
-                horizontalScrollBar.Maximum = Math.Max(1, _scrollViewer.ScrollableWidth);
-                horizontalScrollBar.Value = Math.Clamp(_scrollViewer.HorizontalOffset, 0, horizontalScrollBar.Maximum);
-            }
-            finally
-            {
-                _updatingScrollControls = false;
-            }
+            verticalScrollBar.SetMetrics(
+                _scrollViewer.ScrollableHeight,
+                _scrollViewer.ViewportHeight,
+                _scrollViewer.VerticalOffset);
+            horizontalScrollBar.SetMetrics(
+                _scrollViewer.ScrollableWidth,
+                _scrollViewer.ViewportWidth,
+                _scrollViewer.HorizontalOffset);
         }
 
         private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
