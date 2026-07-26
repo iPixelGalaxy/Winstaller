@@ -36,7 +36,49 @@ public sealed partial class MainWindow : Window
             TextWrapping = TextWrapping.Wrap
         });
         panel.Children.Add(ActionButton("+ Import .reg File", async () => await ImportRegistryFileAsync(config), primary: true));
-        panel.Children.Add(BuildConfigEditor(config, includeScalarSettings: false));
+        panel.Children.Add(BuildManagedRegistryFiles(config));
+        panel.Children.Add(BuildListSection(config, typeof(RegistryConfig).GetProperty(nameof(RegistryConfig.Modifications))!));
+        return panel;
+    }
+
+    private FrameworkElement BuildManagedRegistryFiles(RegistryConfig config)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Files to Import",
+            FontSize = 18,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        if (config.FilesToImport.Count == 0)
+        {
+            panel.Children.Add(new TextBlock { Text = "No .reg files imported.", Opacity = 0.65 });
+            return Card(panel);
+        }
+
+        foreach (var path in config.FilesToImport)
+        {
+            var row = new Grid { ColumnSpacing = 12 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new FontIcon { Glyph = "\uE7B8", FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
+            var text = new StackPanel { Spacing = 2 };
+            text.Children.Add(new TextBlock { Text = Path.GetFileName(path), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+            text.Children.Add(new TextBlock { Text = path, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+            var remove = IconActionButton("\uE74D", "Remove from imports", () =>
+            {
+                config.FilesToImport.Remove(path);
+                SaveConfiguration();
+                InvalidateCachedPage("Registry");
+                RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            });
+            Grid.SetColumn(remove, 2);
+            row.Children.Add(remove);
+            panel.Children.Add(Card(row));
+        }
         return panel;
     }
 
