@@ -74,13 +74,13 @@ public sealed partial class MainWindow : Window
         var backup = new VRChatRegistryModule(_config).LoadBackup();
         if (backup is not null)
         {
-            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings to restore", isExpanded: true));
-            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data to restore", isExpanded: false));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings"));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data"));
         }
         return panel;
     }
 
-    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, VRChatRegistryBackup backup, IEnumerable<VRChatRegistryValue> source, string title, bool isExpanded)
+    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, VRChatRegistryBackup backup, IEnumerable<VRChatRegistryValue> source, string title)
     {
         var values = source.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var panel = new StackPanel { Spacing = 8 };
@@ -99,17 +99,20 @@ public sealed partial class MainWindow : Window
                 panel.Children.Add(tiles);
             }
         }
-        return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = isExpanded };
+        var section = new StackPanel { Spacing = 8 };
+        section.Children.Add(new TextBlock { Text = $"{title} ({values.Count})", FontSize = 20, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 12, 0, 0) });
+        section.Children.Add(panel);
+        return section;
     }
 
     private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryBackup backup, VRChatRegistryValue value)
     {
-        var row = new Grid { ColumnSpacing = 12 };
+        var row = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         row.VerticalAlignment = VerticalAlignment.Center;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
         var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontSize = 14, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
         text.Children.Add(new TextBlock { Text = GuessVRChatDescription(value), FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(text);
         var editor = BuildVRChatValueEditor(backup, value);
@@ -118,13 +121,13 @@ public sealed partial class MainWindow : Window
         var tile = new Border
         {
             Width = 272,
-            Height = 82,
+            Height = 74,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(28),
-            Padding = new Thickness(16, 10, 14, 10),
+            Padding = new Thickness(16, 8, 12, 8),
             Child = row
         };
         ToolTipService.SetToolTip(tile, $"Likely meaning. Registry value: {value.Name}");
@@ -160,6 +163,16 @@ public sealed partial class MainWindow : Window
     {
         var hash = name.LastIndexOf("_h", StringComparison.OrdinalIgnoreCase);
         var readable = hash > 0 ? name[..hash] : name;
+        var knownNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AUDIO_MASTER_STEAMAUDIO"] = "Master Volume",
+            ["AUDIO_UI_STEAMAUDIO"] = "UI Volume",
+            ["AUDIO_GAME_SFX_STEAMAUDIO"] = "Sound Effects Volume",
+            ["AUDIO_GAME_VOICE_STEAMAUDIO"] = "Voice Volume",
+            ["AUDIO_GAME_AVATARS_STEAMAUDIO"] = "Avatar Volume",
+            ["AUDIO_GAME_PROPS_STEAMAUDIO"] = "Prop Volume"
+        };
+        if (knownNames.TryGetValue(readable, out var knownName)) return knownName;
         readable = readable.Replace("CustomTrustLevel_", string.Empty).Replace("VRC_", string.Empty).Replace("_", " ");
         var result = new StringBuilder(readable.Length + 12);
         for (var index = 0; index < readable.Length; index++)
@@ -168,7 +181,10 @@ public sealed partial class MainWindow : Window
             if (index > 0 && char.IsUpper(current) && char.IsLower(readable[index - 1])) result.Append(' ');
             result.Append(current);
         }
-        return result.ToString().Replace("Trust Level", string.Empty).Replace("Can Use", "Can use").Replace("Can Speak", "Can speak").Trim();
+        var normalized = result.ToString();
+        if (normalized.All(character => !char.IsLetter(character) || char.IsUpper(character)))
+            normalized = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(normalized.ToLowerInvariant());
+        return normalized.Replace("Trust Level", string.Empty).Replace("Can Use", "Can use").Replace("Can Speak", "Can speak").Replace("Ui", "UI").Replace("Fps", "FPS").Replace("Sfx", "SFX").Trim();
     }
 
     private static string GuessVRChatDescription(VRChatRegistryValue value)
