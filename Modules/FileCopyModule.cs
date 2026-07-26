@@ -49,18 +49,22 @@ public class FileCopyModule : ModuleBase
     private static string OperationName(Models.FileCopyOperation operation) => string.IsNullOrWhiteSpace(operation.Name) ? operation.Source : operation.Name;
     private static void RewriteShortcut(string path)
     {
-        var type = Type.GetTypeFromProgID("WScript.Shell");
-        var shell = type is null ? null : Activator.CreateInstance(type);
-        if (shell is null) return;
-        dynamic shortcut = type.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, [path]);
+        var shellType = Type.GetTypeFromProgID("WScript.Shell");
+        if (shellType is null || Activator.CreateInstance(shellType) is not object shell) return;
+        var shortcutObject = shellType.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, [path]);
+        if (shortcutObject is null) return;
+        dynamic shortcut = shortcutObject;
         var oldProfile = @"C:\Users\iPixelGalaxy";
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        shortcut.TargetPath = ((string)shortcut.TargetPath).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
-        shortcut.WorkingDirectory = ((string)shortcut.WorkingDirectory).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
-        shortcut.IconLocation = ((string)shortcut.IconLocation).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
-        shortcut.Arguments = ((string)shortcut.Arguments).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
+        shortcut.TargetPath = RewriteProfilePath(shortcut.TargetPath, oldProfile, profile);
+        shortcut.WorkingDirectory = RewriteProfilePath(shortcut.WorkingDirectory, oldProfile, profile);
+        shortcut.IconLocation = RewriteProfilePath(shortcut.IconLocation, oldProfile, profile);
+        shortcut.Arguments = RewriteProfilePath(shortcut.Arguments, oldProfile, profile);
         shortcut.Save();
     }
+
+    private static string RewriteProfilePath(object? value, string oldProfile, string profile) =>
+        (value?.ToString() ?? string.Empty).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
 
     public static void ProtectPrivateKey(string path)
     {
