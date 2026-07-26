@@ -403,7 +403,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Layout = new UniformGridLayout
             {
                 MinItemWidth = 250,
-                MinItemHeight = 166,
+                MinItemHeight = 128,
                 MinRowSpacing = 8,
                 MinColumnSpacing = 8,
                 ItemsStretch = UniformGridLayoutItemsStretch.Fill
@@ -435,19 +435,19 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.Children.Add(new FontIcon { Glyph = "\uE8D2", FontSize = 40, VerticalAlignment = VerticalAlignment.Center });
-        Grid.SetColumn(labels, 1);
-        header.Children.Add(labels);
-
         var preview = new TextBlock
         {
-            Text = "Aa Bb Cc 123",
-            FontSize = 24,
-            TextTrimming = TextTrimming.CharacterEllipsis,
+            Text = "Aa",
+            FontSize = 32,
+            Width = 50,
+            TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
         if (!string.IsNullOrWhiteSpace(fontFamilyName))
             preview.FontFamily = new FontFamily(fontFamilyName);
+        header.Children.Add(preview);
+        Grid.SetColumn(labels, 1);
+        header.Children.Add(labels);
 
         var remove = IconActionButton("\uE74D", "Delete font", async () =>
         {
@@ -473,18 +473,14 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.Children.Add(header);
-        Grid.SetRow(preview, 1);
-        content.Children.Add(preview);
-        Grid.SetRow(footer, 2);
+        Grid.SetRow(footer, 1);
         content.Children.Add(footer);
 
         return new Border
         {
-            Height = 166,
+            Height = 128,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(1),
