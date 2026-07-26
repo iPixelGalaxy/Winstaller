@@ -342,23 +342,23 @@ private static void WriteDiagnosticLog(string message)
             FontFamily = new FontFamily("Cascadia Mono"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
-            MinHeight = 478,
-            MaxHeight = 558,
+            MinHeight = 458,
+            MaxHeight = 538,
             Padding = new Thickness(8, 8, 8, 20)
         };
         ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Hidden);
         ScrollViewer.SetVerticalScrollBarVisibility(outputBox, ScrollBarVisibility.Hidden);
 
-        var verticalScrollBar = CreateLogScrollBar(Orientation.Vertical);
+        var verticalScrollBar = CreateLogScrollControl(Orientation.Vertical);
         verticalScrollBar.Margin = new Thickness(4, 0, 0, 0);
-        var horizontalScrollBar = CreateLogScrollBar(Orientation.Horizontal);
+        var horizontalScrollBar = CreateLogScrollControl(Orientation.Horizontal);
         horizontalScrollBar.Margin = new Thickness(0, 4, 0, 0);
 
         var outputView = new Grid
         {
             Width = width,
-            MinHeight = 500,
-            MaxHeight = 580
+            MinHeight = 480,
+            MaxHeight = 560
         };
         outputView.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outputView.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
@@ -411,40 +411,32 @@ private static void WriteDiagnosticLog(string message)
         return outputView;
     }
 
-    private ScrollBar CreateLogScrollBar(Orientation orientation)
+    private Slider CreateLogScrollControl(Orientation orientation)
     {
-        var scrollBar = new ScrollBar
+        var scrollBar = new Slider
         {
             Orientation = orientation,
             IsTabStop = true,
             IsEnabled = true,
             Visibility = Visibility.Visible,
             Opacity = 1,
-            SmallChange = 32,
-            Background = ResourceBrush("WinstallerCardBrush")
+            Minimum = 0,
+            Maximum = 1,
+            StepFrequency = 1,
+            IsDirectionReversed = orientation == Orientation.Vertical,
+            IsThumbToolTipEnabled = false,
+            Background = ResourceBrush("WinstallerCardStrokeBrush"),
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         };
-        scrollBar.Resources["ScrollBarSize"] = 18d;
-        scrollBar.Resources["ScrollBarVerticalThumbMinWidth"] = 12d;
-        scrollBar.Resources["ScrollBarVerticalThumbMinHeight"] = 48d;
-        scrollBar.Resources["ScrollBarHorizontalThumbMinHeight"] = 12d;
-        scrollBar.Resources["ScrollBarHorizontalThumbMinWidth"] = 48d;
-        scrollBar.Resources["ScrollBarThumbBackground"] = ResourceBrush("WinstallerSecondaryTextBrush");
-        scrollBar.Resources["ScrollBarPanningThumbBackground"] = ResourceBrush("WinstallerSecondaryTextBrush");
-        scrollBar.Resources["ScrollBarThumbFill"] = ResourceBrush("WinstallerSecondaryTextBrush");
-        scrollBar.Resources["ScrollBarThumbFillPointerOver"] = ResourceBrush("WinstallerSecondaryTextBrush");
-        scrollBar.Resources["ScrollBarThumbFillPressed"] = ResourceBrush("WinstallerSecondaryTextBrush");
-        scrollBar.Resources["ScrollBarContractDelay"] = "23:59:59";
-        scrollBar.Resources["ScrollBarContractFinalKeyframe"] = "23:59:59.1";
-        scrollBar.Loaded += (_, _) => VisualStateManager.GoToState(scrollBar, "ExpandedWithoutAnimation", false);
-        scrollBar.PointerExited += (_, _) => VisualStateManager.GoToState(scrollBar, "ExpandedWithoutAnimation", false);
         return scrollBar;
     }
 
-    private sealed class LogScrollState(TextBox outputBox, ScrollBar verticalScrollBar, ScrollBar horizontalScrollBar)
+    private sealed class LogScrollState(TextBox outputBox, Slider verticalScrollBar, Slider horizontalScrollBar)
     {
         private ScrollViewer? _scrollViewer;
         private bool _scrollScheduled;
         private bool _scrollToEndRequested;
+        private bool _updatingScrollControls;
         public bool FollowOutput { get; private set; } = true;
 
         public bool IsAtBottom => _scrollViewer is null ||
@@ -461,14 +453,20 @@ private static void WriteDiagnosticLog(string message)
             _scrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(PauseOutputFollowingForNavigation), true);
-            verticalScrollBar.Scroll += (_, args) =>
+            verticalScrollBar.ValueChanged += (_, args) =>
             {
+                if (_updatingScrollControls)
+                    return;
+
                 FollowOutput = false;
                 _scrollToEndRequested = false;
                 _scrollViewer.ChangeView(null, args.NewValue, null, true);
             };
-            horizontalScrollBar.Scroll += (_, args) =>
-                _scrollViewer.ChangeView(args.NewValue, null, null, true);
+            horizontalScrollBar.ValueChanged += (_, args) =>
+            {
+                if (!_updatingScrollControls)
+                    _scrollViewer.ChangeView(args.NewValue, null, null, true);
+            };
             _scrollViewer.ViewChanged += (_, _) =>
             {
                 UpdateExternalScrollBars();
@@ -529,17 +527,18 @@ private static void WriteDiagnosticLog(string message)
             if (_scrollViewer is null)
                 return;
 
-            verticalScrollBar.Maximum = _scrollViewer.ScrollableHeight;
-            verticalScrollBar.ViewportSize = _scrollViewer.ViewportHeight;
-            verticalScrollBar.LargeChange = Math.Max(32, _scrollViewer.ViewportHeight * 0.9);
-            verticalScrollBar.Value = Math.Clamp(_scrollViewer.VerticalOffset, 0, verticalScrollBar.Maximum);
-            verticalScrollBar.IsEnabled = true;
-
-            horizontalScrollBar.Maximum = _scrollViewer.ScrollableWidth;
-            horizontalScrollBar.ViewportSize = _scrollViewer.ViewportWidth;
-            horizontalScrollBar.LargeChange = Math.Max(32, _scrollViewer.ViewportWidth * 0.9);
-            horizontalScrollBar.Value = Math.Clamp(_scrollViewer.HorizontalOffset, 0, horizontalScrollBar.Maximum);
-            horizontalScrollBar.IsEnabled = true;
+            _updatingScrollControls = true;
+            try
+            {
+                verticalScrollBar.Maximum = Math.Max(1, _scrollViewer.ScrollableHeight);
+                verticalScrollBar.Value = Math.Clamp(_scrollViewer.VerticalOffset, 0, verticalScrollBar.Maximum);
+                horizontalScrollBar.Maximum = Math.Max(1, _scrollViewer.ScrollableWidth);
+                horizontalScrollBar.Value = Math.Clamp(_scrollViewer.HorizontalOffset, 0, horizontalScrollBar.Maximum);
+            }
+            finally
+            {
+                _updatingScrollControls = false;
+            }
         }
 
         private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
