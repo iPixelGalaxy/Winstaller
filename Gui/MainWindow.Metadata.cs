@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Collections;
-using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -226,7 +225,6 @@ private static string GetSettingDescription(PropertyInfo property)
 
     private FrameworkElement BuildProgressiveTileGrid<T>(IReadOnlyList<T> items, double minimumWidth, double minimumHeight, Func<T, FrameworkElement> create)
     {
-        var visibleItems = new ObservableCollection<T>();
         var repeater = new ItemsRepeater
         {
             Layout = new UniformGridLayout
@@ -237,31 +235,12 @@ private static string GetSettingDescription(PropertyInfo property)
                 MinColumnSpacing = 8,
                 ItemsStretch = UniformGridLayoutItemsStretch.Fill
             },
-            ItemsSource = visibleItems
+            ItemsSource = items
         };
         repeater.ItemTemplate = new CallbackElementFactory(data => create((T)data!));
         var host = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
         host.Children.Add(repeater);
 
-        var started = false;
-        repeater.Loaded += async (_, _) =>
-        {
-            if (started)
-                return;
-
-            started = true;
-
-            for (var index = 0; index < items.Count; index += 12)
-            {
-                var batch = items.Skip(index).Take(12).ToList();
-                await RunOnUiThreadAsync(() =>
-                {
-                    foreach (var item in batch)
-                        visibleItems.Add(item);
-                });
-                await Task.Delay(1).ConfigureAwait(false);
-            }
-        };
         return host;
     }
 
