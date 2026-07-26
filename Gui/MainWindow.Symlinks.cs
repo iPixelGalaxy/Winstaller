@@ -34,9 +34,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         }
 
-        var roaming = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.RoamingDirectories))!, "Roaming", "Microsoft\\VisualStudio");
-        var local = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalDirectories))!, "Local", "Microsoft\\VisualStudio");
-        var localLow = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalLowDirectories))!, "LocalLow", "Company\\Game");
+        var roaming = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.RoamingDirectories))!, "Roaming", "Folder path");
+        var local = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalDirectories))!, "Local", "Folder path");
+        var localLow = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.LocalLowDirectories))!, "LocalLow", "Folder path");
         var special = BuildSymlinkColumn(config, typeof(SymlinksConfig).GetProperty(nameof(SymlinksConfig.SpecialSymlinks))!, "Special", string.Empty);
 
         Grid.SetColumn(roaming, 0);
@@ -136,6 +136,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (itemType != typeof(string))
                 SaveConfiguration();
             Refresh();
+            DispatcherQueue.TryEnqueue(() => listScroll.ChangeView(null, listScroll.ScrollableHeight, null));
         });
         Grid.SetColumn(add, 2);
         header.Children.Add(add);
@@ -231,16 +232,19 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             () =>
         {
             var item = row.Item;
-            if (item is null)
-                return Task.CompletedTask;
+            return () =>
+            {
+                if (item is null || item.Index >= list.Count)
+                    return Task.CompletedTask;
 
-            // Refresh recycles this row. Do not let its pending textbox save restore
-            // the value after it has been removed.
-            isDirty = false;
-            list.RemoveAt(item.Index);
-            SaveConfiguration();
-            refresh();
-            return Task.CompletedTask;
+                // Refresh recycles this row. Do not let its pending textbox save restore
+                // the value after it has been removed.
+                isDirty = false;
+                list.RemoveAt(item.Index);
+                SaveConfiguration();
+                refresh();
+                return Task.CompletedTask;
+            };
         });
         Grid.SetColumn(removeButton, 2);
         row.Children.Add(removeButton);
@@ -412,17 +416,20 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             var item = outer.Item;
             var symlink = Current();
-            if (item is null || symlink is null)
-                return Task.CompletedTask;
+            return () =>
+            {
+                if (item is null || symlink is null || item.Index >= list.Count)
+                    return Task.CompletedTask;
 
-            // Refresh recycles this row. Its deferred field saves must not apply
-            // to an item that has just been removed.
-            sourceDirty = false;
-            targetDirty = false;
-            list.RemoveAt(item.Index);
-            SaveConfiguration();
-            refresh();
-            return Task.CompletedTask;
+                // Refresh recycles this row. Its deferred field saves must not apply
+                // to an item that has just been removed.
+                sourceDirty = false;
+                targetDirty = false;
+                list.RemoveAt(item.Index);
+                SaveConfiguration();
+                refresh();
+                return Task.CompletedTask;
+            };
         });
         Grid.SetRow(isFile, 0);
         Grid.SetColumn(isFile, 1);
@@ -531,7 +538,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         return button;
     }
 
-    private Button CompactRemoveButton(string confirmationMessage, Func<Task> remove)
+    private Button CompactRemoveButton(string confirmationMessage, Func<Func<Task>> createRemove)
     {
         var button = new Button
         {
@@ -549,6 +556,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             button.IsEnabled = false;
             try
             {
+                var remove = createRemove();
                 if (!await ConfirmAsync("Remove configuration entry?", confirmationMessage, "Remove"))
                     return;
 
