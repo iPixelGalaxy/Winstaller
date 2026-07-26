@@ -88,7 +88,13 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                     return BuildListItemEditor(list, itemType, item.Index, Refresh, property);
                 });
         panel.Children.Add(emptyText);
-        panel.Children.Add(items);
+        panel.Children.Add(new ScrollViewer
+        {
+            Content = items,
+            MaxHeight = 620,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        });
 
         void Refresh()
         {

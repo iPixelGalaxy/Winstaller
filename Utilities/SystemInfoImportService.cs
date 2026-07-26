@@ -33,11 +33,10 @@ public enum SymlinkImportMode
     Symlink
 }
 
-internal sealed record StartupShortcutImport(string SourcePath, string FileName, bool MachineLevel, bool Enabled)
+internal sealed record StartupShortcutImport(string SourcePath, string FileName, StartupProgram Program)
 {
-    public string Destination => MachineLevel
-        ? @"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-        : @"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup";
+    public bool MachineLevel => Program.MachineLevel;
+    public bool Enabled => Program.Enabled;
 }
 
 public sealed record SystemInfoImportResult(int Added, IReadOnlyList<SymlinkImportFailure> SymlinkFailures);
@@ -220,8 +219,11 @@ public static class SystemInfoImportService
                     break;
 
                 case StartupShortcutImport shortcut:
-                    if (ImportStartupShortcut(config, shortcut, log))
+                    if (GetStartupProgram(config, shortcut.Program.Name, shortcut.Program.MachineLevel) is null)
+                    {
+                        config.Startup.Programs.Add(shortcut.Program);
                         added++;
+                    }
                     break;
 
                 case FirewallCaptureCandidate when candidate.Scope == SystemInfoImportScope.Firewall:
@@ -649,7 +651,7 @@ public static class SystemInfoImportService
 
         foreach (var shortcut in ReadStartupFolder(Environment.SpecialFolder.Startup, false))
         {
-            if (!HasStartupShortcut(config, shortcut))
+            if (GetStartupProgram(config, shortcut.Program.Name, shortcut.MachineLevel) is null)
             {
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Startup,
@@ -662,7 +664,7 @@ public static class SystemInfoImportService
 
         foreach (var shortcut in ReadStartupFolder(Environment.SpecialFolder.CommonStartup, true))
         {
-            if (!HasStartupShortcut(config, shortcut))
+            if (GetStartupProgram(config, shortcut.Program.Name, shortcut.MachineLevel) is null)
             {
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Startup,
@@ -1323,11 +1325,50 @@ public static class SystemInfoImportService
         foreach (var shortcutPath in Directory.EnumerateFiles(directory, "*.lnk", SearchOption.TopDirectoryOnly))
         {
             var fileName = Path.GetFileName(shortcutPath);
+            var (targetPath, arguments) = ReadShortcutCommand(shortcutPath);
             yield return new StartupShortcutImport(
                 shortcutPath,
                 fileName,
-                machineLevel,
-                IsStartupFolderEnabled(fileName));
+                new StartupProgram
+                {
+                    Name = Path.GetFileNameWithoutExtension(fileName),
+                    Path = targetPath,
+                    Arguments = arguments,
+                    MachineLevel = machineLevel,
+                    Enabled = IsStartupFolderEnabled(fileName)
+                });
+        }
+    }
+
+    private static (string Path, string Arguments) ReadShortcutCommand(string shortcutPath)
+    {
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            var shell = shellType is null ? null : Activator.CreateInstance(shellType);
+            if (shell is null)
+                return (shortcutPath, string.Empty);
+
+            try
+            {
+                var shortcut = shell.GetType().InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, [shortcutPath]);
+                if (shortcut is null)
+                    return (shortcutPath, string.Empty);
+
+                var type = shortcut.GetType();
+                var target = type.InvokeMember("TargetPath", System.Reflection.BindingFlags.GetProperty, null, shortcut, null)?.ToString();
+                var arguments = type.InvokeMember("Arguments", System.Reflection.BindingFlags.GetProperty, null, shortcut, null)?.ToString();
+                return (string.IsNullOrWhiteSpace(target) ? shortcutPath : target, arguments ?? string.Empty);
+            }
+            finally
+            {
+                if (System.Runtime.InteropServices.Marshal.IsComObject(shell))
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
+            }
+        }
+        catch
+        {
+            return (shortcutPath, string.Empty);
         }
     }
 
@@ -1335,44 +1376,6 @@ public static class SystemInfoImportService
     {
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder");
         return key?.GetValue(fileName) is not byte[] value || value.Length == 0 || value[0] != 3;
-    }
-
-    private static bool HasStartupShortcut(WinstallerConfig config, StartupShortcutImport shortcut)
-    {
-        return config.FileCopy.Operations.Any(operation =>
-            operation.Destination.Equals(shortcut.Destination, StringComparison.OrdinalIgnoreCase) &&
-            Path.GetFileName(operation.Source).Equals(shortcut.FileName, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool ImportStartupShortcut(WinstallerConfig config, StartupShortcutImport shortcut, Action<string>? log)
-    {
-        try
-        {
-            var backupDirectory = Path.Combine(
-                BootstrapManager.DataDirectory,
-                "FilesAndShortcuts",
-                "ImportedStartup",
-                shortcut.MachineLevel ? "AllUsers" : "CurrentUser");
-            Directory.CreateDirectory(backupDirectory);
-            var backupPath = Path.Combine(backupDirectory, shortcut.FileName);
-            File.Copy(shortcut.SourcePath, backupPath, true);
-
-            config.FileCopy.Operations.Add(new FileCopyOperation
-            {
-                Name = $"Startup shortcut: {shortcut.FileName}",
-                Source = backupPath,
-                Destination = shortcut.Destination,
-                Overwrite = true,
-                RewriteShortcutProfilePaths = true
-            });
-            log?.Invoke($"Saved startup shortcut: {shortcut.FileName}");
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            log?.Invoke($"Could not save startup shortcut {shortcut.FileName}: {ex.Message}");
-            return false;
-        }
     }
 
     private static (string Path, string Arguments) SplitStartupCommand(string command)
