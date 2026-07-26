@@ -342,8 +342,8 @@ private static void WriteDiagnosticLog(string message)
             FontFamily = new FontFamily("Cascadia Mono"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
-            MinHeight = 498,
-            MaxHeight = 578,
+            MinHeight = 478,
+            MaxHeight = 558,
             Padding = new Thickness(8, 8, 8, 20)
         };
         ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Hidden);
@@ -357,8 +357,8 @@ private static void WriteDiagnosticLog(string message)
         var outputView = new Grid
         {
             Width = width,
-            MinHeight = 520,
-            MaxHeight = 600
+            MinHeight = 500,
+            MaxHeight = 580
         };
         outputView.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outputView.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
@@ -375,16 +375,30 @@ private static void WriteDiagnosticLog(string message)
         _logScrollStates.Add(logBox, scrollState);
         logBox.Loaded += (_, _) => DispatcherQueue.TryEnqueue(scrollState.Attach);
         logBox.Unloaded += (_, _) => _logScrollStates.Remove(logBox);
-        logBox.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) =>
+        void CopyLogSelection() => CopyText(logBox.SelectedText);
+        var copyKeyHandler = new KeyEventHandler((_, args) =>
         {
             if (args.Key == VirtualKey.C &&
                 InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
                     .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
             {
-                CopyText(logBox.SelectedText);
+                CopyLogSelection();
                 args.Handled = true;
             }
-        }), true);
+        });
+        logBox.AddHandler(UIElement.PreviewKeyDownEvent, copyKeyHandler, true);
+        logBox.AddHandler(UIElement.KeyDownEvent, copyKeyHandler, true);
+        var copyAccelerator = new KeyboardAccelerator
+        {
+            Key = VirtualKey.C,
+            Modifiers = VirtualKeyModifiers.Control
+        };
+        copyAccelerator.Invoked += (_, args) =>
+        {
+            CopyLogSelection();
+            args.Handled = true;
+        };
+        logBox.KeyboardAccelerators.Add(copyAccelerator);
 
         var logMenu = new MenuFlyout();
         var copySelectionItem = new MenuFlyoutItem { Text = "Copy Selection" };
@@ -403,6 +417,9 @@ private static void WriteDiagnosticLog(string message)
         {
             Orientation = orientation,
             IsTabStop = true,
+            IsEnabled = true,
+            Visibility = Visibility.Visible,
+            Opacity = 1,
             SmallChange = 32,
             Background = ResourceBrush("WinstallerCardBrush")
         };
@@ -412,6 +429,14 @@ private static void WriteDiagnosticLog(string message)
         scrollBar.Resources["ScrollBarHorizontalThumbMinHeight"] = 12d;
         scrollBar.Resources["ScrollBarHorizontalThumbMinWidth"] = 48d;
         scrollBar.Resources["ScrollBarThumbBackground"] = ResourceBrush("WinstallerSecondaryTextBrush");
+        scrollBar.Resources["ScrollBarPanningThumbBackground"] = ResourceBrush("WinstallerSecondaryTextBrush");
+        scrollBar.Resources["ScrollBarThumbFill"] = ResourceBrush("WinstallerSecondaryTextBrush");
+        scrollBar.Resources["ScrollBarThumbFillPointerOver"] = ResourceBrush("WinstallerSecondaryTextBrush");
+        scrollBar.Resources["ScrollBarThumbFillPressed"] = ResourceBrush("WinstallerSecondaryTextBrush");
+        scrollBar.Resources["ScrollBarContractDelay"] = "23:59:59";
+        scrollBar.Resources["ScrollBarContractFinalKeyframe"] = "23:59:59.1";
+        scrollBar.Loaded += (_, _) => VisualStateManager.GoToState(scrollBar, "ExpandedWithoutAnimation", false);
+        scrollBar.PointerExited += (_, _) => VisualStateManager.GoToState(scrollBar, "ExpandedWithoutAnimation", false);
         return scrollBar;
     }
 
@@ -508,13 +533,13 @@ private static void WriteDiagnosticLog(string message)
             verticalScrollBar.ViewportSize = _scrollViewer.ViewportHeight;
             verticalScrollBar.LargeChange = Math.Max(32, _scrollViewer.ViewportHeight * 0.9);
             verticalScrollBar.Value = Math.Clamp(_scrollViewer.VerticalOffset, 0, verticalScrollBar.Maximum);
-            verticalScrollBar.IsEnabled = verticalScrollBar.Maximum > 0;
+            verticalScrollBar.IsEnabled = true;
 
             horizontalScrollBar.Maximum = _scrollViewer.ScrollableWidth;
             horizontalScrollBar.ViewportSize = _scrollViewer.ViewportWidth;
             horizontalScrollBar.LargeChange = Math.Max(32, _scrollViewer.ViewportWidth * 0.9);
             horizontalScrollBar.Value = Math.Clamp(_scrollViewer.HorizontalOffset, 0, horizontalScrollBar.Maximum);
-            horizontalScrollBar.IsEnabled = horizontalScrollBar.Maximum > 0;
+            horizontalScrollBar.IsEnabled = true;
         }
 
         private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
