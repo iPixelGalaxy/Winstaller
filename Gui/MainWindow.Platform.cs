@@ -322,7 +322,7 @@ private static void WriteDiagnosticLog(string message)
             MinWidth = width,
             Width = width,
             MinHeight = 520,
-            MaxHeight = 720,
+            MaxHeight = 600,
             Padding = new Thickness(8, 8, 8, 20)
         };
         ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Auto);
@@ -375,8 +375,14 @@ private static void WriteDiagnosticLog(string message)
         private void ScrollAfterLayout(object? sender, object args)
         {
             outputBox.LayoutUpdated -= ScrollAfterLayout;
+            outputBox.DispatcherQueue.TryEnqueue(ScrollToCurrentBottom);
+        }
+
+        private void ScrollToCurrentBottom()
+        {
             _scrollScheduled = false;
-            _scrollViewer?.ChangeView(null, _scrollViewer.ScrollableHeight, null, true);
+            if (_scrollViewer is { ScrollableHeight: > 0 } scrollViewer)
+                scrollViewer.ChangeView(null, scrollViewer.ScrollableHeight, null, true);
         }
 
         private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
