@@ -84,9 +84,10 @@ public static class ConfigurationManager
         return config;
     }
 
-    public static void SaveConfiguration(WinstallerConfig config, string? path = null)
+    public static void SaveConfiguration(WinstallerConfig config, string? path = null, bool sanitizeSymlinks = true)
     {
-        SanitizeSymlinkConfig(config.Symlinks);
+        if (sanitizeSymlinks)
+            SanitizeSymlinkConfig(config.Symlinks);
 
         if (!string.IsNullOrWhiteSpace(path))
         {

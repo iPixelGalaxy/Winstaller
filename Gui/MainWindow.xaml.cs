@@ -328,9 +328,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void SaveConfiguration()
+    private void SaveConfiguration(bool sanitizeSymlinks = true)
     {
-        ConfigurationManager.SaveConfiguration(_config);
+        ConfigurationManager.SaveConfiguration(_config, sanitizeSymlinks: sanitizeSymlinks);
         _pageCache.Clear();
         _pageScrollOffsets.Clear();
     }

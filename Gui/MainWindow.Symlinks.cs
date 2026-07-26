@@ -272,7 +272,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             HorizontalAlignment = HorizontalAlignment.Stretch,
             MinWidth = 0
         };
-        void SaveBox(bool defocus = true)
+        void SaveBox(bool defocus = true, bool sanitizeSymlinks = true)
         {
             var item = row.Item;
             if (item is null || !isDirty)
@@ -293,7 +293,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             entry.Value = box!.Text.Trim();
             list[index] = entry.Value;
             iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
-            SaveConfiguration();
+            SaveConfiguration(sanitizeSymlinks);
             isDirty = false;
             if (defocus)
                 DefocusTextBox(box);
@@ -304,7 +304,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                 return;
 
             isDirty = true;
-            SaveBox(false);
+            SaveBox(defocus: false, sanitizeSymlinks: false);
         };
         box.LostFocus += (_, _) => SaveBox();
         box.KeyDown += (_, args) =>
