@@ -26,6 +26,56 @@ namespace Winstaller.Gui;
 
 public sealed partial class MainWindow : Window
 {
+    private FrameworkElement BuildRegistryContent(RegistryConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Add .reg files to Winstaller managed storage. Winstaller imports stored copies when Registry runs.",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(ActionButton("+ Import .reg File", async () => await ImportRegistryFileAsync(config), primary: true));
+        panel.Children.Add(BuildConfigEditor(config, includeScalarSettings: false));
+        return panel;
+    }
+
+    private async Task ImportRegistryFileAsync(RegistryConfig config)
+    {
+        var source = await PickFilePathAsync(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Choose registry file (.reg)");
+        if (source is null)
+            return;
+        if (!source.EndsWith(".reg", StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync("Invalid file", "Choose a .reg file.");
+            return;
+        }
+
+        try
+        {
+            var directory = Path.Combine(BootstrapManager.DataDirectory, "Registry");
+            Directory.CreateDirectory(directory);
+            var destination = Path.Combine(directory, Path.GetFileName(source));
+            if (File.Exists(destination) && !Path.GetFullPath(source).Equals(Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
+            {
+                var stem = Path.GetFileNameWithoutExtension(source);
+                destination = Path.Combine(directory, $"{stem}-{DateTime.Now:yyyyMMdd-HHmmss}.reg");
+            }
+
+            File.Copy(source, destination, overwrite: true);
+            if (!config.FilesToImport.Contains(destination, StringComparer.OrdinalIgnoreCase))
+                config.FilesToImport.Add(destination);
+            SaveConfiguration();
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync("Import registry file", $"Could not store {Path.GetFileName(source)}: {ex.Message}");
+        }
+    }
+
 private FrameworkElement BuildFontsContent(FontsConfig config)
     {
         var fontsDirectory = Environment.ExpandEnvironmentVariables(config.FontsDirectory)

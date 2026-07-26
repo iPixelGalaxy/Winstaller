@@ -338,6 +338,10 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             return BuildSymlinksContent(symlinks);
         }
+        if (module.Config is RegistryConfig registry)
+        {
+            return BuildRegistryContent(registry);
+        }
 
         if (module.Config is SystemSettingsConfig or FirewallConfig or SetupTasksConfig)
         {
