@@ -217,10 +217,11 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private Grid BuildResponsiveTileGrid(IReadOnlyList<FrameworkElement> tiles)
     {
         var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        var arrangedColumns = -1;
         void ArrangeTiles()
         {
             var columns = RootGrid.ActualWidth >= 1723 ? 2 : 1;
-            if (grid.ColumnDefinitions.Count == columns)
+            if (arrangedColumns == columns && grid.Children.Count == tiles.Count)
                 return;
 
             grid.ColumnDefinitions.Clear();
@@ -236,6 +237,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                 Grid.SetColumn(tiles[index], index % columns);
                 grid.Children.Add(tiles[index]);
             }
+            arrangedColumns = columns;
         }
         grid.SizeChanged += (_, _) => ArrangeTiles();
         ArrangeTiles();
@@ -625,7 +627,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             }
         }
 
-        var removeButton = ActionButton("Remove", () =>
+        var removeButton = IconActionButton("\uE74D", "Remove", () =>
         {
             list.RemoveAt(index);
             SaveConfiguration();
