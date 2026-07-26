@@ -245,7 +245,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
     {
         var outer = new ReusableSymlinkRow { ColumnSpacing = 4, RowSpacing = 6 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
         outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -359,7 +359,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             Content = "File",
             FlowDirection = FlowDirection.RightToLeft,
-            HorizontalAlignment = HorizontalAlignment.Right
+            HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 0,
+            Margin = new Thickness(0, 0, 6, 0)
         };
         isFile.Checked += (_, _) =>
         {
