@@ -225,24 +225,43 @@ private static string GetSettingDescription(PropertyInfo property)
         }
     }
 
+    private sealed class ReusableSymlinkTile : Grid
+    {
+        public ReusableSymlinkTile(ReusableSymlinkRow row)
+        {
+            Row = row;
+            Children.Add(new Border
+            {
+                Background = (Brush)Application.Current.Resources["WinstallerCardBrush"],
+                BorderBrush = (Brush)Application.Current.Resources["WinstallerCardStrokeBrush"],
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12),
+                Child = row
+            });
+        }
+
+        public ReusableSymlinkRow Row { get; }
+    }
+
     private sealed class RecyclableRowFactory(Func<ReusableSymlinkRow> create) : IElementFactory
     {
-        private readonly Stack<ReusableSymlinkRow> _pool = new();
+        private readonly Stack<ReusableSymlinkTile> _pool = new();
 
         public UIElement GetElement(ElementFactoryGetArgs args)
         {
-            var row = _pool.Count > 0 ? _pool.Pop() : create();
-            row.Bind((IndexedItem)args.Data!);
-            return row;
+            var tile = _pool.Count > 0 ? _pool.Pop() : new ReusableSymlinkTile(create());
+            tile.Row.Bind((IndexedItem)args.Data!);
+            return tile;
         }
 
         public void RecycleElement(ElementFactoryRecycleArgs args)
         {
-            if (args.Element is not ReusableSymlinkRow row)
+            if (args.Element is not ReusableSymlinkTile tile)
                 return;
 
-            row.Recycle();
-            _pool.Push(row);
+            tile.Row.Recycle();
+            _pool.Push(tile);
         }
     }
 
