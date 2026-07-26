@@ -59,7 +59,6 @@ public sealed partial class MainWindow : Window
     private bool _isLoadingUi;
     private int _pageRenderVersion;
     private string? _currentPageKey;
-    private string? _symlinkColumnToScroll;
 
     private const string DashboardPageKey = "Dashboard";
     private const string PreReinstallChecklistPageKey = "PreReinstallChecklist";

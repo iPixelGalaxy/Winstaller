@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections;
+using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -78,6 +79,8 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             VerticalCacheLength = 0.25,
             Layout = new StackLayout { Spacing = 8 }
         };
+        var viewItems = new ObservableCollection<IndexedItem>();
+        items.ItemsSource = viewItems;
         items.ItemTemplate = itemType == typeof(string)
             ? new RecyclableRowFactory(() => BuildCompactStringListItem(config, property, list, Refresh, placeholder))
             : itemType == typeof(SpecialSymlink)
@@ -103,11 +106,20 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
             emptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            items.ItemsSource = null;
-            items.ItemsSource = list.Cast<object>()
-                .Select((item, index) => new IndexedItem(item, index))
-                .ToList();
-            items.InvalidateMeasure();
+            viewItems.Clear();
+            foreach (var (item, index) in list.Cast<object>().Select((item, index) => (item, index)))
+                viewItems.Add(new IndexedItem(item, index));
+        }
+
+        void ScrollToBottomAfterLayout()
+        {
+            EventHandler<object>? onLayoutUpdated = null;
+            onLayoutUpdated = (_, _) =>
+            {
+                listScroll.LayoutUpdated -= onLayoutUpdated;
+                listScroll.ChangeView(null, listScroll.ScrollableHeight, null);
+            };
+            listScroll.LayoutUpdated += onLayoutUpdated;
         }
 
         var header = new Grid { ColumnSpacing = 8 };
@@ -138,22 +150,12 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (itemType != typeof(string))
                 SaveConfiguration();
             Refresh();
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                _symlinkColumnToScroll = property.Name;
-                InvalidateCachedPage("Symlinks");
-                RenderModule(_modules.First(module => module.Name == "Symlinks"));
-            });
+            ScrollToBottomAfterLayout();
         });
         Grid.SetColumn(add, 2);
         header.Children.Add(add);
 
         Refresh();
-        if (_symlinkColumnToScroll == property.Name)
-        {
-            _symlinkColumnToScroll = null;
-            DispatcherQueue.TryEnqueue(() => listScroll.ChangeView(null, listScroll.ScrollableHeight, null));
-        }
         return new StackPanel
         {
             Spacing = 10,
@@ -572,16 +574,16 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                 if (!await ConfirmAsync("Remove configuration entry?", confirmationMessage, "Remove"))
                     return;
 
-                await remove();
+                await RunOnUiThreadAsync(remove);
             }
             catch (Exception ex)
             {
                 RunLog.WriteException("UI", "Remove failed", ex);
-                AppendOutput($"Remove failed: {ex.Message}");
+                await RunOnUiThreadAsync(() => AppendOutput($"Remove failed: {ex.Message}"));
             }
             finally
             {
-                button.IsEnabled = true;
+                await RunOnUiThreadAsync(() => button.IsEnabled = true);
             }
         };
         return button;
