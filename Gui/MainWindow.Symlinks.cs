@@ -138,12 +138,22 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (itemType != typeof(string))
                 SaveConfiguration();
             Refresh();
-            DispatcherQueue.TryEnqueue(() => listScroll.ChangeView(null, listScroll.ScrollableHeight, null));
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _symlinkColumnToScroll = property.Name;
+                InvalidateCachedPage("Symlinks");
+                RenderModule(_modules.First(module => module.Name == "Symlinks"));
+            });
         });
         Grid.SetColumn(add, 2);
         header.Children.Add(add);
 
         Refresh();
+        if (_symlinkColumnToScroll == property.Name)
+        {
+            _symlinkColumnToScroll = null;
+            DispatcherQueue.TryEnqueue(() => listScroll.ChangeView(null, listScroll.ScrollableHeight, null));
+        }
         return new StackPanel
         {
             Spacing = 10,
