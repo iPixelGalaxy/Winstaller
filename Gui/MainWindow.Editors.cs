@@ -272,7 +272,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Header = "Password",
             Password = drive.Password,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(12, 0, 40, 0),
+            Padding = new Thickness(12, 8, 40, 8),
             PasswordRevealMode = PasswordRevealMode.Hidden
         };
         var revealed = false;
