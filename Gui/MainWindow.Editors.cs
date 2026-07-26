@@ -74,13 +74,13 @@ public sealed partial class MainWindow : Window
         var backup = new VRChatRegistryModule(_config).LoadBackup();
         if (backup is not null)
         {
-            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings to restore", isExpanded: true));
-            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data to restore", isExpanded: false));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings to restore", isExpanded: true));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data to restore", isExpanded: false));
         }
         return panel;
     }
 
-    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, IEnumerable<VRChatRegistryValue> source, string title, bool isExpanded)
+    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, VRChatRegistryBackup backup, IEnumerable<VRChatRegistryValue> source, string title, bool isExpanded)
     {
         var values = source.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var panel = new StackPanel { Spacing = 8 };
@@ -95,23 +95,15 @@ public sealed partial class MainWindow : Window
                 panel.Children.Add(new TextBlock { Text = category.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 8, 0, 0) });
                 var tiles = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
                 foreach (var value in category)
-                    tiles.Children.Add(BuildVRChatValueTile(config, value));
+                    tiles.Children.Add(BuildVRChatValueTile(config, backup, value));
                 panel.Children.Add(tiles);
             }
         }
         return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = isExpanded };
     }
 
-    private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryValue value)
+    private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryBackup backup, VRChatRegistryValue value)
     {
-        var id = VRChatRegistryModule.GetValueId(value);
-        var toggle = new ToggleSwitch { IsOn = !config.ExcludedValueIds.Contains(id, StringComparer.OrdinalIgnoreCase), OffContent = string.Empty, OnContent = string.Empty, VerticalAlignment = VerticalAlignment.Center };
-        toggle.Toggled += (_, _) =>
-        {
-            config.ExcludedValueIds.RemoveAll(existing => existing.Equals(id, StringComparison.OrdinalIgnoreCase));
-            if (!toggle.IsOn) config.ExcludedValueIds.Add(id);
-            SaveConfiguration();
-        };
         var row = new Grid { ColumnSpacing = 12 };
         row.VerticalAlignment = VerticalAlignment.Center;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -120,8 +112,9 @@ public sealed partial class MainWindow : Window
         text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap });
         text.Children.Add(new TextBlock { Text = GuessVRChatDescription(value), FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(text);
-        Grid.SetColumn(toggle, 1);
-        row.Children.Add(toggle);
+        var editor = BuildVRChatValueEditor(backup, value);
+        Grid.SetColumn(editor, 1);
+        row.Children.Add(editor);
         var tile = new Border
         {
             Width = 272,
@@ -136,6 +129,31 @@ public sealed partial class MainWindow : Window
         };
         ToolTipService.SetToolTip(tile, $"Likely meaning. Registry value: {value.Name}");
         return tile;
+    }
+
+    private FrameworkElement BuildVRChatValueEditor(VRChatRegistryBackup backup, VRChatRegistryValue value)
+    {
+        void Save() => new VRChatRegistryModule(_config).SaveBackup(backup);
+        if (value.Kind == Microsoft.Win32.RegistryValueKind.DWord && (value.Data == "0" || value.Data == "1"))
+        {
+            var toggle = new ToggleSwitch { IsOn = value.Data == "1", OffContent = string.Empty, OnContent = string.Empty, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            toggle.Toggled += (_, _) => { value.Data = toggle.IsOn ? "1" : "0"; Save(); };
+            return toggle;
+        }
+        if ((value.Kind is Microsoft.Win32.RegistryValueKind.DWord or Microsoft.Win32.RegistryValueKind.QWord) && double.TryParse(value.Data, System.Globalization.CultureInfo.InvariantCulture, out var number) && number <= 9007199254740991d)
+        {
+            var box = new NumberBox { Value = number, MinWidth = 82, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            box.ValueChanged += (_, args) =>
+            {
+                if (!double.IsNaN(args.NewValue) && args.NewValue >= 0)
+                {
+                    value.Data = Math.Round(args.NewValue).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    Save();
+                }
+            };
+            return box;
+        }
+        return new TextBlock { Text = value.Kind is Microsoft.Win32.RegistryValueKind.Binary ? "Saved binary" : "Saved value", Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     }
 
     private static string DescribeVRChatValue(string name)

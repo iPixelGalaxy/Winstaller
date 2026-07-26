@@ -54,7 +54,6 @@ public class VRChatRegistryModule : ModuleBase
             {
                 if (value.Group == VRChatRegistryGroup.Settings && !Config.VRChatRegistry.RestoreSettings) continue;
                 if (value.Group == VRChatRegistryGroup.Personal && !Config.VRChatRegistry.RestorePersonalData) continue;
-                if (Config.VRChatRegistry.ExcludedValueIds.Contains(GetValueId(value), StringComparer.OrdinalIgnoreCase)) continue;
                 using var key = Registry.CurrentUser.CreateSubKey(string.IsNullOrWhiteSpace(value.SubKey) ? RootPath : $"{RootPath}\\{value.SubKey}", true);
                 key!.SetValue(value.Name, Decode(value), value.Kind);
                 restored++;
@@ -65,7 +64,7 @@ public class VRChatRegistryModule : ModuleBase
         catch (Exception ex) { ConsoleHelper.WriteError($"VRChat restore failed: {ex.Message}"); return Task.FromResult(false); }
     }
 
-    private void SaveBackup(VRChatRegistryBackup backup)
+    public void SaveBackup(VRChatRegistryBackup backup)
     {
         var path = ExpandEnvironmentVariables(Config.VRChatRegistry.BackupPath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
