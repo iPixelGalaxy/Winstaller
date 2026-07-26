@@ -164,7 +164,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         }
         void ArrangeTiles()
         {
-            var columns = RootGrid.ActualWidth >= 1436 ? 2 : 1;
+            var columns = RootGrid.ActualWidth >= 1723 ? 2 : 1;
             if (folders.ColumnDefinitions.Count == columns)
                 return;
 
