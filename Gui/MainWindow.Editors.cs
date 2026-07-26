@@ -150,7 +150,6 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private FrameworkElement BuildShellFoldersContent(ShellFoldersConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };
-        var folders = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
         var folderTiles = new List<FrameworkElement>();
         void Refresh()
         {
@@ -162,29 +161,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             tile.HorizontalAlignment = HorizontalAlignment.Stretch;
             folderTiles.Add(tile);
         }
-        void ArrangeTiles()
-        {
-            var columns = RootGrid.ActualWidth >= 1723 ? 2 : 1;
-            if (folders.ColumnDefinitions.Count == columns)
-                return;
-
-            folders.ColumnDefinitions.Clear();
-            folders.RowDefinitions.Clear();
-            folders.Children.Clear();
-            for (var column = 0; column < columns; column++)
-                folders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            for (var row = 0; row < (int)Math.Ceiling(folderTiles.Count / (double)columns); row++)
-                folders.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            for (var index = 0; index < folderTiles.Count; index++)
-            {
-                Grid.SetRow(folderTiles[index], index / columns);
-                Grid.SetColumn(folderTiles[index], index % columns);
-                folders.Children.Add(folderTiles[index]);
-            }
-        }
-        folders.SizeChanged += (_, _) => ArrangeTiles();
-        ArrangeTiles();
-        panel.Children.Add(folders);
+        panel.Children.Add(BuildResponsiveTileGrid(folderTiles));
 
         var presets = GetShellFolderPresets()
             .Where(preset => !config.Folders.Any(folder => folder.RegistryValue.Equals(preset.RegistryValue, StringComparison.OrdinalIgnoreCase)))
@@ -209,6 +186,60 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         }
 
         return panel;
+    }
+
+    private FrameworkElement BuildPathContent(PathConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        var property = typeof(PathConfig).GetProperty(nameof(PathConfig.Additions))!;
+        void Refresh()
+        {
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        }
+
+        var pathTiles = new List<FrameworkElement>();
+        for (var index = 0; index < config.Additions.Count; index++)
+        {
+            var tile = BuildListItemEditor(config.Additions, typeof(string), index, Refresh, property);
+            tile.HorizontalAlignment = HorizontalAlignment.Stretch;
+            pathTiles.Add(tile);
+        }
+        panel.Children.Add(BuildResponsiveTileGrid(pathTiles));
+        panel.Children.Add(ActionButton("+ Add Path", () =>
+        {
+            config.Additions.Add(string.Empty);
+            SaveConfiguration();
+            Refresh();
+        }));
+        return panel;
+    }
+
+    private Grid BuildResponsiveTileGrid(IReadOnlyList<FrameworkElement> tiles)
+    {
+        var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        void ArrangeTiles()
+        {
+            var columns = RootGrid.ActualWidth >= 1723 ? 2 : 1;
+            if (grid.ColumnDefinitions.Count == columns)
+                return;
+
+            grid.ColumnDefinitions.Clear();
+            grid.RowDefinitions.Clear();
+            grid.Children.Clear();
+            for (var column = 0; column < columns; column++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (var row = 0; row < (int)Math.Ceiling(tiles.Count / (double)columns); row++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (var index = 0; index < tiles.Count; index++)
+            {
+                Grid.SetRow(tiles[index], index / columns);
+                Grid.SetColumn(tiles[index], index % columns);
+                grid.Children.Add(tiles[index]);
+            }
+        }
+        grid.SizeChanged += (_, _) => ArrangeTiles();
+        ArrangeTiles();
+        return grid;
     }
 
 

@@ -326,6 +326,10 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             return BuildShellFoldersContent(shellFolders);
         }
+        if (module.Config is PathConfig path)
+        {
+            return BuildPathContent(path);
+        }
         if (module.Config is SymlinksConfig symlinks)
         {
             return BuildSymlinksContent(symlinks);
