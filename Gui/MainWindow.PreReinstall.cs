@@ -87,37 +87,46 @@ public sealed partial class MainWindow
                     _config,
                     SystemInfoImportScope.All,
                     includeUpdates: true,
-                    progress: message => DispatcherQueue.TryEnqueue(() => status.Text = message))))
+                    progress: message => DispatcherQueue.TryEnqueue(() => status.Text = message))).ConfigureAwait(false))
                     .Where(candidate => candidate.Scope != SystemInfoImportScope.Firewall)
                     .ToList();
-                foreach (var group in candidates.GroupBy(candidate => candidate.Group == "Changed" ? "Changed configuration" : $"New {SplitName(candidate.Scope.ToString())}"))
+                await RunOnUiThreadAsync(() =>
                 {
-                    var groupPanel = new StackPanel { Spacing = 6 };
-                    groupPanel.Children.Add(new TextBlock { Text = group.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
-                    foreach (var candidate in group)
+                    foreach (var group in candidates.GroupBy(candidate => candidate.Group == "Changed" ? "Changed configuration" : $"New {SplitName(candidate.Scope.ToString())}"))
                     {
-                        var content = new StackPanel { Spacing = 2 };
-                        content.Children.Add(new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap });
-                        content.Children.Add(new TextBlock { Text = candidate.Detail, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
-                        var check = new CheckBox { Content = content, IsChecked = candidate.Scope != SystemInfoImportScope.Symlinks && candidate.Group != "Ignored" };
-                        checks.Add((candidate, check));
-                        groupPanel.Children.Add(check);
+                        var groupPanel = new StackPanel { Spacing = 6 };
+                        groupPanel.Children.Add(new TextBlock { Text = group.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+                        foreach (var candidate in group)
+                        {
+                            var content = new StackPanel { Spacing = 2 };
+                            content.Children.Add(new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap });
+                            content.Children.Add(new TextBlock { Text = candidate.Detail, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
+                            var check = new CheckBox { Content = content, IsChecked = candidate.Scope != SystemInfoImportScope.Symlinks && candidate.Group != "Ignored" };
+                            checks.Add((candidate, check));
+                            groupPanel.Children.Add(check);
+                        }
+                        findings.Children.Add(Card(groupPanel));
                     }
-                    findings.Children.Add(Card(groupPanel));
-                }
-                status.Text = candidates.Count == 0 ? "No new or changed system configuration found." : $"Found {candidates.Count} item(s). Review selections, then run checklist.";
-                RunLog.Write("Pre-reinstall Checklist", status.Text);
-                run!.IsEnabled = true;
+                    status.Text = candidates.Count == 0 ? "No new or changed system configuration found." : $"Found {candidates.Count} item(s). Review selections, then run checklist.";
+                    RunLog.Write("Pre-reinstall Checklist", status.Text);
+                    run!.IsEnabled = true;
+                });
             }
             catch (Exception ex)
             {
-                status.Text = $"Scan failed: {ex.Message}";
-                RunLog.WriteException("Pre-reinstall Checklist", "Scan failed", ex);
+                await RunOnUiThreadAsync(() =>
+                {
+                    status.Text = $"Scan failed: {ex.Message}";
+                    RunLog.WriteException("Pre-reinstall Checklist", "Scan failed", ex);
+                });
             }
             finally
             {
-                spinner.Visibility = Visibility.Collapsed;
-                scan!.IsEnabled = true;
+                await RunOnUiThreadAsync(() =>
+                {
+                    spinner.Visibility = Visibility.Collapsed;
+                    scan!.IsEnabled = true;
+                });
             }
         }
 
