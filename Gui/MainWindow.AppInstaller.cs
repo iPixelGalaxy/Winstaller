@@ -32,12 +32,17 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
         foreach (var group in RecommendedAppCatalog.Groups.Append(new RecommendedAppGroupInfo(RecommendedAppGroup.None, "Apps")))
         {
             var packageIds = new List<string>();
-            var tiles = new VariableSizedWrapGrid
+            var tiles = new ItemsRepeater
             {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Left,
+                Layout = new UniformGridLayout
+                {
+                    MinItemWidth = 250,
+                    MinItemHeight = 128,
+                    MinRowSpacing = 8,
+                    MinColumnSpacing = 8,
+                    ItemsStretch = UniformGridLayoutItemsStretch.Fill
+                }
             };
-            var tileByPackageId = new Dictionary<string, FrameworkElement>(StringComparer.OrdinalIgnoreCase);
             var isMaterialized = false;
             var chevron = new FontIcon
             {
@@ -77,29 +82,9 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
                 if (!isMaterialized)
                     return;
 
-                var wanted = packageIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                foreach (var packageId in tileByPackageId.Keys.Where(packageId => !wanted.Contains(packageId)).ToList())
-                {
-                    tiles.Children.Remove(tileByPackageId[packageId]);
-                    tileByPackageId.Remove(packageId);
-                }
-
-                for (var index = 0; index < packageIds.Count; index++)
-                {
-                    var packageId = packageIds[index];
-                    if (!tileByPackageId.TryGetValue(packageId, out var tile))
-                    {
-                        tile = BuildAppTile(packageId, config, Refresh);
-                        tileByPackageId.Add(packageId, tile);
-                    }
-
-                    if (tiles.Children.IndexOf(tile) != index)
-                    {
-                        tiles.Children.Remove(tile);
-                        tiles.Children.Insert(index, tile);
-                    }
-                }
+                tiles.ItemsSource = packageIds.ToList();
             }
+            tiles.ItemTemplate = new CallbackElementFactory(data => BuildAppTile((string)data!, config, Refresh));
             void MaterializeTiles()
             {
                 if (isMaterialized)
@@ -125,7 +110,7 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
                 ConfigurationManager.SaveAppInstallerGroupExpanded(
                     _appInstallerGroupExpanded.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value));
             };
-            groupedSections.Add(new AppGroupSection(group, packageIds, tiles, RefreshTiles, section));
+            groupedSections.Add(new AppGroupSection(group, packageIds, RefreshTiles, section));
         }
 
         void Refresh()
@@ -206,9 +191,8 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
 
         var tile = new Border
         {
-            Width = 250,
             Height = 128,
-            Margin = new Thickness(0, 0, 8, 8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(1),

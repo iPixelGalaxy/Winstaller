@@ -216,7 +216,7 @@ private static string GetSettingDescription(PropertyInfo property)
 
     private sealed record AppIconView(Grid Host, Image Image, FontIcon Fallback, ProgressRing Spinner);
     private sealed record AppBehaviorDialogState(string PackageId, AppInstallBehavior Behavior);
-    private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, VariableSizedWrapGrid Tiles, Action RefreshTiles, StackPanel Section);
+    private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, Action RefreshTiles, StackPanel Section);
     private sealed record IndexedItem(object Value, int Index);
     private sealed class ReusableSymlinkRow : Grid
     {

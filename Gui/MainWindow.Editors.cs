@@ -71,13 +71,30 @@ public sealed partial class MainWindow : Window
         });
         panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestoreSettings), "Settings", "Graphics, audio, input, safety, camera, accessibility, and other app settings."));
         panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestorePersonalData), "Personal data", "Account-linked values, inventories, custom groups, histories, and session-related data."));
-        var backup = new VRChatRegistryModule(_config).LoadBackup();
-        if (backup is not null)
+        var backupValues = new StackPanel { Spacing = 12 };
+        backupValues.Children.Add(new StackPanel
         {
-            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings"));
-            panel.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data"));
-        }
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children = { new ProgressRing { IsActive = true, Width = 20, Height = 20 }, new TextBlock { Text = "Loading saved VRChat values…", VerticalAlignment = VerticalAlignment.Center } }
+        });
+        panel.Children.Add(backupValues);
+        _ = LoadVRChatBackupValuesAsync(config, backupValues);
         return panel;
+    }
+
+    private async Task LoadVRChatBackupValuesAsync(VRChatRegistryConfig config, StackPanel backupValues)
+    {
+        var backup = await Task.Run(() => new VRChatRegistryModule(_config).LoadBackup()).ConfigureAwait(false);
+        await RunOnUiThreadAsync(() =>
+        {
+            backupValues.Children.Clear();
+            if (backup is null)
+                return;
+
+            backupValues.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings"));
+            backupValues.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data"));
+        });
     }
 
     private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, VRChatRegistryBackup backup, IEnumerable<VRChatRegistryValue> source, string title)
@@ -93,9 +110,19 @@ public sealed partial class MainWindow : Window
             foreach (var category in values.GroupBy(VRChatRegistryModule.GetCategory).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
                 panel.Children.Add(new TextBlock { Text = category.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 8, 0, 0) });
-                var tiles = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
-                foreach (var value in category)
-                    tiles.Children.Add(BuildVRChatValueTile(config, backup, value));
+                var tiles = new ItemsRepeater
+                {
+                    Layout = new UniformGridLayout
+                    {
+                        MinItemWidth = 272,
+                        MinItemHeight = 74,
+                        MinRowSpacing = 8,
+                        MinColumnSpacing = 8,
+                        ItemsStretch = UniformGridLayoutItemsStretch.Fill
+                    },
+                    ItemsSource = category.ToList()
+                };
+                tiles.ItemTemplate = new CallbackElementFactory(data => BuildVRChatValueTile(config, backup, (VRChatRegistryValue)data!));
                 panel.Children.Add(tiles);
             }
         }
@@ -121,9 +148,8 @@ public sealed partial class MainWindow : Window
         row.Children.Add(editor);
         var tile = new Border
         {
-            Width = 272,
             Height = 74,
-            Margin = new Thickness(0, 0, 8, 8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(1),
