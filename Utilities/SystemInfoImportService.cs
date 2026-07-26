@@ -33,6 +33,13 @@ public enum SymlinkImportMode
     Symlink
 }
 
+internal sealed record StartupShortcutImport(string SourcePath, string FileName, bool MachineLevel, bool Enabled)
+{
+    public string Destination => MachineLevel
+        ? @"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
+        : @"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup";
+}
+
 public sealed record SystemInfoImportResult(int Added, IReadOnlyList<SymlinkImportFailure> SymlinkFailures);
 public sealed record SymlinkImportFailure(SystemInfoImportCandidate Candidate, string Title, IReadOnlyList<string> FailedPaths, string Message);
 public sealed record AppImportCandidate(string PackageId, string DisplayName, string Version, bool IsRecommended);
@@ -210,6 +217,11 @@ public static class SystemInfoImportService
                         config.Startup.Programs.Add(startup);
                         added++;
                     }
+                    break;
+
+                case StartupShortcutImport shortcut:
+                    if (ImportStartupShortcut(config, shortcut, log))
+                        added++;
                     break;
 
                 case FirewallCaptureCandidate when candidate.Scope == SystemInfoImportScope.Firewall:
@@ -632,6 +644,32 @@ public static class SystemInfoImportService
                     candidate,
                     existing is null ? string.Empty : "Changed",
                     existing is not null);
+            }
+        }
+
+        foreach (var shortcut in ReadStartupFolder(Environment.SpecialFolder.Startup, false))
+        {
+            if (!HasStartupShortcut(config, shortcut))
+            {
+                yield return new SystemInfoImportCandidate(
+                    SystemInfoImportScope.Startup,
+                    shortcut.FileName,
+                    $"{shortcut.SourcePath}\nCurrent user Startup folder; {(shortcut.Enabled ? "enabled" : "disabled")}",
+                    shortcut,
+                    "Startup shortcut");
+            }
+        }
+
+        foreach (var shortcut in ReadStartupFolder(Environment.SpecialFolder.CommonStartup, true))
+        {
+            if (!HasStartupShortcut(config, shortcut))
+            {
+                yield return new SystemInfoImportCandidate(
+                    SystemInfoImportScope.Startup,
+                    shortcut.FileName,
+                    $"{shortcut.SourcePath}\nAll users Startup folder; {(shortcut.Enabled ? "enabled" : "disabled")}",
+                    shortcut,
+                    "Startup shortcut");
             }
         }
     }
@@ -1273,6 +1311,67 @@ public static class SystemInfoImportService
                 MachineLevel = machineLevel,
                 Enabled = IsStartupEnabled(root, name)
             };
+        }
+    }
+
+    private static IEnumerable<StartupShortcutImport> ReadStartupFolder(Environment.SpecialFolder folder, bool machineLevel)
+    {
+        var directory = Environment.GetFolderPath(folder);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            yield break;
+
+        foreach (var shortcutPath in Directory.EnumerateFiles(directory, "*.lnk", SearchOption.TopDirectoryOnly))
+        {
+            var fileName = Path.GetFileName(shortcutPath);
+            yield return new StartupShortcutImport(
+                shortcutPath,
+                fileName,
+                machineLevel,
+                IsStartupFolderEnabled(fileName));
+        }
+    }
+
+    private static bool IsStartupFolderEnabled(string fileName)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder");
+        return key?.GetValue(fileName) is not byte[] value || value.Length == 0 || value[0] != 3;
+    }
+
+    private static bool HasStartupShortcut(WinstallerConfig config, StartupShortcutImport shortcut)
+    {
+        return config.FileCopy.Operations.Any(operation =>
+            operation.Destination.Equals(shortcut.Destination, StringComparison.OrdinalIgnoreCase) &&
+            Path.GetFileName(operation.Source).Equals(shortcut.FileName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ImportStartupShortcut(WinstallerConfig config, StartupShortcutImport shortcut, Action<string>? log)
+    {
+        try
+        {
+            var backupDirectory = Path.Combine(
+                BootstrapManager.DataDirectory,
+                "FilesAndShortcuts",
+                "ImportedStartup",
+                shortcut.MachineLevel ? "AllUsers" : "CurrentUser");
+            Directory.CreateDirectory(backupDirectory);
+            var backupPath = Path.Combine(backupDirectory, shortcut.FileName);
+            File.Copy(shortcut.SourcePath, backupPath, true);
+
+            config.FileCopy.Operations.Add(new FileCopyOperation
+            {
+                Name = $"Startup shortcut: {shortcut.FileName}",
+                Source = backupPath,
+                Destination = shortcut.Destination,
+                Overwrite = true,
+                RewriteShortcutProfilePaths = true
+            });
+            log?.Invoke($"Saved startup shortcut: {shortcut.FileName}");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log?.Invoke($"Could not save startup shortcut {shortcut.FileName}: {ex.Message}");
+            return false;
         }
     }
 
