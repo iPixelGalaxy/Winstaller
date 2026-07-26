@@ -1074,25 +1074,29 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private FrameworkElement BuildSystemSettingsContent(SystemSettingsConfig settings)
     {
         var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(BuildAppliedSettingCard("Computer name", "Rename this PC. Windows applies it after restart.", settings.ComputerName, new TextBox
+        panel.Children.Add(BuildUacSettingCard(settings.Uac));
+        var compactSettings = new List<FrameworkElement>
+        {
+            BuildAppliedSettingCard("Computer name", "Rename this PC. Windows applies it after restart.", settings.ComputerName, new TextBox
         {
             Text = settings.ComputerName.Value,
             PlaceholderText = "Computer name",
             HorizontalAlignment = HorizontalAlignment.Stretch
-        }, value => settings.ComputerName.Value = (string)value));
-        panel.Children.Add(BuildAppliedSettingCard("Transparency effects", "Show transparency in Windows surfaces.", settings.Transparency, new ToggleSwitch
+        }, value => settings.ComputerName.Value = (string)value),
+            BuildAppliedSettingCard("Transparency effects", "Show transparency in Windows surfaces.", settings.Transparency, new ToggleSwitch
         {
             IsOn = settings.Transparency.Value
-        }, value => settings.Transparency.Value = (bool)value));
-        panel.Children.Add(BuildAppliedSettingCard("Treat UNC paths as intranet", "Apply Local Intranet zone rules to UNC network paths.", settings.UncAsIntranet, new ToggleSwitch
+        }, value => settings.Transparency.Value = (bool)value),
+            BuildAppliedSettingCard("Treat UNC paths as intranet", "Apply Local Intranet zone rules to UNC network paths.", settings.UncAsIntranet, new ToggleSwitch
         {
             IsOn = settings.UncAsIntranet.Value != 0
-        }, value => settings.UncAsIntranet.Value = (bool)value ? 1 : 0));
-        panel.Children.Add(BuildAppliedSettingCard("Do not preserve download zone information", "Stop Windows saving source-zone metadata for downloaded files.", settings.SaveZoneInformation, new ToggleSwitch
+        }, value => settings.UncAsIntranet.Value = (bool)value ? 1 : 0),
+            BuildAppliedSettingCard("Do not preserve download zone information", "Stop Windows saving source-zone metadata for downloaded files.", settings.SaveZoneInformation, new ToggleSwitch
         {
             IsOn = settings.SaveZoneInformation.Value != 0
-        }, value => settings.SaveZoneInformation.Value = (bool)value ? 1 : 0));
-        panel.Children.Add(BuildUacSettingCard(settings.Uac));
+        }, value => settings.SaveZoneInformation.Value = (bool)value ? 1 : 0)
+        };
+        panel.Children.Add(BuildProgressiveTileGrid(compactSettings, 210, 188, setting => setting));
         return panel;
     }
 

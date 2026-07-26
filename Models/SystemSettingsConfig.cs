@@ -9,11 +9,11 @@ public class AppliedSetting<T>
 public class SystemSettingsConfig
 {
     public bool Enabled { get; set; }
-    public AppliedSetting<string> ComputerName { get; set; } = new();
-    public AppliedSetting<bool> Transparency { get; set; } = new();
-    public AppliedSetting<int> UncAsIntranet { get; set; } = new();
-    public AppliedSetting<int> SaveZoneInformation { get; set; } = new();
-    public AppliedSetting<UacLevel> Uac { get; set; } = new();
+    public AppliedSetting<string> ComputerName { get; set; } = new() { Apply = true, Value = Environment.MachineName };
+    public AppliedSetting<bool> Transparency { get; set; } = new() { Apply = true, Value = true };
+    public AppliedSetting<int> UncAsIntranet { get; set; } = new() { Apply = true, Value = 1 };
+    public AppliedSetting<int> SaveZoneInformation { get; set; } = new() { Apply = true, Value = 1 };
+    public AppliedSetting<UacLevel> Uac { get; set; } = new() { Apply = true, Value = UacLevel.NotifyAppsWithoutSecureDesktop };
 }
 
 public enum UacLevel
