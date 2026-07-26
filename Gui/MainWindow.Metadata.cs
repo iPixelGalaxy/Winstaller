@@ -285,32 +285,24 @@ private static string GetSettingDescription(PropertyInfo property)
                 }
             }
 
-            try
+            await RunOnUiThreadAsync(() =>
             {
+                grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+                grid.SizeChanged += (_, _) => ArrangeTiles();
+                host.Children.Clear();
+                host.Children.Add(grid);
+            });
+
+            for (var index = 0; index < items.Count; index += 12)
+            {
+                var batch = items.Skip(index).Take(12).ToList();
                 await RunOnUiThreadAsync(() =>
                 {
-                    BeginContentWarmup();
-                    grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
-                    grid.SizeChanged += (_, _) => ArrangeTiles();
-                    host.Children.Clear();
-                    host.Children.Add(grid);
+                    foreach (var item in batch)
+                        tiles.Add(create(item));
+                    ArrangeTiles();
                 });
-
-                for (var index = 0; index < items.Count; index += 12)
-                {
-                    var batch = items.Skip(index).Take(12).ToList();
-                    await RunOnUiThreadAsync(() =>
-                    {
-                        foreach (var item in batch)
-                            tiles.Add(create(item));
-                        ArrangeTiles();
-                    });
-                    await Task.Delay(1).ConfigureAwait(false);
-                }
-            }
-            finally
-            {
-                await RunOnUiThreadAsync(EndContentWarmup);
+                await Task.Delay(1).ConfigureAwait(false);
             }
         };
         return host;
