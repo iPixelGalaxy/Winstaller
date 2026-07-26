@@ -123,7 +123,8 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         panel.Children.Add(ActionButton($"+ Add {title}", () =>
         {
             list.Add(CreateDefaultItem(itemType));
-            SaveConfiguration();
+            if (itemType != typeof(string))
+                SaveConfiguration();
             Refresh();
         }));
 

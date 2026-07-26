@@ -29,7 +29,8 @@ public sealed record SystemInfoImportCandidate(
 public enum SymlinkImportMode
 {
     Copy,
-    Move
+    Move,
+    Symlink
 }
 
 public sealed record SystemInfoImportResult(int Added, IReadOnlyList<SymlinkImportFailure> SymlinkFailures);
@@ -839,6 +840,13 @@ public static class SystemInfoImportService
 
     public static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(IEnumerable<string> paths) => SymlinkLockUtility.FindLockingProcesses(paths);
 
+    public static bool IsManagedSymlinkCandidate(WinstallerConfig config, SystemInfoImportCandidate candidate)
+    {
+        return candidate.Value is SymlinkImport symlink &&
+               symlink.IsExistingSymlink &&
+               IsManagedSymlinkTarget(config, symlink.ExistingTargetPath);
+    }
+
     private static SymlinkMigrationResult MigrateSymlinkData(WinstallerConfig config, SymlinkImport symlink, SymlinkImportMode mode, Action<string>? log)
     {
         if (!SymlinkSafetyPolicy.IsSafeAppDataRelativePath(symlink.Section, symlink.Name, out var unsafeReason))
@@ -849,6 +857,12 @@ public static class SystemInfoImportService
 
         if (symlink.Kind is SymlinkImportKind.BackupRecovery or SymlinkImportKind.BackupRollback)
             return RecoverBackupSymlink(config, symlink, log);
+
+        if (symlink.IsExistingSymlink && IsManagedSymlinkTarget(config, symlink.ExistingTargetPath))
+        {
+            log?.Invoke($"Using existing managed symlink: {symlink.SourcePath} -> {symlink.ExistingTargetPath}");
+            return SymlinkMigrationResult.Ok();
+        }
 
         var dataSource = symlink.IsExistingSymlink && Directory.Exists(symlink.ExistingTargetPath)
             ? symlink.ExistingTargetPath
@@ -1066,6 +1080,22 @@ public static class SystemInfoImportService
         }
 
         return SymlinkMigrationResult.Ok();
+    }
+
+    private static bool IsManagedSymlinkTarget(WinstallerConfig config, string target)
+    {
+        try
+        {
+            var managedRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(config.Symlinks.BaseSymlinkDirectory))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var fullTarget = Path.GetFullPath(target)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return fullTarget.StartsWith(managedRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string GetSymlinkDestination(WinstallerConfig config, string section, string name)

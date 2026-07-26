@@ -548,6 +548,9 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         var actionName = "Copy and Symlink";
         var accepted = false;
         ContentDialog? dialog = null;
+        Button? copyButton = null;
+        Button? moveButton = null;
+        Button? symlinkButton = null;
         var dialogWidth = Math.Min(1080, Math.Max(720, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1180) - 160));
         var scrollbarGutter = 24;
         var cardWidth = dialogWidth - scrollbarGutter;
@@ -565,10 +568,19 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         var ignoredCandidates = new HashSet<SystemInfoImportCandidate>();
         void UpdateSelectedCount()
         {
+            var selected = checkBoxes
+                .Where(checkBox => checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate && !ignoredCandidates.Contains(candidate))
+                .Select(checkBox => (SystemInfoImportCandidate)checkBox.Tag)
+                .ToList();
             if (dialog is not null)
             {
-                dialog.Title = $"Import {checkBoxes.Count(checkBox => checkBox.IsChecked == true && checkBox.Tag is SystemInfoImportCandidate candidate && !ignoredCandidates.Contains(candidate))} symlink item(s)?";
+                dialog.Title = $"Import {selected.Count} symlink item(s)?";
             }
+
+            var managedOnly = selected.Count > 0 && selected.All(candidate => SystemInfoImportService.IsManagedSymlinkCandidate(_config, candidate));
+            if (copyButton is not null) copyButton.Visibility = managedOnly ? Visibility.Collapsed : Visibility.Visible;
+            if (moveButton is not null) moveButton.Visibility = managedOnly ? Visibility.Collapsed : Visibility.Visible;
+            if (symlinkButton is not null) symlinkButton.Visibility = managedOnly ? Visibility.Visible : Visibility.Collapsed;
         }
 
         var orderedGroups = candidates
@@ -724,20 +736,31 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         dialog.Resources["ContentDialogMaxWidth"] = dialogWidth + 80;
         UpdateSelectedCount();
 
-        footer.Children.Add(ActionButton("Copy and Symlink (Safe, but slower)", () =>
+        copyButton = ActionButton("Copy and Symlink (Safe, but slower)", () =>
         {
             actionName = "Copy and Symlink";
             resultMode = SymlinkImportMode.Copy;
             accepted = true;
             dialog.Hide();
-        }, primary: true));
-        footer.Children.Add(ActionButton("Move and Symlink (Faster, but riskier)", () =>
+        }, primary: true);
+        footer.Children.Add(copyButton);
+        moveButton = ActionButton("Move and Symlink (Faster, but riskier)", () =>
         {
             actionName = "Move and Symlink";
             resultMode = SymlinkImportMode.Move;
             accepted = true;
             dialog.Hide();
-        }));
+        });
+        footer.Children.Add(moveButton);
+        symlinkButton = ActionButton("Symlink", () =>
+        {
+            actionName = "Symlink";
+            resultMode = SymlinkImportMode.Symlink;
+            accepted = true;
+            dialog.Hide();
+        }, primary: true);
+        footer.Children.Add(symlinkButton);
+        UpdateSelectedCount();
         footer.Children.Add(ActionButton("Cancel", () =>
         {
             accepted = false;
