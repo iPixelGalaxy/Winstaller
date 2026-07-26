@@ -43,17 +43,20 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(ActionButton("Capture Current VRChat Registry", async () =>
         {
             captureStatus.Text = "Capturing current VRChat registry…";
-            await Task.Yield();
             var module = new VRChatRegistryModule(_config);
-            var captured = await Task.Run(async () => await module.CaptureAsync());
-            if (!captured)
+            var captured = await Task.Run(async () => await module.CaptureAsync()).ConfigureAwait(false);
+            await RunOnUiThreadAsync(() =>
             {
-                captureStatus.Text = module.LastMessage;
-                captureStatus.Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
-                return;
-            }
-            InvalidateCachedPage("VRChat Registry");
-            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+                if (!captured)
+                {
+                    captureStatus.Text = module.LastMessage;
+                    captureStatus.Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+                    return;
+                }
+
+                InvalidateCachedPage("VRChat Registry");
+                RenderModule(_modules.First(descriptor => ReferenceEquals(descriptor.Config, config)));
+            });
         }, primary: true));
         panel.Children.Add(captureStatus);
         panel.Children.Add(ActionButton("Restore Selected Groups", async () => await new VRChatRegistryModule(_config).RestoreAsync()));
