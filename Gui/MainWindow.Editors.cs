@@ -1147,7 +1147,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             IsOn = settings.SaveZoneInformation.Value != 0
         }, value => settings.SaveZoneInformation.Value = (bool)value ? 1 : 0)
         };
-        panel.Children.Add(BuildProgressiveTileGrid(compactSettings, 360, 264, setting => setting));
+        panel.Children.Add(BuildProgressiveTileGrid(compactSettings, 360, 160, setting => setting));
         return panel;
     }
 
@@ -1213,7 +1213,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Children =
             {
                 new TextBlock { Text = title, FontSize = 17, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
-                new TextBlock { Text = description, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
+                new TextBlock { Text = description, FontSize = 11, Height = 30, MaxLines = 2, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
                 controls
             }
         });
@@ -1229,9 +1229,9 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             "Always notify"
         };
         var current = Math.Clamp((int)setting.Value, 0, labels.Length - 1);
-        var selected = new TextBlock { Text = labels[current], FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } };
+        var selected = new TextBlock { Text = labels[current], FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.WrapWholeWords };
         var slider = new Slider { Minimum = 0, Maximum = labels.Length - 1, StepFrequency = 1, TickFrequency = 1, Value = current, IsEnabled = setting.Apply };
-        var apply = new ToggleSwitch { Header = "Apply UAC setting", IsOn = setting.Apply };
+        var apply = new ToggleSwitch { IsOn = setting.Apply };
         apply.Toggled += (_, _) =>
         {
             if (_isLoadingUi) return;
@@ -1248,16 +1248,39 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             SaveConfiguration();
         };
 
+        var controls = new Grid { ColumnSpacing = 14 };
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        controls.Children.Add(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                new TextBlock { Text = "Apply UAC setting" },
+                apply
+            }
+        });
+        var state = new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                new TextBlock { Text = "State to apply" },
+                selected,
+                slider
+            }
+        };
+        Grid.SetColumn(state, 1);
+        controls.Children.Add(state);
+
         return Card(new StackPanel
         {
             Spacing = 10,
             Children =
             {
                 new TextBlock { Text = "User Account Control", FontSize = 17, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
-                new TextBlock { Text = "Choose when Windows asks permission before elevation.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
-                apply,
-                selected,
-                slider
+                new TextBlock { Text = "Choose when Windows asks permission before elevation.", FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
+                controls
             }
         });
     }
