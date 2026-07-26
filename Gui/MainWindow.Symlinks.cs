@@ -243,6 +243,16 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (item is null || !isDirty)
                 return;
 
+            if (item.Index < 0 || item.Index >= list.Count)
+            {
+                // ItemsRepeater can recycle a previously bound row after its
+                // configuration item has been removed. Never let that stale
+                // textbox write back into a different list position.
+                isDirty = false;
+                RunLog.Write("Symlinks", $"Skipped stale recycled {property.Name} row at index {item.Index}.");
+                return;
+            }
+
             list[item.Index] = box!.Text.Trim();
             iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
             SaveConfiguration();
