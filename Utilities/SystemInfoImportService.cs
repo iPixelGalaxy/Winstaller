@@ -1404,7 +1404,7 @@ public static class SystemInfoImportService
     private static bool IsStartupEnabled(RegistryKey root, string name)
     {
         using var key = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run");
-        return key?.GetValue(name) is not byte[] value || value.Length == 0 || value[0] != 3;
+        return key?.GetValue(name) is not byte[] value || value.Length == 0 || value[0] == 2;
     }
 
     private static string GetStartupCandidateDetail(StartupProgram program)

@@ -89,6 +89,7 @@ public sealed partial class MainWindow
                     includeUpdates: true,
                     progress: message => DispatcherQueue.TryEnqueue(() => status.Text = message))).ConfigureAwait(false))
                     .Where(candidate => candidate.Scope != SystemInfoImportScope.Firewall)
+                    .Where(candidate => candidate.Group != "Ignored")
                     .ToList();
                 await RunOnUiThreadAsync(() =>
                 {
@@ -103,9 +104,48 @@ public sealed partial class MainWindow
                             content.Children.Add(new TextBlock { Text = candidate.Detail, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
                             var check = new CheckBox { Content = content, IsChecked = candidate.Scope != SystemInfoImportScope.Symlinks && candidate.Group != "Ignored" };
                             checks.Add((candidate, check));
-                            groupPanel.Children.Add(check);
+                            if (candidate.Value is AppImportCandidate)
+                            {
+                                var row = new Grid { ColumnSpacing = 8 };
+                                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                                row.Children.Add(check);
+                                var ignore = ActionButton("Ignore", () =>
+                                {
+                                    SystemInfoImportService.IgnoreCandidates(_config, [candidate]);
+                                    ConfigurationManager.SaveConfiguration(_config);
+                                    checks.RemoveAll(entry => entry.Candidate == candidate);
+                                    groupPanel.Children.Remove(row);
+                                    if (groupPanel.Children.Count == 1)
+                                        groupPanel.Visibility = Visibility.Collapsed;
+                                });
+                                Grid.SetColumn(ignore, 1);
+                                row.Children.Add(ignore);
+                                groupPanel.Children.Add(row);
+                            }
+                            else
+                                groupPanel.Children.Add(check);
                         }
                         findings.Children.Add(Card(groupPanel));
+                    }
+                    var scannedScopes = new[]
+                    {
+                        SystemInfoImportScope.Path,
+                        SystemInfoImportScope.NetworkDrives,
+                        SystemInfoImportScope.ShellFolders,
+                        SystemInfoImportScope.AppInstaller,
+                        SystemInfoImportScope.Fonts,
+                        SystemInfoImportScope.Startup,
+                        SystemInfoImportScope.Symlinks
+                    };
+                    var unchangedScopes = scannedScopes.Where(scope => candidates.All(candidate => candidate.Scope != scope)).ToList();
+                    if (unchangedScopes.Count > 0)
+                    {
+                        var unchanged = new StackPanel { Spacing = 6 };
+                        unchanged.Children.Add(new TextBlock { Text = "No changes detected", FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+                        foreach (var scope in unchangedScopes)
+                            unchanged.Children.Add(new TextBlock { Text = SplitName(scope.ToString()) });
+                        findings.Children.Add(Card(unchanged));
                     }
                     status.Text = candidates.Count == 0 ? "No new or changed system configuration found." : $"Found {candidates.Count} item(s). Review selections, then run checklist.";
                     RunLog.Write("Pre-reinstall Checklist", status.Text);
