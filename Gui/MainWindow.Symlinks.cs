@@ -245,6 +245,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
     {
         var outer = new ReusableSymlinkRow { ColumnSpacing = 4 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var isBinding = false;
         var sourceDirty = false;
@@ -316,11 +319,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                     SaveConfiguration();
                 });
             });
-        var fields = new StackPanel { Spacing = 6 };
         var sourceRow = new Grid { ColumnSpacing = 6 };
-        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
-        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sourceRow.Children.Add(sourceButton);
         sourceBox = CompactTextBox(string.Empty, "Source", value =>
         {
@@ -337,9 +338,8 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         sourceRow.Children.Add(sourceBox);
 
         var targetRow = new Grid { ColumnSpacing = 6 };
-        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
-        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         targetRow.Children.Add(targetButton);
         targetBox = CompactTextBox(string.Empty, "Target override", value =>
         {
@@ -378,9 +378,10 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             SetSpecialSymlinkGlyphs(symlink);
             SaveConfiguration();
         };
-        fields.Children.Add(sourceRow);
-        fields.Children.Add(targetRow);
-        outer.Children.Add(fields);
+        Grid.SetRow(sourceRow, 0);
+        outer.Children.Add(sourceRow);
+        Grid.SetRow(targetRow, 1);
+        outer.Children.Add(targetRow);
 
         var removeButton = CompactRemoveButton(async () =>
         {
@@ -395,11 +396,13 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             SaveConfiguration();
             refresh();
         });
-        Grid.SetColumn(isFile, 2);
-        sourceRow.Children.Add(isFile);
+        Grid.SetRow(isFile, 0);
+        Grid.SetColumn(isFile, 1);
+        outer.Children.Add(isFile);
         removeButton.HorizontalAlignment = HorizontalAlignment.Right;
-        Grid.SetColumn(removeButton, 2);
-        targetRow.Children.Add(removeButton);
+        Grid.SetRow(removeButton, 1);
+        Grid.SetColumn(removeButton, 1);
+        outer.Children.Add(removeButton);
 
         void SetSpecialSymlinkGlyphs(SpecialSymlink symlink)
         {
