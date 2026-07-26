@@ -1302,8 +1302,12 @@ public static class SystemInfoImportService
                 CreateNoWindow = true
             };
             process.Start();
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(true);
+                return string.Empty;
+            }
             var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
 
             foreach (var line in output.Split('\n'))
             {
@@ -1337,8 +1341,12 @@ public static class SystemInfoImportService
                 CreateNoWindow = true
             };
             process.Start();
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(true);
+                yield break;
+            }
             output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
         }
         catch
         {
@@ -1371,7 +1379,7 @@ public static class SystemInfoImportService
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = "winget",
-                Arguments = "list --source winget --accept-source-agreements",
+                Arguments = "list --source winget --accept-source-agreements --disable-interactivity --no-progress",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -1382,7 +1390,16 @@ public static class SystemInfoImportService
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
 
-            await process.WaitForExitAsync();
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            catch (TimeoutException)
+            {
+                process.Kill(true);
+                await process.WaitForExitAsync();
+                return (-1, string.Empty, "winget list timed out after 30 seconds.");
+            }
             await Task.WhenAll(outputTask, errorTask);
 
             return (process.ExitCode, outputTask.Result, errorTask.Result);
