@@ -142,14 +142,21 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (index < 0 || index >= viewItems.Count)
-                    return;
-
-                var element = items.GetOrCreateElement(index);
-                element.StartBringIntoView(new BringIntoViewOptions
+                // Let the collection change reach ItemsRepeater first. Its extent is
+                // still the old size during the Add button callback.
+                DispatcherQueue.TryEnqueue(() =>
                 {
-                    AnimationDesired = false,
-                    VerticalAlignmentRatio = 1
+                    if (index < 0 || index >= viewItems.Count)
+                        return;
+
+                    var element = items.GetOrCreateElement(index);
+                    items.UpdateLayout();
+                    listScroll.UpdateLayout();
+                    element.StartBringIntoView(new BringIntoViewOptions
+                    {
+                        AnimationDesired = false,
+                        VerticalAlignmentRatio = 1
+                    });
                 });
             });
         }
@@ -291,7 +298,14 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (defocus)
                 DefocusTextBox(box);
         }
-        box.TextChanged += (_, _) => { if (!isBinding) isDirty = true; };
+        box.TextChanged += (_, _) =>
+        {
+            if (isBinding)
+                return;
+
+            isDirty = true;
+            SaveBox(false);
+        };
         box.LostFocus += (_, _) => SaveBox();
         box.KeyDown += (_, args) =>
         {
