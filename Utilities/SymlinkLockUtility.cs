@@ -1,12 +1,71 @@
 using System.Diagnostics;
+using System.Management;
 using System.Runtime.InteropServices;
 
 namespace Winstaller.Utilities;
 
 public sealed record LockingProcessInfo(int ProcessId, string ProcessName, string Path);
+public sealed record RestartableApplication(string ExecutablePath, string Arguments, string ProcessName);
 
 public static class SymlinkLockUtility
 {
+    public static IReadOnlyList<LockingProcessInfo> FindExactLockingProcesses(IEnumerable<string> paths) =>
+        FindExactLockingProcessDetails(paths).Select(process => new LockingProcessInfo(process.ProcessId, process.ProcessName, process.Path)).ToList();
+
+    public static bool StopExactUserAppLocks(IEnumerable<string> paths, ICollection<RestartableApplication> stoppedApplications, Action<string>? log)
+    {
+        var lockingProcesses = FindExactLockingProcessDetails(paths);
+        if (lockingProcesses.Count == 0)
+            return false;
+
+        var stoppedAny = false;
+        foreach (var processInfo in lockingProcesses)
+        {
+            log?.Invoke($"Locked by {processInfo.ProcessName} (PID {processInfo.ProcessId}): {processInfo.Path}");
+            if (!IsSafeToStop(processInfo))
+            {
+                log?.Invoke($"Leaving protected or non-user process running: {processInfo.ProcessName} (PID {processInfo.ProcessId})");
+                continue;
+            }
+
+            try
+            {
+                using var process = Process.GetProcessById(processInfo.ProcessId);
+                var restart = GetRestartableApplication(process);
+                log?.Invoke($"Stopping {processInfo.ProcessName} (PID {processInfo.ProcessId})");
+                process.Kill(true);
+                process.WaitForExit(5000);
+                if (restart is not null)
+                    stoppedApplications.Add(restart);
+                stoppedAny = true;
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"Could not stop {processInfo.ProcessName} (PID {processInfo.ProcessId}): {ex.Message}");
+            }
+        }
+
+        return stoppedAny;
+    }
+
+    public static void RestartApplications(IEnumerable<RestartableApplication> applications, Action<string>? log)
+    {
+        foreach (var application in applications
+            .GroupBy(application => $"{application.ExecutablePath}\0{application.Arguments}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First()))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(application.ExecutablePath, application.Arguments) { UseShellExecute = true });
+                log?.Invoke($"Restarted {application.ProcessName}");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"Could not restart {application.ProcessName}: {ex.Message}");
+            }
+        }
+    }
+
     public static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(IEnumerable<string> paths)
     {
         var found = new Dictionary<int, LockingProcessInfo>();
@@ -76,6 +135,92 @@ public static class SymlinkLockUtility
                 yield return entry;
         }
     }
+
+    private static IReadOnlyList<ExactLockingProcessInfo> FindExactLockingProcessDetails(IEnumerable<string> paths)
+    {
+        var resources = paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (resources.Length == 0)
+            return [];
+
+        var sessionHandle = 0u;
+        if (RmStartSession(out sessionHandle, 0, Guid.NewGuid().ToString("N")) != 0)
+            return [];
+
+        try
+        {
+            if (RmRegisterResources(sessionHandle, (uint)resources.Length, resources, 0, null, 0, null) != 0)
+                return [];
+
+            uint needed = 0;
+            uint count = 0;
+            uint reason;
+            if (RmGetList(sessionHandle, out needed, ref count, null, out reason) != ErrorMoreData || needed == 0)
+                return [];
+
+            var processInfo = new RmProcessInfo[needed];
+            count = needed;
+            if (RmGetList(sessionHandle, out needed, ref count, processInfo, out reason) != 0)
+                return [];
+
+            return processInfo.Take((int)count)
+                .GroupBy(info => info.Process.dwProcessId)
+                .Select(group => group.First())
+                .Select(info => new ExactLockingProcessInfo(info.Process.dwProcessId,
+                    string.IsNullOrWhiteSpace(info.strAppName) ? $"PID {info.Process.dwProcessId}" : info.strAppName,
+                    resources[0], info.ApplicationType, info.TSSessionId))
+                .ToList();
+        }
+        finally
+        {
+            RmEndSession(sessionHandle);
+        }
+    }
+
+    private static bool IsSafeToStop(ExactLockingProcessInfo processInfo)
+    {
+        const uint RmMainWindow = 1;
+        const uint RmOtherWindow = 2;
+        const uint RmConsole = 5;
+        if (processInfo.ProcessId <= 4 || processInfo.ProcessId == Environment.ProcessId ||
+            processInfo.SessionId == 0 || processInfo.ApplicationType is not (RmMainWindow or RmOtherWindow or RmConsole))
+            return false;
+        return !processInfo.ProcessName.Equals("Winstaller", StringComparison.OrdinalIgnoreCase) &&
+               !processInfo.ProcessName.Equals("Windows Explorer", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static RestartableApplication? GetRestartableApplication(Process process)
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher($"SELECT ExecutablePath, CommandLine FROM Win32_Process WHERE ProcessId = {process.Id}");
+            var managementProcess = searcher.Get().Cast<ManagementObject>().FirstOrDefault();
+            var executablePath = managementProcess?["ExecutablePath"]?.ToString() ?? process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                return null;
+
+            var commandLine = managementProcess?["CommandLine"]?.ToString() ?? executablePath;
+            return new RestartableApplication(executablePath, GetArguments(commandLine, executablePath), process.ProcessName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetArguments(string commandLine, string executablePath)
+    {
+        if (commandLine.StartsWith('"'))
+        {
+            var closingQuote = commandLine.IndexOf('"', 1);
+            return closingQuote >= 0 ? commandLine[(closingQuote + 1)..].TrimStart() : string.Empty;
+        }
+
+        return commandLine.StartsWith(executablePath, StringComparison.OrdinalIgnoreCase)
+            ? commandLine[executablePath.Length..].TrimStart()
+            : string.Empty;
+    }
+
+    private sealed record ExactLockingProcessInfo(int ProcessId, string ProcessName, string Path, uint ApplicationType, uint SessionId);
 
     private static IReadOnlyList<LockingProcessInfo> FindLockingProcesses(string path)
     {

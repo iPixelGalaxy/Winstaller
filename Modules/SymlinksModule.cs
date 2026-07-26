@@ -9,6 +9,7 @@ namespace Winstaller.Modules;
 /// </summary>
 public class SymlinksModule : ModuleBase
 {
+    private readonly List<RestartableApplication> _stoppedApplications = [];
     public SymlinksModule(WinstallerConfig config) : base(config) { }
 
     public override string Name => "Symlinks";
@@ -30,6 +31,19 @@ public class SymlinksModule : ModuleBase
 
         EnsureAdministrator();
 
+        _stoppedApplications.Clear();
+        try
+        {
+            return await ExecuteCoreAsync();
+        }
+        finally
+        {
+            SymlinkLockUtility.RestartApplications(_stoppedApplications, message => ConsoleHelper.WriteWarning($"    {message}"));
+        }
+    }
+
+    private async Task<bool> ExecuteCoreAsync()
+    {
         ConsoleHelper.WriteHeader("Symlinks Setup");
 
         var success = true;
@@ -122,62 +136,33 @@ public class SymlinksModule : ModuleBase
                 Console.WriteLine($"    Created target directory: {targetDir}");
             }
 
-            if (!PreflightSymlinkPaths(sourcePath, targetPath))
+            if (TryGetSourceAttributes(sourcePath, out var attributes) && !attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
                 return false;
-
-            if (isDirectory && Directory.Exists(sourcePath))
-            {
-                var info = new DirectoryInfo(sourcePath);
-                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    if (!Config.Symlinks.Resymlink)
-                        return VerifySymlink(sourcePath, targetPath, true);
-
-                    Console.WriteLine("    Removing existing symlink before recreating it...");
-                    Directory.Delete(sourcePath);
-                }
-                else
-                {
-                    ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
-                    return false;
-                }
             }
 
-            if (!isDirectory && File.Exists(sourcePath))
-            {
-                var info = new FileInfo(sourcePath);
-                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    if (!Config.Symlinks.Resymlink)
-                        return VerifySymlink(sourcePath, targetPath, false);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint) && !Config.Symlinks.Resymlink)
+                return VerifySymlink(sourcePath, targetPath, isDirectory);
 
-                    Console.WriteLine("    Removing existing symlink before recreating it...");
-                    File.Delete(sourcePath);
-                }
-                else
-                {
-                    ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
-                    return false;
-                }
-            }
-
-            var sourceDir = Path.GetDirectoryName(sourcePath);
-            if (!string.IsNullOrEmpty(sourceDir) && !Directory.Exists(sourceDir))
-            {
-                Directory.CreateDirectory(sourceDir);
-            }
-
-            var linkType = isDirectory ? "/D" : "";
-            var result = await RunCmdAsync($"mklink {linkType} \"{sourcePath}\" \"{targetPath}\"", 10000);
-
-            if (result == 0 && VerifySymlink(sourcePath, targetPath, isDirectory))
-            {
-                ConsoleHelper.WriteSuccess($"    Symlink created: {sourcePath} -> {targetPath}");
+            if (TryReplaceSymlink(sourcePath, targetPath, isDirectory, out var error))
                 return true;
+
+            if (!Config.Symlinks.ForceKillApps)
+            {
+                LogExactLocks(sourcePath);
+                throw error!;
             }
 
-            ConsoleHelper.WriteError($"    Failed to create symlink");
-            return false;
+            ConsoleHelper.WriteWarning("    Initial replacement failed. Checking exact link lock only...");
+            if (!SymlinkLockUtility.StopExactUserAppLocks([sourcePath], _stoppedApplications, message => ConsoleHelper.WriteWarning($"    {message}")))
+                throw error!;
+
+            if (TryReplaceSymlink(sourcePath, targetPath, isDirectory, out error))
+                return true;
+
+            LogExactLocks(sourcePath);
+            throw error!;
         }
         catch (Exception ex)
         {
@@ -186,20 +171,52 @@ public class SymlinksModule : ModuleBase
         }
     }
 
-    private bool PreflightSymlinkPaths(string sourcePath, string targetPath)
+    private static bool TryGetSourceAttributes(string sourcePath, out FileAttributes attributes)
     {
-        var paths = new[]
+        try
         {
-            sourcePath,
-            targetPath,
-            Path.GetDirectoryName(sourcePath) ?? string.Empty,
-            Path.GetDirectoryName(targetPath) ?? string.Empty
-        };
+            attributes = File.GetAttributes(sourcePath);
+            return true;
+        }
+        catch (FileNotFoundException) { attributes = default; return false; }
+        catch (DirectoryNotFoundException) { attributes = default; return false; }
+    }
 
-        return SymlinkLockUtility.ClearLocks(
-            paths,
-            Config.Symlinks.ForceKillApps,
-            message => ConsoleHelper.WriteWarning($"    {message}"));
+    private bool TryReplaceSymlink(string sourcePath, string targetPath, bool isDirectory, out Exception? error)
+    {
+        error = null;
+        try
+        {
+            if (TryGetSourceAttributes(sourcePath, out var attributes) && attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                Console.WriteLine("    Removing existing symlink before recreating it...");
+                if (isDirectory) Directory.Delete(sourcePath); else File.Delete(sourcePath);
+            }
+
+            var sourceDir = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrEmpty(sourceDir) && !Directory.Exists(sourceDir))
+                Directory.CreateDirectory(sourceDir);
+
+            if (isDirectory) Directory.CreateSymbolicLink(sourcePath, targetPath);
+            else File.CreateSymbolicLink(sourcePath, targetPath);
+
+            if (!VerifySymlink(sourcePath, targetPath, isDirectory))
+                throw new IOException("Created link did not pass verification.");
+
+            ConsoleHelper.WriteSuccess($"    Symlink created: {sourcePath} -> {targetPath}");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error = ex;
+            return false;
+        }
+    }
+
+    private static void LogExactLocks(string sourcePath)
+    {
+        foreach (var process in SymlinkLockUtility.FindExactLockingProcesses([sourcePath]))
+            ConsoleHelper.WriteWarning($"    Locked by {process.ProcessName} (PID {process.ProcessId}): {process.Path}");
     }
     private static bool VerifySymlink(string sourcePath, string targetPath, bool isDirectory)
     {
