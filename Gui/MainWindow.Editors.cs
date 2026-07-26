@@ -413,6 +413,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private FrameworkElement BuildFontTile(string fontFile, string fontsDirectory, FontsConfig config)
     {
         var fileName = Path.GetFileName(fontFile);
+        var fontFamilyName = FontPreviewService.GetFontFamily(fontFile);
         var isOpenType = fontFile.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
         var type = isOpenType ? "OpenType Font" : "TrueType Font";
         var size = new FileInfo(fontFile).Length;
@@ -431,6 +432,16 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         header.Children.Add(new FontIcon { Glyph = "\uE8D2", FontSize = 40, VerticalAlignment = VerticalAlignment.Center });
         Grid.SetColumn(labels, 1);
         header.Children.Add(labels);
+
+        var preview = new TextBlock
+        {
+            Text = "Aa Bb Cc 123",
+            FontSize = 24,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (!string.IsNullOrWhiteSpace(fontFamilyName))
+            preview.FontFamily = new FontFamily(fontFamilyName);
 
         var remove = IconActionButton("\uE74D", "Delete font", async () =>
         {
@@ -456,14 +467,17 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.Children.Add(header);
-        Grid.SetRow(footer, 1);
+        Grid.SetRow(preview, 1);
+        content.Children.Add(preview);
+        Grid.SetRow(footer, 2);
         content.Children.Add(footer);
 
         return new Border
         {
             Width = 250,
-            Height = 128,
+            Height = 166,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
