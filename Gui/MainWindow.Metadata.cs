@@ -244,14 +244,23 @@ private static string GetSettingDescription(PropertyInfo property)
                 return;
 
             started = true;
-            await Task.Delay(1);
+            await Task.Delay(100);
             BeginContentWarmup();
 
             var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
             var tiles = new List<FrameworkElement>();
+            var arrangedColumns = -1;
+            var arrangedCount = -1;
+            var arranging = false;
             void ArrangeTiles()
             {
                 var columns = Math.Max(1, (int)((Math.Max(grid.ActualWidth, minimumWidth) + 8) / (minimumWidth + 8)));
+                if (arranging || (arrangedColumns == columns && arrangedCount == tiles.Count))
+                    return;
+
+                arranging = true;
+                try
+                {
                 grid.ColumnDefinitions.Clear();
                 grid.RowDefinitions.Clear();
                 grid.Children.Clear();
@@ -264,6 +273,13 @@ private static string GetSettingDescription(PropertyInfo property)
                     Grid.SetRow(tiles[index], index / columns);
                     Grid.SetColumn(tiles[index], index % columns);
                     grid.Children.Add(tiles[index]);
+                }
+                    arrangedColumns = columns;
+                    arrangedCount = tiles.Count;
+                }
+                finally
+                {
+                    arranging = false;
                 }
             }
 
