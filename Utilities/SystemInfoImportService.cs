@@ -652,6 +652,9 @@ public static class SystemInfoImportService
 
         foreach (var candidate in FindSymlinksRecursive(appDataPath, appDataPath, section, configured, ignored, config, 0))
             yield return candidate;
+
+        foreach (var candidate in FindConfiguredSymlinkRecoveries(appDataPath, section, configured, config))
+            yield return candidate;
     }
 
     private static IEnumerable<SystemInfoImportCandidate> FindSymlinksRecursive(
@@ -666,7 +669,13 @@ public static class SystemInfoImportService
         IEnumerable<string> directories;
         try
         {
-            directories = Directory.GetDirectories(currentPath);
+            directories = Directory.EnumerateDirectories(currentPath, "*", new EnumerationOptions
+            {
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = false,
+                ReturnSpecialDirectories = false,
+                AttributesToSkip = 0
+            });
         }
         catch
         {
@@ -716,6 +725,11 @@ public static class SystemInfoImportService
             var isIgnored = ignored.Contains(relativePath, StringComparer.OrdinalIgnoreCase);
             var isExcluded = config.AppDataUtility.ExcludedDirectories.Contains(leafName, StringComparer.OrdinalIgnoreCase);
 
+            // Candidate discovery only needs top-level normal folders. Deep traversal exists
+            // solely to find pre-existing links and recovery folders, so prune known heavy trees.
+            if (isIgnored || isExcluded)
+                continue;
+
             if (existingSymlink && !Path.IsPathRooted(target) && target != "(unknown target)")
             {
                 target = Path.GetFullPath(target, Path.GetDirectoryName(dir) ?? currentPath);
@@ -737,7 +751,14 @@ public static class SystemInfoImportService
                     yield return child;
             }
         }
+    }
 
+    private static IEnumerable<SystemInfoImportCandidate> FindConfiguredSymlinkRecoveries(
+        string rootPath,
+        string section,
+        List<string> configured,
+        WinstallerConfig config)
+    {
         foreach (var configuredName in configured.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var safeName = SymlinkSafetyPolicy.NormalizeRelativePath(configuredName);
