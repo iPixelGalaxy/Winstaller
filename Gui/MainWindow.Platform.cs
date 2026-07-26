@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Management;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -20,6 +21,7 @@ using Winstaller.Configuration;
 using Winstaller.Modules;
 using Winstaller.Utilities;
 using Windows.Foundation;
+using Windows.System;
 using WinRT.Interop;
 
 namespace Winstaller.Gui;
@@ -255,11 +257,16 @@ private static void WriteDiagnosticLog(string message)
             _outputFlushQueued = true;
         }
 
-        if (!DispatcherQueue.TryEnqueue(FlushOutputText))
+        if (!DispatcherQueue.TryEnqueue(StartOutputFlushTimer))
         {
             lock (_outputLock)
                 _outputFlushQueued = false;
         }
+    }
+
+    private void StartOutputFlushTimer()
+    {
+        _outputFlushTimer.Start();
     }
 
     private void FlushOutputText()
@@ -275,6 +282,7 @@ private static void WriteDiagnosticLog(string message)
             return;
         }
 
+        _outputFlushTimer.Stop();
         string chunk;
         lock (_outputLock)
         {
@@ -291,7 +299,7 @@ private static void WriteDiagnosticLog(string message)
 
     private void AppendTextToOutputBox(TextBox outputBox, string text)
     {
-        var followOutput = _logScrollStates.TryGetValue(outputBox, out var state) && state.IsAtBottom;
+        var followOutput = _logScrollStates.TryGetValue(outputBox, out var state) && state.FollowOutput;
         var selectionStart = outputBox.SelectionStart;
         var selectionLength = outputBox.SelectionLength;
         outputBox.Text += text;
@@ -348,6 +356,7 @@ private static void WriteDiagnosticLog(string message)
     {
         private ScrollViewer? _scrollViewer;
         private bool _scrollScheduled;
+        public bool FollowOutput { get; private set; } = true;
 
         public bool IsAtBottom => _scrollViewer is null ||
             _scrollViewer.VerticalOffset >= _scrollViewer.ScrollableHeight - 1;
@@ -360,7 +369,26 @@ private static void WriteDiagnosticLog(string message)
 
             _scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
             _scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            _scrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PauseOutputFollowing), true);
+            _scrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(PauseOutputFollowing), true);
+            _scrollViewer.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(PauseOutputFollowingForNavigation), true);
+            _scrollViewer.ViewChanged += (_, _) =>
+            {
+                if (IsAtBottom)
+                    FollowOutput = true;
+            };
             ScheduleScrollToEnd();
+        }
+
+        private void PauseOutputFollowing(object sender, PointerRoutedEventArgs args)
+        {
+            FollowOutput = false;
+        }
+
+        private void PauseOutputFollowingForNavigation(object sender, KeyRoutedEventArgs args)
+        {
+            if (args.Key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End)
+                FollowOutput = false;
         }
 
         public void ScheduleScrollToEnd()

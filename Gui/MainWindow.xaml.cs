@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Management;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -54,6 +55,7 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<TextBox, LogScrollState> _logScrollStates = [];
     private readonly object _outputLock = new();
     private readonly StringBuilder _pendingOutputText = new();
+    private readonly DispatcherQueueTimer _outputFlushTimer;
     private bool _outputFlushQueued;
     private int _busyDepth;
     private bool _isRunning;
@@ -69,6 +71,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _outputFlushTimer = DispatcherQueue.CreateTimer();
+        _outputFlushTimer.Interval = TimeSpan.FromMilliseconds(33);
+        _outputFlushTimer.IsRepeating = false;
+        _outputFlushTimer.Tick += (_, _) => FlushOutputText();
         SystemBackdrop = new MicaBackdrop();
         BuildShell();
         RegisterCloseGuard();
