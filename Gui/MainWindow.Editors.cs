@@ -243,7 +243,13 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     {
         TextBox TextField(string label, string value, Action<string> save)
         {
-            var box = new TextBox { Header = label, Text = value, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var box = new TextBox
+            {
+                Header = label,
+                Text = value,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(12, 4, 12, 4)
+            };
             box.LostFocus += (_, _) => { save(box.Text); SaveConfiguration(); };
             return box;
         }
@@ -272,7 +278,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Header = "Password",
             Password = drive.Password,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(12, 8, 40, 8),
+            Padding = new Thickness(12, 4, 40, 4),
             PasswordRevealMode = PasswordRevealMode.Hidden
         };
         var revealed = false;
