@@ -117,7 +117,7 @@ public sealed partial class MainWindow
                         Layout = new UniformGridLayout
                         {
                             MinItemWidth = 360,
-                            MinItemHeight = 96,
+                            MinItemHeight = 224,
                             MinRowSpacing = 8,
                             MinColumnSpacing = 8,
                             ItemsStretch = UniformGridLayoutItemsStretch.Fill
