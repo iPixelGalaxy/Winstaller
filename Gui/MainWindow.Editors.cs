@@ -108,7 +108,7 @@ public sealed partial class MainWindow : Window
     private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryBackup backup, VRChatRegistryValue value)
     {
         var editor = BuildVRChatValueEditor(backup, value);
-        var editorWidth = editor is ToggleSwitch ? 56 : 104;
+        var editorWidth = editor is ToggleSwitch ? 56 : 82;
         var row = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         row.VerticalAlignment = VerticalAlignment.Center;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -121,7 +121,7 @@ public sealed partial class MainWindow : Window
         row.Children.Add(editor);
         var tile = new Border
         {
-            Width = editor is ToggleSwitch ? 272 : 320,
+            Width = 272,
             Height = 74,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
@@ -146,7 +146,7 @@ public sealed partial class MainWindow : Window
         }
         if ((value.Kind is Microsoft.Win32.RegistryValueKind.DWord or Microsoft.Win32.RegistryValueKind.QWord) && ulong.TryParse(value.Data, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _))
         {
-            var box = new TextBox { Text = value.Data, Width = 100, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
+            var box = new TextBox { Text = value.Data, Width = 78, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
             box.LostFocus += (_, _) =>
             {
                 if (ulong.TryParse(box.Text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number))
