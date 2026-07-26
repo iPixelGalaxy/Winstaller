@@ -318,7 +318,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             });
         var fields = new StackPanel { Spacing = 6 };
         var sourceRow = new Grid { ColumnSpacing = 6 };
-        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         sourceRow.Children.Add(sourceButton);
@@ -337,7 +337,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         sourceRow.Children.Add(sourceBox);
 
         var targetRow = new Grid { ColumnSpacing = 6 };
-        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         targetRow.Children.Add(targetButton);
