@@ -42,6 +42,9 @@
     <EmbeddedResource Include="Assets\HEVC Video Extensions.appxbundle" LogicalName="Winstaller.Assets.HEVCVideoExtensions.appxbundle" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Assets\VRChat Win3UI Style Icon.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ApplicationDefinition Include="Gui\App.xaml" />
     <Page Include="Gui\MainWindow.xaml" />
   </ItemGroup>
