@@ -106,20 +106,38 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
             emptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            viewItems.Clear();
-            foreach (var (item, index) in list.Cast<object>().Select((item, index) => (item, index)))
-                viewItems.Add(new IndexedItem(item, index));
+            while (viewItems.Count > list.Count)
+                viewItems.RemoveAt(viewItems.Count - 1);
+
+            for (var index = 0; index < list.Count; index++)
+            {
+                var value = list[index]!;
+                if (index == viewItems.Count)
+                {
+                    viewItems.Add(new IndexedItem(value, index));
+                    continue;
+                }
+
+                var existing = viewItems[index];
+                if (existing.Index != index || !Equals(existing.Value, value))
+                    viewItems[index] = new IndexedItem(value, index);
+            }
         }
 
-        void ScrollToBottomAfterLayout()
+        void BringItemIntoView(int index)
         {
-            EventHandler<object>? onLayoutUpdated = null;
-            onLayoutUpdated = (_, _) =>
+            DispatcherQueue.TryEnqueue(() =>
             {
-                listScroll.LayoutUpdated -= onLayoutUpdated;
-                listScroll.ChangeView(null, listScroll.ScrollableHeight, null);
-            };
-            listScroll.LayoutUpdated += onLayoutUpdated;
+                if (index < 0 || index >= viewItems.Count)
+                    return;
+
+                var element = items.GetOrCreateElement(index);
+                element.StartBringIntoView(new BringIntoViewOptions
+                {
+                    AnimationDesired = false,
+                    VerticalAlignmentRatio = 1
+                });
+            });
         }
 
         var header = new Grid { ColumnSpacing = 8 };
@@ -146,11 +164,15 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
 
         var add = ActionButton($"+ Add {title}", () =>
         {
-            list.Add(CreateDefaultItem(itemType));
+            var index = list.Count;
+            var item = CreateDefaultItem(itemType);
+            list.Add(item);
             if (itemType != typeof(string))
                 SaveConfiguration();
-            Refresh();
-            ScrollToBottomAfterLayout();
+            countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
+            emptyText.Visibility = Visibility.Collapsed;
+            viewItems.Add(new IndexedItem(item, index));
+            BringItemIntoView(index);
         });
         Grid.SetColumn(add, 2);
         header.Children.Add(add);
