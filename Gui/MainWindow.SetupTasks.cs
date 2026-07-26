@@ -395,6 +395,7 @@ public sealed partial class MainWindow : Window
         };
         dialog.Resources["ContentDialogMinWidth"] = width;
         dialog.Resources["ContentDialogMaxWidth"] = width + 80;
+        dialog.Resources["ContentDialogSeparatorThickness"] = new Thickness(0);
 
         _activeOutputBox = output;
         var dialogTask = dialog.ShowAsync().AsTask();

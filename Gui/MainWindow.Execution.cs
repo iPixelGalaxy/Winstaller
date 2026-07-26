@@ -94,6 +94,7 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
         };
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
         dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
+        dialog.Resources["ContentDialogSeparatorThickness"] = new Thickness(0);
 
         _activeOutputBox = outputBox;
         var dialogTask = dialog.ShowAsync().AsTask();

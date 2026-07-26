@@ -344,8 +344,9 @@ private static void WriteDiagnosticLog(string message)
             VerticalAlignment = VerticalAlignment.Stretch,
             MinHeight = 458,
             MaxHeight = 538,
-            Padding = new Thickness(8, 8, 8, 20)
+            Padding = new Thickness(8, 8, 8, 4)
         };
+        outputBox.Resources["TextControlBorderBrushFocused"] = ResourceBrush("WinstallerCardStrokeBrush");
         ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Hidden);
         ScrollViewer.SetVerticalScrollBarVisibility(outputBox, ScrollBarVisibility.Hidden);
 

@@ -152,6 +152,7 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         };
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
         dialog.Resources["ContentDialogMaxWidth"] = logDialogWidth + 80;
+        dialog.Resources["ContentDialogSeparatorThickness"] = new Thickness(0);
 
         var uiLogLock = new object();
         var pendingLogText = new StringBuilder();
