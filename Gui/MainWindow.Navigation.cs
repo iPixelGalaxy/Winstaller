@@ -81,6 +81,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
 
     private void RenderDashboard()
     {
+        _pageRenderVersion++;
         _isLoadingUi = true;
         SetDashboardTopBarActions();
         ShowCachedPage(DashboardPageKey, () =>
@@ -102,18 +103,40 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
 
     private void RenderModule(ModuleDescriptor module)
     {
+        var renderVersion = ++_pageRenderVersion;
         _isLoadingUi = true;
         SetModuleTopBarActions(module);
-        ShowCachedPage(module.Name, () => new StackPanel
+        if (_pageCache.TryGetValue(module.Name, out var cachedPage))
         {
-            Spacing = 12,
-            Children = { ModulePageHeader(module), BuildModuleContent(module) }
+            ShowPage(module.Name, cachedPage);
+            _isLoadingUi = false;
+            return;
+        }
+
+        ShowPage(module.Name, ModuleLoadingPage(module));
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (renderVersion != _pageRenderVersion)
+                return;
+
+            try
+            {
+                ShowCachedPage(module.Name, () => new StackPanel
+                {
+                    Spacing = 12,
+                    Children = { ModulePageHeader(module), BuildModuleContent(module) }
+                });
+            }
+            finally
+            {
+                _isLoadingUi = false;
+            }
         });
-        _isLoadingUi = false;
     }
 
     private void RenderPreReinstallChecklist()
     {
+        _pageRenderVersion++;
         _isLoadingUi = true;
         _topBarActions.Children.Clear();
         _topBarActionLabels.Clear();
@@ -150,6 +173,29 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         _currentPageKey = key;
         var verticalOffset = _pageScrollOffsets.GetValueOrDefault(key);
         DispatcherQueue.TryEnqueue(() => _contentScroll.ChangeView(null, verticalOffset, null, disableAnimation: true));
+    }
+
+    private FrameworkElement ModuleLoadingPage(ModuleDescriptor module)
+    {
+        return new StackPanel
+        {
+            Spacing = 16,
+            VerticalAlignment = VerticalAlignment.Top,
+            Children =
+            {
+                ModulePageHeader(module),
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children =
+                    {
+                        new ProgressRing { IsActive = true, Width = 24, Height = 24 },
+                        new TextBlock { Text = $"Loading {module.Name}…", VerticalAlignment = VerticalAlignment.Center }
+                    }
+                }
+            }
+        };
     }
 
     private void InvalidateCachedPage(string key)
