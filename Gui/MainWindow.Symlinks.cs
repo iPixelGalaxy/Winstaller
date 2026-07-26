@@ -354,27 +354,31 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         Grid.SetColumn(targetBox, 1);
         targetRow.Children.Add(targetBox);
 
-        var typeToggle = new ToggleSwitch
-        {
-            IsOn = false,
-            OnContent = "Directory",
-            OffContent = "File",
-            MinWidth = 0
-        };
-        typeToggle.Toggled += (_, _) =>
+        var isFile = new CheckBox { Content = "Is File?", HorizontalAlignment = HorizontalAlignment.Right };
+        isFile.Checked += (_, _) =>
         {
             if (isBinding)
                 return;
             var symlink = Current();
             if (symlink is null)
                 return;
-            symlink.IsDirectory = typeToggle.IsOn;
+            symlink.IsDirectory = false;
+            SetSpecialSymlinkGlyphs(symlink);
+            SaveConfiguration();
+        };
+        isFile.Unchecked += (_, _) =>
+        {
+            if (isBinding)
+                return;
+            var symlink = Current();
+            if (symlink is null)
+                return;
+            symlink.IsDirectory = true;
             SetSpecialSymlinkGlyphs(symlink);
             SaveConfiguration();
         };
         fields.Children.Add(sourceRow);
         fields.Children.Add(targetRow);
-        fields.Children.Add(typeToggle);
         outer.Children.Add(fields);
 
         var removeButton = CompactRemoveButton(async () =>
@@ -390,8 +394,14 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             SaveConfiguration();
             refresh();
         });
-        Grid.SetColumn(removeButton, 1);
-        outer.Children.Add(removeButton);
+        var actions = new StackPanel
+        {
+            Spacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { isFile, removeButton }
+        };
+        Grid.SetColumn(actions, 1);
+        outer.Children.Add(actions);
 
         void SetSpecialSymlinkGlyphs(SpecialSymlink symlink)
         {
@@ -405,7 +415,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             isBinding = true;
             sourceBox.Text = symlink.Source;
             targetBox.Text = symlink.Target;
-            typeToggle.IsOn = symlink.IsDirectory;
+            isFile.IsChecked = !symlink.IsDirectory;
             isBinding = false;
             sourceDirty = false;
             targetDirty = false;
