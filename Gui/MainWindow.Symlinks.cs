@@ -394,13 +394,13 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             SaveConfiguration();
             refresh();
         });
-        var actions = new StackPanel
-        {
-            Spacing = 6,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { isFile, removeButton }
-        };
+        var actions = new Grid { Width = 64, RowSpacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
+        actions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        actions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        actions.Children.Add(isFile);
         removeButton.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetRow(removeButton, 1);
+        actions.Children.Add(removeButton);
         Grid.SetColumn(actions, 1);
         outer.Children.Add(actions);
 
