@@ -240,6 +240,8 @@ private static string GetSettingDescription(PropertyInfo property)
             ItemsSource = visibleItems
         };
         repeater.ItemTemplate = new CallbackElementFactory(data => create((T)data!));
+        var host = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        host.Children.Add(repeater);
 
         var started = false;
         repeater.Loaded += async (_, _) =>
@@ -260,7 +262,7 @@ private static string GetSettingDescription(PropertyInfo property)
                 await Task.Delay(1).ConfigureAwait(false);
             }
         };
-        return repeater;
+        return host;
     }
 
     private sealed class ReusableSymlinkRow : Grid
