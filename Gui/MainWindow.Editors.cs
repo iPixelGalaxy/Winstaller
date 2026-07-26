@@ -1153,7 +1153,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
 
     private FrameworkElement BuildAppliedSettingCard<T>(string title, string description, AppliedSetting<T> setting, Control valueEditor, Action<object> setValue)
     {
-        var apply = new ToggleSwitch { Header = "Apply this setting", IsOn = setting.Apply };
+        var apply = new ToggleSwitch { IsOn = setting.Apply };
         valueEditor.IsEnabled = setting.Apply;
         apply.Toggled += (_, _) =>
         {
@@ -1182,6 +1182,31 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                 break;
         }
 
+        var controls = new Grid { ColumnSpacing = 14 };
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var applyControl = new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                new TextBlock { Text = "Apply this setting" },
+                apply
+            }
+        };
+        controls.Children.Add(applyControl);
+        var valueControl = new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                new TextBlock { Text = valueEditor is TextBox ? "PC Name" : "State to apply" },
+                valueEditor
+            }
+        };
+        Grid.SetColumn(valueControl, 1);
+        controls.Children.Add(valueControl);
+
         return Card(new StackPanel
         {
             Spacing = 10,
@@ -1189,8 +1214,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             {
                 new TextBlock { Text = title, FontSize = 17, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
                 new TextBlock { Text = description, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
-                apply,
-                valueEditor
+                controls
             }
         });
     }
