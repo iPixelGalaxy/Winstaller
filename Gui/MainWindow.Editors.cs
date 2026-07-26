@@ -35,12 +35,27 @@ public sealed partial class MainWindow : Window
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
             TextWrapping = TextWrapping.Wrap
         });
+        var captureStatus = new TextBlock
+        {
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextWrapping = TextWrapping.Wrap
+        };
         panel.Children.Add(ActionButton("Capture Current VRChat Registry", async () =>
         {
-            var captured = await new VRChatRegistryModule(_config).CaptureAsync();
-            if (!captured) return;
+            captureStatus.Text = "Capturing current VRChat registry…";
+            await Task.Yield();
+            var module = new VRChatRegistryModule(_config);
+            var captured = await Task.Run(async () => await module.CaptureAsync());
+            if (!captured)
+            {
+                captureStatus.Text = module.LastMessage;
+                captureStatus.Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+                return;
+            }
+            InvalidateCachedPage("VRChat Registry");
             RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
         }, primary: true));
+        panel.Children.Add(captureStatus);
         panel.Children.Add(ActionButton("Restore Selected Groups", async () => await new VRChatRegistryModule(_config).RestoreAsync()));
 
         var backupPath = Environment.ExpandEnvironmentVariables(config.BackupPath);
@@ -56,13 +71,13 @@ public sealed partial class MainWindow : Window
         var backup = new VRChatRegistryModule(_config).LoadBackup();
         if (backup is not null)
         {
-            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings to restore"));
-            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data to restore"));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings to restore", isExpanded: true));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data to restore", isExpanded: false));
         }
         return panel;
     }
 
-    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, IEnumerable<VRChatRegistryValue> source, string title)
+    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, IEnumerable<VRChatRegistryValue> source, string title, bool isExpanded)
     {
         var values = source.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var panel = new StackPanel { Spacing = 8 };
@@ -94,7 +109,7 @@ public sealed partial class MainWindow : Window
                 panel.Children.Add(Card(row));
             }
         }
-        return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = false };
+        return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = isExpanded };
     }
 
     private static string DescribeVRChatValue(string name)

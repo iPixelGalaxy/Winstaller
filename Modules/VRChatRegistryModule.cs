@@ -15,6 +15,7 @@ public class VRChatRegistryModule : ModuleBase
     public override string Name => "VRChat Registry";
     public override string Description => "Backs up and restores VRChat settings and personal data";
     public override bool IsEnabled => Config.VRChatRegistry.Enabled;
+    public string LastMessage { get; private set; } = string.Empty;
 
     public override async Task<bool> ExecuteAsync()
     {
@@ -27,14 +28,15 @@ public class VRChatRegistryModule : ModuleBase
         try
         {
             using var root = Registry.CurrentUser.OpenSubKey(RootPath);
-            if (root is null) { ConsoleHelper.WriteError("VRChat registry key not found."); return Task.FromResult(false); }
+            if (root is null) { LastMessage = "VRChat registry key not found."; ConsoleHelper.WriteError(LastMessage); return Task.FromResult(false); }
             var backup = new VRChatRegistryBackup { CapturedAt = DateTimeOffset.UtcNow };
             ReadKey(root, string.Empty, backup.Values);
             SaveBackup(backup);
-            ConsoleHelper.WriteSuccess($"Captured {backup.Values.Count} VRChat registry values.");
+            LastMessage = $"Captured {backup.Values.Count} VRChat registry values.";
+            ConsoleHelper.WriteSuccess(LastMessage);
             return Task.FromResult(true);
         }
-        catch (Exception ex) { ConsoleHelper.WriteError($"VRChat capture failed: {ex.Message}"); return Task.FromResult(false); }
+        catch (Exception ex) { LastMessage = $"VRChat capture failed: {ex.Message}"; ConsoleHelper.WriteError(LastMessage); return Task.FromResult(false); }
     }
 
     public Task<bool> RestoreAsync()
