@@ -74,7 +74,18 @@ public sealed partial class MainWindow
                             var content = new StackPanel { Spacing = 2 };
                             content.Children.Add(new TextBlock { Text = candidate.Title, TextWrapping = TextWrapping.Wrap });
                             content.Children.Add(new TextBlock { Text = candidate.Detail, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
-                            var check = new CheckBox { Content = content, IsChecked = candidate.Scope != SystemInfoImportScope.Symlinks && candidate.Group != "Ignored" };
+                            FrameworkElement checkContent = content;
+                            if (candidate.Value is AppImportCandidate app)
+                            {
+                                var appContent = new Grid { ColumnSpacing = 8 };
+                                appContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                                appContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                                appContent.Children.Add(CreateAppIconView(app.PackageId, 32, app.DisplayName).Host);
+                                Grid.SetColumn(content, 1);
+                                appContent.Children.Add(content);
+                                checkContent = appContent;
+                            }
+                            var check = new CheckBox { Content = checkContent, IsChecked = candidate.Scope != SystemInfoImportScope.Symlinks && candidate.Group != "Ignored" };
                             checks.Add((candidate, check));
                             if (candidate.Value is AppImportCandidate)
                             {
@@ -163,21 +174,30 @@ public sealed partial class MainWindow
                     output.AddRange(applied.SymlinkFailures.Select(failure => $"{failure.Title}: {failure.Message}"));
                     ConfigurationManager.SaveConfiguration(_config);
                     return output;
+                }).ConfigureAwait(false);
+                await RunOnUiThreadAsync(() =>
+                {
+                    foreach (var message in messages)
+                        AppendOutput(message);
+                    status.Text = "Selected items added. See activity log for details.";
                 });
-                foreach (var message in messages)
-                    AppendOutput(message);
-                status.Text = "Selected items added. See activity log for details.";
             }
             catch (Exception ex)
             {
-                status.Text = $"Checklist failed: {ex.Message}";
-                AppendOutput(status.Text);
+                await RunOnUiThreadAsync(() =>
+                {
+                    status.Text = $"Checklist failed: {ex.Message}";
+                    AppendOutput(status.Text);
+                });
             }
             finally
             {
-                EndLongOperation();
-                scan!.IsEnabled = true;
-                run!.IsEnabled = true;
+                await RunOnUiThreadAsync(() =>
+                {
+                    EndLongOperation();
+                    scan!.IsEnabled = true;
+                    run!.IsEnabled = true;
+                });
             }
         }
 
