@@ -328,12 +328,14 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             title.Text = GetTitle();
         };
 
-        var inputRow = new Grid { ColumnSpacing = 12 };
+        var inputRow = new Grid { ColumnSpacing = 12, RowSpacing = 4 };
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inputRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        inputRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var inputFields = new FrameworkElement[]
         {
             driveLetter,
@@ -345,26 +347,21 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         for (var index = 0; index < inputFields.Length; index++)
         {
             Grid.SetColumn(inputFields[index], index);
+            Grid.SetRow(inputFields[index], 1);
             inputRow.Children.Add(inputFields[index]);
         }
+        var persistent = CheckField("Persistent", drive.Persistent, value => drive.Persistent = value);
+        Grid.SetColumn(persistent, 2);
+        inputRow.Children.Add(persistent);
+        var deleteFirst = CheckField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value);
+        Grid.SetColumn(deleteFirst, 3);
+        inputRow.Children.Add(deleteFirst);
         var remove = IconActionButton("\uE74D", "Remove drive", () =>
         {
             config.Drives.Remove(drive);
             SaveConfiguration();
             refresh();
         });
-        var actions = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 16,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                CheckField("Persistent", drive.Persistent, value => drive.Persistent = value),
-                CheckField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value),
-                remove
-            }
-        };
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -372,8 +369,8 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         header.Children.Add(new FontIcon { Glyph = "\uE839", FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
         Grid.SetColumn(title, 1);
         header.Children.Add(title);
-        Grid.SetColumn(actions, 2);
-        header.Children.Add(actions);
+        Grid.SetColumn(remove, 2);
+        header.Children.Add(remove);
         var fields = new StackPanel
         {
             Spacing = 10,
