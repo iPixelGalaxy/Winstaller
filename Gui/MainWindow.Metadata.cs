@@ -330,7 +330,8 @@ private static string GetSettingDescription(PropertyInfo property)
         string IconGlyph,
         object Config,
         Func<IModule> CreateModule,
-        SystemInfoImportScope? ImportScope)
+        SystemInfoImportScope? ImportScope,
+        string? IconAsset = null)
     {
         public bool IsEnabled => Config.GetType().GetProperty("Enabled")?.GetValue(Config) is true;
 

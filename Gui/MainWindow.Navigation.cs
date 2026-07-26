@@ -289,12 +289,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        row.Children.Add(new FontIcon
-        {
-            Glyph = module.IconGlyph,
-            FontSize = 24,
-            VerticalAlignment = VerticalAlignment.Center
-        });
+        row.Children.Add(CreateModulePageIcon(module));
         row.Children.Add(new TextBlock
         {
             Text = module.Name,
@@ -375,7 +370,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             Header = module.Name,
             Description = module.Description,
-            HeaderIcon = new FontIcon { Glyph = module.IconGlyph },
+            HeaderIcon = CreateModuleIconElement(module),
             Content = action,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -456,6 +451,33 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         return BuildConfigEditor(module.Config, includeScalarSettings: false);
     }
 
+    private IconElement CreateModuleIconElement(ModuleDescriptor module)
+    {
+        if (module.IconAsset is null)
+            return new FontIcon { Glyph = module.IconGlyph };
+
+        return new ImageIcon
+        {
+            Source = new BitmapImage(new Uri($"ms-appx:///{module.IconAsset}"))
+        };
+    }
+
+    private FrameworkElement CreateModulePageIcon(ModuleDescriptor module)
+    {
+        if (module.IconAsset is null)
+            return new FontIcon { Glyph = module.IconGlyph, FontSize = 24, VerticalAlignment = VerticalAlignment.Center };
+
+        return new Image
+        {
+            Width = 26,
+            Height = 26,
+            Source = new BitmapImage(new Uri($"ms-appx:///{module.IconAsset}")),
+            Stretch = Stretch.Uniform,
+            VerticalAlignment = VerticalAlignment.Center,
+            HighContrastAdjustment = ElementHighContrastAdjustment.None
+        };
+    }
+
 
     private void RebuildNavigation()
     {
@@ -483,7 +505,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             _navigation.MenuItems.Add(new NavigationViewItem
             {
                 Content = module.Name,
-                Icon = new FontIcon { Glyph = module.IconGlyph },
+                Icon = CreateModuleIconElement(module),
                 Tag = module
             });
         }
@@ -498,7 +520,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             _navigation.MenuItems.Add(new NavigationViewItem
             {
                 Content = module.Name,
-                Icon = new FontIcon { Glyph = module.IconGlyph },
+                Icon = CreateModuleIconElement(module),
                 Tag = module
             });
         }
@@ -509,7 +531,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             _navigation.MenuItems.Add(new NavigationViewItem
             {
                 Content = module.Name,
-                Icon = new FontIcon { Glyph = module.IconGlyph },
+                Icon = CreateModuleIconElement(module),
                 Tag = module
             });
         }
