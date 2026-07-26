@@ -398,13 +398,18 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         });
 
-        var tiles = new VariableSizedWrapGrid
+        var tiles = new ItemsRepeater
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Left
+            Layout = new UniformGridLayout
+            {
+                MinItemWidth = 250,
+                MinItemHeight = 166,
+                MinRowSpacing = 8,
+                MinColumnSpacing = 8
+            },
+            ItemsSource = fontFiles
         };
-        foreach (var fontFile in fontFiles)
-            tiles.Children.Add(BuildFontTile(fontFile, fontsDirectory, config));
+        tiles.ItemTemplate = new CallbackElementFactory(data => BuildFontTile((string)data!, fontsDirectory, config));
         panel.Children.Add(tiles);
 
         return panel;

@@ -57,6 +57,7 @@ public sealed partial class MainWindow : Window
     private int _busyDepth;
     private bool _isRunning;
     private bool _isLoadingUi;
+    private int _pageRenderVersion;
     private string? _currentPageKey;
 
     private const string DashboardPageKey = "Dashboard";
