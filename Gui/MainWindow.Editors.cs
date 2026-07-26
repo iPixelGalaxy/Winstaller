@@ -927,6 +927,107 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         return Card(new StackPanel { Spacing = 10, Children = { header, fields } });
     }
 
+    private FrameworkElement BuildFileCopyContent(FileCopyConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        void Refresh() => RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Restore saved files to their Windows locations. Add one restore operation per file or folder. Copy Matching Files copies a folder's matching files, such as *.lnk.",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(BuildResponsiveTileGrid(config.Operations
+            .Select(operation => BuildFileCopyTile(config, operation, Refresh))
+            .Cast<FrameworkElement>()
+            .ToList()));
+        panel.Children.Add(ActionButton("+ Add Restore Operation", () =>
+        {
+            config.Operations.Add(new FileCopyOperation());
+            SaveConfiguration();
+            Refresh();
+        }));
+        return panel;
+    }
+
+    private FrameworkElement BuildFileCopyTile(FileCopyConfig config, FileCopyOperation operation, Action refresh)
+    {
+        TextBox TextField(string label, string value, Action<string> save)
+        {
+            var box = new TextBox { Header = label, Text = value, HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(12, 4, 12, 4) };
+            box.LostFocus += (_, _) => { save(box.Text); SaveConfiguration(); };
+            return box;
+        }
+
+        CheckBox CheckField(string label, bool value, Action<bool> save)
+        {
+            var checkBox = new CheckBox { Content = label, IsChecked = value, VerticalAlignment = VerticalAlignment.Center };
+            checkBox.Checked += (_, _) => { save(true); SaveConfiguration(); };
+            checkBox.Unchecked += (_, _) => { save(false); SaveConfiguration(); };
+            return checkBox;
+        }
+
+        var title = new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(operation.Name) ? "New restore operation" : operation.Name,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var name = TextField("Name", operation.Name, value => operation.Name = value);
+        name.TextChanged += (_, _) => title.Text = string.IsNullOrWhiteSpace(name.Text) ? "New restore operation" : name.Text;
+        var remove = IconActionButton("\uE74D", "Remove restore operation", () =>
+        {
+            config.Operations.Remove(operation);
+            SaveConfiguration();
+            refresh();
+        });
+        remove.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(title);
+        var copyMatching = CheckField("Copy Matching Files", operation.MatchingFiles, value => operation.MatchingFiles = value);
+        Grid.SetColumn(copyMatching, 1);
+        header.Children.Add(copyMatching);
+        Grid.SetColumn(remove, 2);
+        header.Children.Add(remove);
+
+        var locations = new Grid { ColumnSpacing = 12 };
+        locations.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        locations.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var inputs = new FrameworkElement[]
+        {
+            name,
+            TextField("Source File Or Folder", operation.Source, value => operation.Source = value),
+            TextField("Destination File Or Folder", operation.Destination, value => operation.Destination = value),
+            TextField("Search Pattern", operation.SearchPattern, value => operation.SearchPattern = value)
+        };
+
+        var firstRow = new Grid { ColumnSpacing = 12 };
+        firstRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        firstRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        Grid.SetColumn(inputs[0], 0);
+        firstRow.Children.Add(inputs[0]);
+        Grid.SetColumn(inputs[1], 1);
+        firstRow.Children.Add(inputs[1]);
+
+        Grid.SetColumn(inputs[2], 0);
+        locations.Children.Add(inputs[2]);
+        Grid.SetColumn(inputs[3], 1);
+        locations.Children.Add(inputs[3]);
+
+        var options = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18 };
+        options.Children.Add(CheckField("Replace Existing", operation.Overwrite, value => operation.Overwrite = value));
+        options.Children.Add(CheckField("Rewrite Shortcut Profile Paths", operation.RewriteShortcutProfilePaths, value => operation.RewriteShortcutProfilePaths = value));
+        options.Children.Add(CheckField("Protect Private Key", operation.ProtectPrivateKeyAcl, value => operation.ProtectPrivateKeyAcl = value));
+
+        return Card(new StackPanel { Spacing = 10, Children = { header, firstRow, locations, options } });
+    }
+
 
     private FrameworkElement BuildConfigEditor(object config, bool includeScalarSettings = true)
     {

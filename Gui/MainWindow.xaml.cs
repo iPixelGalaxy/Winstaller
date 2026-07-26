@@ -241,7 +241,7 @@ public sealed partial class MainWindow : Window
             new("Path", "Configure PATH additions", "\uE943", _config.Path, () => new PathModule(_config), SystemInfoImportScope.Path),
             new("Network Drives", "Map configured network drives", "\uE839", _config.NetworkDrives, () => new NetworkDrivesModule(_config), SystemInfoImportScope.NetworkDrives),
             new("Registry", "Apply registry files and changes", "\uE7B8", _config.Registry, () => new RegistryModule(_config), null),
-            new("Files & Shortcuts", "Run configured copy and shortcut operations", "\uE8C8", _config.FileCopy, () => new FileCopyModule(_config), null),
+            new("Files & Shortcuts", "Restore saved files, Start Menu shortcuts, and startup shortcuts", "\uE8C8", _config.FileCopy, () => new FileCopyModule(_config), null),
             new("Startup", "Configure startup programs and processes", "\uE768", _config.Startup, () => new StartupModule(_config), SystemInfoImportScope.Startup),
             new("System Settings", "Apply selected Windows settings", "\uE9D9", _config.SystemSettings, () => new SystemSettingsModule(_config), null),
             new("Firewall", "Restore managed firewall policy", "\uE7F4", _config.Firewall, () => new FirewallModule(_config), SystemInfoImportScope.Firewall),

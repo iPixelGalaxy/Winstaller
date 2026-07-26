@@ -338,6 +338,10 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             return BuildStartupContent(startup);
         }
+        if (module.Config is FileCopyConfig fileCopy)
+        {
+            return BuildFileCopyContent(fileCopy);
+        }
         if (module.Config is SymlinksConfig symlinks)
         {
             return BuildSymlinksContent(symlinks);

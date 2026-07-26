@@ -38,7 +38,7 @@ public class FileCopyModule : ModuleBase
             var target = operation.MatchingFiles || Directory.Exists(destination) || destination.EndsWith(Path.DirectorySeparatorChar.ToString())
                 ? Path.Combine(destination, Path.GetFileName(file)) : destination;
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
+            File.Copy(file, target, overwrite: operation.Overwrite);
             if (operation.RewriteShortcutProfilePaths && target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) RewriteShortcut(target);
             if (operation.ProtectPrivateKeyAcl) ProtectPrivateKey(target);
             ConsoleHelper.WriteSuccess($"Copied {Path.GetFileName(file)}");
