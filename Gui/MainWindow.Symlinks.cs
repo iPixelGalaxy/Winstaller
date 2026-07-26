@@ -243,7 +243,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
 
     private ReusableSymlinkRow BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, Action refresh)
     {
-        var outer = new ReusableSymlinkRow { ColumnSpacing = 8 };
+        var outer = new ReusableSymlinkRow { ColumnSpacing = 4 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -400,6 +400,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             HorizontalAlignment = HorizontalAlignment.Right,
             Children = { isFile, removeButton }
         };
+        removeButton.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(actions, 1);
         outer.Children.Add(actions);
 
