@@ -102,12 +102,13 @@ public sealed partial class MainWindow : Window
             if (backup is null)
                 return;
 
-            backupValues.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings"));
-            backupValues.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data"));
+            var warmupQueue = new VRChatTileWarmupQueue();
+            backupValues.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings", warmupQueue));
+            backupValues.Children.Add(BuildVRChatValueGroup(config, backup, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data", warmupQueue));
         });
     }
 
-    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, VRChatRegistryBackup backup, IEnumerable<VRChatRegistryValue> source, string title)
+    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, VRChatRegistryBackup backup, IEnumerable<VRChatRegistryValue> source, string title, VRChatTileWarmupQueue warmupQueue)
     {
         var values = source.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var panel = new StackPanel { Spacing = 8 };
@@ -120,7 +121,7 @@ public sealed partial class MainWindow : Window
             foreach (var category in values.GroupBy(VRChatRegistryModule.GetCategory).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
                 panel.Children.Add(new TextBlock { Text = category.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 8, 0, 0) });
-                var tiles = BuildProgressiveTileGrid(category.ToList(), 272, 74, value => BuildVRChatValueTile(config, backup, value));
+                var tiles = BuildWarmedVRChatTileGrid(category.ToList(), 272, 74, warmupQueue, value => BuildVRChatValueTile(config, backup, value));
                 panel.Children.Add(tiles);
             }
         }
@@ -128,6 +129,157 @@ public sealed partial class MainWindow : Window
         section.Children.Add(new TextBlock { Text = $"{title} ({values.Count})", FontSize = 20, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 12, 0, 0) });
         section.Children.Add(panel);
         return section;
+    }
+
+    private FrameworkElement BuildWarmedVRChatTileGrid<T>(IReadOnlyList<T> items, double minimumWidth, double minimumHeight, VRChatTileWarmupQueue warmupQueue, Func<T, FrameworkElement> create)
+    {
+        var host = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        var initial = new ItemsRepeater
+        {
+            Layout = new UniformGridLayout
+            {
+                MinItemWidth = minimumWidth,
+                MinItemHeight = minimumHeight,
+                MinRowSpacing = 8,
+                MinColumnSpacing = 8,
+                ItemsStretch = UniformGridLayoutItemsStretch.Fill
+            },
+            ItemsSource = items,
+            ItemTemplate = new CallbackElementFactory(data => create((T)data!))
+        };
+        host.Children.Add(initial);
+
+        Grid? staticGrid = null;
+        var tiles = new List<FrameworkElement>();
+        var columns = 0;
+        var nextItemIndex = 0;
+        var reflowQueued = false;
+        var complete = false;
+        CancellationTokenSource? activeWarmup = null;
+
+        int CalculateColumns() => Math.Max(1, (int)((Math.Max(host.ActualWidth, minimumWidth) + 8) / (minimumWidth + 8)));
+
+        void EnsureRows()
+        {
+            if (staticGrid is null)
+                return;
+
+            var rows = (int)Math.Ceiling(tiles.Count / (double)Math.Max(1, columns));
+            while (staticGrid.RowDefinitions.Count < rows)
+                staticGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(minimumHeight) });
+        }
+
+        void Reflow()
+        {
+            if (staticGrid is null)
+                return;
+
+            var nextColumns = CalculateColumns();
+            if (nextColumns == columns && staticGrid.ColumnDefinitions.Count > 0)
+                return;
+
+            columns = nextColumns;
+            staticGrid.ColumnDefinitions.Clear();
+            staticGrid.RowDefinitions.Clear();
+            for (var column = 0; column < columns; column++)
+                staticGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            EnsureRows();
+            for (var index = 0; index < tiles.Count; index++)
+            {
+                Grid.SetRow(tiles[index], index / columns);
+                Grid.SetColumn(tiles[index], index % columns);
+            }
+        }
+
+        void QueueReflow()
+        {
+            if (staticGrid is null || reflowQueued || CalculateColumns() == columns)
+                return;
+
+            reflowQueued = true;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                reflowQueued = false;
+                Reflow();
+            });
+        }
+
+        async Task WarmAsync(CancellationTokenSource warmup)
+        {
+            var acquired = false;
+            try
+            {
+                await Task.Delay(100, warmup.Token).ConfigureAwait(false);
+                await warmupQueue.Gate.WaitAsync(warmup.Token).ConfigureAwait(false);
+                acquired = true;
+                await RunOnUiThreadAsync(() =>
+                {
+                    if (warmup.Token.IsCancellationRequested || staticGrid is not null)
+                        return;
+
+                    staticGrid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+                    host.Children.Clear();
+                    host.Children.Add(staticGrid);
+                    Reflow();
+                });
+
+                for (var index = nextItemIndex; index < items.Count; index += 12)
+                {
+                    warmup.Token.ThrowIfCancellationRequested();
+                    var batch = items.Skip(index).Take(12).ToList();
+                    await RunOnUiThreadAsync(() =>
+                    {
+                        if (warmup.Token.IsCancellationRequested || staticGrid is null)
+                            return;
+
+                        foreach (var item in batch)
+                        {
+                            var tile = create(item);
+                            var tileIndex = tiles.Count;
+                            tiles.Add(tile);
+                            EnsureRows();
+                            Grid.SetRow(tile, tileIndex / columns);
+                            Grid.SetColumn(tile, tileIndex % columns);
+                            staticGrid.Children.Add(tile);
+                        }
+                        nextItemIndex += batch.Count;
+                    });
+                    await Task.Delay(16, warmup.Token).ConfigureAwait(false);
+                }
+
+                complete = true;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                if (acquired)
+                    warmupQueue.Gate.Release();
+                await RunOnUiThreadAsync(() =>
+                {
+                    if (ReferenceEquals(activeWarmup, warmup))
+                        activeWarmup = null;
+                });
+            }
+        }
+
+        host.SizeChanged += (_, _) => QueueReflow();
+        host.Loaded += (_, _) =>
+        {
+            if (complete || activeWarmup is not null)
+                return;
+
+            activeWarmup = new CancellationTokenSource();
+            _ = WarmAsync(activeWarmup);
+        };
+        host.Unloaded += (_, _) =>
+        {
+            var warmup = activeWarmup;
+            activeWarmup = null;
+            warmup?.Cancel();
+        };
+        return host;
     }
 
     private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryBackup backup, VRChatRegistryValue value)
