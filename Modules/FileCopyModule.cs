@@ -1,135 +1,74 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Winstaller.Configuration;
-using Winstaller.Models;
 using Winstaller.Utilities;
 
 namespace Winstaller.Modules;
 
-/// <summary>
-/// Module for copying files to specific destinations
-/// </summary>
 public class FileCopyModule : ModuleBase
 {
     public FileCopyModule(WinstallerConfig config) : base(config) { }
-
-    public override string Name => "File Copy";
-    public override string Description => "Copies configured files to their destinations";
+    public override string Name => "Files & Shortcuts";
+    public override string Description => "Copies configured files, shortcuts, and private keys";
     public override bool IsEnabled => Config.FileCopy.Enabled;
 
     public override Task<bool> ExecuteAsync()
     {
-        if (!IsEnabled)
-        {
-            ConsoleHelper.WriteWarning("File Copy module is disabled in configuration.");
-            return Task.FromResult(false);
-        }
-
-        ConsoleHelper.WriteHeader("Copying Files");
-
-        if (Config.FileCopy.Operations.Count == 0)
-        {
-            Console.WriteLine("No file copy operations configured.");
-            return Task.FromResult(true);
-        }
-
+        if (!IsEnabled) return Task.FromResult(false);
         var success = true;
-        var copied = 0;
-
-        foreach (var copyOp in Config.FileCopy.Operations)
+        foreach (var operation in Config.FileCopy.Operations)
         {
-            var source = ExpandEnvironmentVariables(copyOp.Source);
-            var dest = ExpandEnvironmentVariables(copyOp.Destination);
-
-            Console.WriteLine($"  Copying to {dest}...");
-
-            try
-            {
-                // Create empty file first if configured
-                if (copyOp.CreateEmptyFirst)
-                {
-                    var destDir = Path.GetDirectoryName(dest);
-                    if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
-                    {
-                        Directory.CreateDirectory(destDir);
-                    }
-                    File.WriteAllText(dest, "");
-                }
-
-                // Copy the file
-                if (File.Exists(source))
-                {
-                    File.Copy(source, dest, true);
-                    ConsoleHelper.WriteSuccess($"    Copied {Path.GetFileName(source)}");
-                    copied++;
-                }
-                else
-                {
-                    ConsoleHelper.WriteWarning($"    Source file not found: {source}");
-                }
-            }
-            catch (Exception ex)
-            {
-                ConsoleHelper.WriteError($"    Failed to copy: {ex.Message}");
-                success = false;
-            }
+            try { Copy(operation); }
+            catch (Exception ex) { ConsoleHelper.WriteError($"{OperationName(operation)}: {ex.Message}"); success = false; }
         }
-
-        Console.WriteLine($"\nCopied {copied}/{Config.FileCopy.Operations.Count} files");
         return Task.FromResult(success);
     }
 
-    protected override List<MenuOption> GetMenuOptions()
+    private static void Copy(Models.FileCopyOperation operation)
     {
-        return
-        [
-            new MenuOption("Copy All Files", ExecuteAsync),
-            new MenuOption("List Configured Operations", ListOperations),
-            new MenuOption("Verify Source Files Exist", VerifySourceFiles)
-        ];
+        var source = Expand(operation.Source);
+        var destination = Expand(operation.Destination);
+        var files = operation.MatchingFiles
+            ? Directory.Exists(source) ? Directory.GetFiles(source, string.IsNullOrWhiteSpace(operation.SearchPattern) ? "*" : operation.SearchPattern) : []
+            : File.Exists(source) ? [source] : [];
+        if (files.Length == 0) throw new FileNotFoundException("Source file(s) not found", source);
+
+        foreach (var file in files)
+        {
+            var target = operation.MatchingFiles || Directory.Exists(destination) || destination.EndsWith(Path.DirectorySeparatorChar.ToString())
+                ? Path.Combine(destination, Path.GetFileName(file)) : destination;
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: true);
+            if (operation.RewriteShortcutProfilePaths && target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) RewriteShortcut(target);
+            if (operation.ProtectPrivateKeyAcl) ProtectPrivateKey(target);
+            ConsoleHelper.WriteSuccess($"Copied {Path.GetFileName(file)}");
+        }
     }
 
-    private Task ListOperations()
+    private static string Expand(string value) => Environment.ExpandEnvironmentVariables(value).Replace("{USERNAME}", Environment.UserName);
+    private static string OperationName(Models.FileCopyOperation operation) => string.IsNullOrWhiteSpace(operation.Name) ? operation.Source : operation.Name;
+    private static void RewriteShortcut(string path)
     {
-        ConsoleHelper.WriteSubHeader($"File Copy Operations ({Config.FileCopy.Operations.Count})");
-
-        if (Config.FileCopy.Operations.Count == 0)
-        {
-            Console.WriteLine("No operations configured.");
-            return Task.CompletedTask;
-        }
-
-        foreach (var op in Config.FileCopy.Operations)
-        {
-            Console.WriteLine($"\n  Source: {op.Source}");
-            Console.WriteLine($"  Dest:   {op.Destination}");
-            Console.WriteLine($"  Create Empty First: {op.CreateEmptyFirst}");
-        }
-
-        return Task.CompletedTask;
+        var type = Type.GetTypeFromProgID("WScript.Shell");
+        var shell = type is null ? null : Activator.CreateInstance(type);
+        if (shell is null) return;
+        dynamic shortcut = type.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, [path]);
+        var oldProfile = @"C:\Users\iPixelGalaxy";
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        shortcut.TargetPath = ((string)shortcut.TargetPath).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
+        shortcut.WorkingDirectory = ((string)shortcut.WorkingDirectory).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
+        shortcut.IconLocation = ((string)shortcut.IconLocation).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
+        shortcut.Arguments = ((string)shortcut.Arguments).Replace(oldProfile, profile, StringComparison.OrdinalIgnoreCase);
+        shortcut.Save();
     }
 
-    private Task VerifySourceFiles()
+    public static void ProtectPrivateKey(string path)
     {
-        ConsoleHelper.WriteSubHeader("Verifying Source Files");
-
-        var found = 0;
-        var missing = 0;
-
-        foreach (var op in Config.FileCopy.Operations)
-        {
-            var source = ExpandEnvironmentVariables(op.Source);
-            if (File.Exists(source))
-            {
-                Console.WriteLine($"  [OK] {Path.GetFileName(source)}");
-                found++;
-            }
-            else
-            {
-                ConsoleHelper.WriteWarning($"  [MISSING] {source}");
-                missing++;
-            }
-        }
-
-        Console.WriteLine($"\nFound: {found}, Missing: {missing}");
-        return Task.CompletedTask;
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(true, false);
+        security.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!, FileSystemRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), FileSystemRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl, AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
     }
 }

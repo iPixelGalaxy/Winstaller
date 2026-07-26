@@ -77,6 +77,9 @@ internal class Program
             new FileCopyModule(_config),
             new StartupModule(_config),
             new PathModule(_config),
+            new SystemSettingsModule(_config),
+            new FirewallModule(_config),
+            new SetupTasksModule(_config),
 
             // Application-specific modules
             new DiscordModule(_config),
@@ -291,6 +294,8 @@ internal class Program
 
         var successCount = 0;
         var failCount = 0;
+        await using var runSession = new RunSessionCoordinator();
+        runSession.Activate();
 
         foreach (var module in enabledModules)
         {
@@ -322,6 +327,7 @@ internal class Program
         ConsoleHelper.WriteHeader("Summary");
         Console.WriteLine($"Successful: {successCount}");
         Console.WriteLine($"Failed: {failCount}");
+        await runSession.FlushAsync();
     }
 
     private static async Task SelectAndRunModulesAsync()
@@ -373,6 +379,8 @@ internal class Program
         }
 
         Console.WriteLine($"\nWill run {selectedModules.Count} modules:");
+        await using var runSession = new RunSessionCoordinator();
+        runSession.Activate();
         foreach (var module in selectedModules)
         {
             Console.WriteLine($"  - {module.Name}");
@@ -399,6 +407,7 @@ internal class Program
                 ConsoleHelper.WriteError($"Error: {ex.Message}");
             }
         }
+        await runSession.FlushAsync();
     }
 
     private static async Task ShowConfigurationMenuAsync()

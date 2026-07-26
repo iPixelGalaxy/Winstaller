@@ -14,6 +14,7 @@ public enum SystemInfoImportScope
     AppInstaller,
     Fonts,
     Startup,
+    Firewall,
     Symlinks
 }
 
@@ -63,6 +64,9 @@ public static class SystemInfoImportService
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Startup)
             candidates.AddRange(FindStartupCandidates(config));
+
+        if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Firewall)
+            candidates.Add(new(SystemInfoImportScope.Firewall, "Current firewall rules", "Capture active rules into managed backup", new FirewallCaptureCandidate()));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Symlinks)
             candidates.AddRange(FindSymlinkCandidates(config));
@@ -150,6 +154,11 @@ public static class SystemInfoImportService
                         config.Startup.Programs.Add(startup);
                         added++;
                     }
+                    break;
+
+                case FirewallCaptureCandidate when candidate.Scope == SystemInfoImportScope.Firewall:
+                    config.Firewall.Enabled = true;
+                    added++;
                     break;
 
                 case SymlinkImport symlink:
@@ -1336,6 +1345,7 @@ public static class SystemInfoImportService
     }
 
     private sealed record WingetInstalledPackage(string Name, string Id, string Version);
+    private sealed record FirewallCaptureCandidate;
     private sealed record SymlinkImport(string Section, string Name, string SourcePath, bool IsExistingSymlink, string ExistingTargetPath, SymlinkImportKind Kind);
     private enum SymlinkImportKind
     {

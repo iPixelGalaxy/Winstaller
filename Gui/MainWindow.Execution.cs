@@ -143,6 +143,8 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
                     Console.SetError(writer);
                     Console.SetIn(reader);
 
+                    await using var runSession = new RunSessionCoordinator();
+                    runSession.Activate();
                     foreach (var descriptor in modules)
                     {
                         AppendOutput("");
@@ -161,6 +163,7 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
                             AppendOutput($"Failed: {ex.Message}");
                         }
                     }
+                    await runSession.FlushAsync().ConfigureAwait(false);
                 }
                 finally
                 {

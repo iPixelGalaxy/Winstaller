@@ -339,6 +339,11 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             return BuildSymlinksContent(symlinks);
         }
 
+        if (module.Config is SystemSettingsConfig or FirewallConfig or SetupTasksConfig)
+        {
+            return BuildConfigEditor(module.Config, includeScalarSettings: true);
+        }
+
         return BuildConfigEditor(module.Config, includeScalarSettings: false);
     }
 

@@ -32,6 +32,9 @@ public static class ConfigurationManager
         new("fileCopy", "file-copy.json", nameof(WinstallerConfig.FileCopy)),
         new("startup", "startup.json", nameof(WinstallerConfig.Startup)),
         new("path", "path.json", nameof(WinstallerConfig.Path)),
+        new("systemSettings", "system-settings.json", nameof(WinstallerConfig.SystemSettings)),
+        new("firewall", "firewall.json", nameof(WinstallerConfig.Firewall)),
+        new("setupTasks", "setup-tasks.json", nameof(WinstallerConfig.SetupTasks)),
         new("discord", "discord.json", nameof(WinstallerConfig.Discord)),
         new("spotify", "spotify.json", nameof(WinstallerConfig.Spotify)),
         new("appDataUtility", "app-data-utility.json", nameof(WinstallerConfig.AppDataUtility)),
@@ -71,6 +74,12 @@ public static class ConfigurationManager
         }
 
         SanitizeSymlinkConfig(config.Symlinks);
+        if (BootstrapManager.DataRoot?.Equals(@"D:\.winstaller", StringComparison.OrdinalIgnoreCase) is true &&
+            !File.Exists(Path.Combine(ModuleConfigDirectory, "system-settings.json")))
+        {
+            PersonalizedConfigurationMigration.Apply(config);
+            SaveConfiguration(config);
+        }
         return config;
     }
 
@@ -197,6 +206,13 @@ public static class ConfigurationManager
                 Enabled = false,
                 Additions = []
             },
+            SystemSettings = new SystemSettingsConfig(),
+            Firewall = new FirewallConfig
+            {
+                Enabled = false,
+                BackupPath = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "Firewall", "firewall-rules.wfw")
+            },
+            SetupTasks = new SetupTasksConfig(),
             Discord = new DiscordConfig
             {
                 Enabled = false,
@@ -288,7 +304,9 @@ public static class ConfigurationManager
             return;
         }
 
-        SaveConfiguration(CreateDefaultConfiguration());
+        var defaultConfig = CreateDefaultConfiguration();
+        PersonalizedConfigurationMigration.Apply(defaultConfig);
+        SaveConfiguration(defaultConfig);
     }
 
     private static WinstallerConfig LoadMonolithicConfiguration(string path)

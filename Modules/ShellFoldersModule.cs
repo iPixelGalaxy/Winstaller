@@ -43,6 +43,7 @@ public class ShellFoldersModule : ModuleBase
                 return false;
             }
 
+            var changed = false;
             foreach (var folder in Config.ShellFolders.Folders)
             {
                 var path = ExpandEnvironmentVariables(folder.Path);
@@ -57,7 +58,11 @@ public class ShellFoldersModule : ModuleBase
                         Console.WriteLine($"    Created directory: {path}");
                     }
 
-                    key.SetValue(folder.RegistryValue, path, RegistryValueKind.ExpandString);
+                    if (!string.Equals(key.GetValue(folder.RegistryValue)?.ToString(), path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        key.SetValue(folder.RegistryValue, path, RegistryValueKind.ExpandString);
+                        changed = true;
+                    }
                     ConsoleHelper.WriteSuccess($"    Configured {folder.FolderName}");
                 }
                 catch (Exception ex)
@@ -66,20 +71,12 @@ public class ShellFoldersModule : ModuleBase
                     success = false;
                 }
             }
+            if (changed) RunSessionCoordinator.Current?.RequestExplorerRestart();
         }
         catch (Exception ex)
         {
             ConsoleHelper.WriteError($"Failed to configure shell folders: {ex.Message}");
             success = false;
-        }
-
-        // Restart Explorer to apply changes
-        if (success && ConsoleHelper.Confirm("\nRestart Explorer to apply changes?"))
-        {
-            Console.WriteLine("Restarting Explorer...");
-            await RunCmdAsync("taskkill /IM explorer.exe /F", 5000);
-            await Task.Delay(1000);
-            await RunCmdAsync("start explorer.exe", 5000);
         }
 
         return success;

@@ -18,6 +18,9 @@ public class WinstallerConfig
     public FileCopyConfig FileCopy { get; set; } = new();
     public StartupConfig Startup { get; set; } = new();
     public PathConfig Path { get; set; } = new();
+    public SystemSettingsConfig SystemSettings { get; set; } = new();
+    public FirewallConfig Firewall { get; set; } = new();
+    public SetupTasksConfig SetupTasks { get; set; } = new();
 
     // Discord and Spotify as separate modules
     public DiscordConfig Discord { get; set; } = new();

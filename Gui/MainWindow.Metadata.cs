@@ -62,6 +62,7 @@ private static string GetSettingDescription(PropertyInfo property)
             SystemInfoImportScope.Symlinks => "No new symlink candidates were found.",
             SystemInfoImportScope.Path => "No new PATH entries were found.",
             SystemInfoImportScope.Startup => "No new startup items were found.",
+            SystemInfoImportScope.Firewall => "Firewall capture is unavailable.",
             _ => "No new importable items were found."
         };
     }
@@ -90,6 +91,7 @@ private static string GetSettingDescription(PropertyInfo property)
             SystemInfoImportScope.ShellFolders => "Import Shell Folders",
             SystemInfoImportScope.Path => "Import PATH Entries",
             SystemInfoImportScope.Startup => "Import Startup Items",
+            SystemInfoImportScope.Firewall => "Capture Current Rules",
             _ => "Import System Info"
         };
     }
