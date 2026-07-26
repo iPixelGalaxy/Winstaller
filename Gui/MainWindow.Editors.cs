@@ -241,7 +241,9 @@ public sealed partial class MainWindow : Window
         row.Children.Add(text);
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
-        return Card(row);
+        var card = Card(row);
+        card.SizeChanged += (_, _) => row.Width = Math.Max(0, card.ActualWidth - card.Padding.Left - card.Padding.Right);
+        return card;
     }
 
     private static FrameworkElement BuildResponsiveRestoreGrid(IReadOnlyList<FrameworkElement> cards)
