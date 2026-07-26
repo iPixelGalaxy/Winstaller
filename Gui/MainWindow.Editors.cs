@@ -37,7 +37,8 @@ public sealed partial class MainWindow : Window
         });
         panel.Children.Add(ActionButton("Capture Current VRChat Registry", async () =>
         {
-            await new VRChatRegistryModule(_config).CaptureAsync();
+            var captured = await new VRChatRegistryModule(_config).CaptureAsync();
+            if (!captured) return;
             RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
         }, primary: true));
         panel.Children.Add(ActionButton("Restore Selected Groups", async () => await new VRChatRegistryModule(_config).RestoreAsync()));
@@ -52,7 +53,55 @@ public sealed partial class MainWindow : Window
         });
         panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestoreSettings), "Settings", "Graphics, audio, input, safety, camera, accessibility, and other app settings."));
         panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestorePersonalData), "Personal data", "Account-linked values, inventories, custom groups, histories, and session-related data."));
+        var backup = new VRChatRegistryModule(_config).LoadBackup();
+        if (backup is not null)
+        {
+            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Settings), "Settings to restore"));
+            panel.Children.Add(BuildVRChatValueGroup(config, backup.Values.Where(value => value.Group == VRChatRegistryGroup.Personal), "Personal data to restore"));
+        }
         return panel;
+    }
+
+    private FrameworkElement BuildVRChatValueGroup(VRChatRegistryConfig config, IEnumerable<VRChatRegistryValue> source, string title)
+    {
+        var values = source.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var panel = new StackPanel { Spacing = 8 };
+        if (values.Count == 0)
+        {
+            panel.Children.Add(new TextBlock { Text = "No captured values.", Opacity = 0.65 });
+        }
+        else
+        {
+            foreach (var value in values)
+            {
+                var id = VRChatRegistryModule.GetValueId(value);
+                var toggle = new ToggleSwitch { IsOn = !config.ExcludedValueIds.Contains(id, StringComparer.OrdinalIgnoreCase), OffContent = string.Empty, OnContent = string.Empty, VerticalAlignment = VerticalAlignment.Center };
+                toggle.Toggled += (_, _) =>
+                {
+                    config.ExcludedValueIds.RemoveAll(existing => existing.Equals(id, StringComparison.OrdinalIgnoreCase));
+                    if (!toggle.IsOn) config.ExcludedValueIds.Add(id);
+                    SaveConfiguration();
+                };
+                var row = new Grid { ColumnSpacing = 12 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var text = new StackPanel { Spacing = 2 };
+                text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap });
+                text.Children.Add(new TextBlock { Text = value.Name, FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+                row.Children.Add(text);
+                Grid.SetColumn(toggle, 1);
+                row.Children.Add(toggle);
+                panel.Children.Add(Card(row));
+            }
+        }
+        return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = false };
+    }
+
+    private static string DescribeVRChatValue(string name)
+    {
+        var hash = name.LastIndexOf("_h", StringComparison.OrdinalIgnoreCase);
+        var readable = hash > 0 ? name[..hash] : name;
+        return readable.Replace("CustomTrustLevel_", "Safety: ").Replace("VRC_", string.Empty).Replace("_", " ");
     }
 
     private FrameworkElement BuildVRChatRestoreGroup(VRChatRegistryConfig config, string propertyName, string title, string description)

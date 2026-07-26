@@ -50,6 +50,7 @@ public class VRChatRegistryModule : ModuleBase
             {
                 if (value.Group == VRChatRegistryGroup.Settings && !Config.VRChatRegistry.RestoreSettings) continue;
                 if (value.Group == VRChatRegistryGroup.Personal && !Config.VRChatRegistry.RestorePersonalData) continue;
+                if (Config.VRChatRegistry.ExcludedValueIds.Contains(GetValueId(value), StringComparer.OrdinalIgnoreCase)) continue;
                 using var key = Registry.CurrentUser.CreateSubKey(string.IsNullOrWhiteSpace(value.SubKey) ? RootPath : $"{RootPath}\\{value.SubKey}", true);
                 key!.SetValue(value.Name, Decode(value), value.Kind);
                 restored++;
@@ -68,6 +69,18 @@ public class VRChatRegistryModule : ModuleBase
         File.WriteAllText(temporary, JsonSerializer.Serialize(backup, JsonOptions));
         if (File.Exists(path)) File.Replace(temporary, path, path + ".bak", true); else File.Move(temporary, path);
     }
+
+    public VRChatRegistryBackup? LoadBackup()
+    {
+        try
+        {
+            var path = ExpandEnvironmentVariables(Config.VRChatRegistry.BackupPath);
+            return File.Exists(path) ? JsonSerializer.Deserialize<VRChatRegistryBackup>(File.ReadAllText(path), JsonOptions) : null;
+        }
+        catch { return null; }
+    }
+
+    public static string GetValueId(VRChatRegistryValue value) => $"{value.SubKey}\\{value.Name}";
 
     private static void ReadKey(RegistryKey key, string relativePath, List<VRChatRegistryValue> values)
     {
