@@ -9,6 +9,13 @@ public sealed class SetupTaskStateStore
     public DateTimeOffset? GetCompletedAt(string task) => Load().Completed.TryGetValue(task, out var completed) ? completed : null;
     public void Complete(string task) { var state = Load(); state.Completed[task] = DateTimeOffset.UtcNow; Save(state); }
     public void Clear(string task) { var state = Load(); state.Completed.Remove(task); Save(state); }
+    public void CopyCompletion(string source, params string[] targets)
+    {
+        var state = Load();
+        if (!state.Completed.TryGetValue(source, out var completed)) return;
+        foreach (var target in targets) state.Completed[target] = completed;
+        Save(state);
+    }
     private State Load()
     {
         try { return File.Exists(_path) ? JsonSerializer.Deserialize<State>(File.ReadAllText(_path)) ?? new() : new(); } catch { return new(); }

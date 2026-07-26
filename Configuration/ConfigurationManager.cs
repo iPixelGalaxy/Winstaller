@@ -502,8 +502,28 @@ public static class ConfigurationManager
 
     private static bool MigrateSetupTasksJson(JsonObject setupTasks, bool includeEnabled)
     {
-        if (setupTasks["workflows"] is JsonArray)
-            return false;
+        if (setupTasks["workflows"] is JsonArray workflows)
+        {
+            var changed = RepairSetupTaskWaitActions(workflows);
+            var legacyWorkflow = workflows.OfType<JsonObject>().FirstOrDefault(workflow =>
+                workflow["id"]?.GetValue<string>()?.Equals("windhawk-steam", StringComparison.OrdinalIgnoreCase) is true);
+            if (legacyWorkflow is null)
+                return changed;
+
+            var windhawkPath = FindStartPath(legacyWorkflow, "windhawk-start") ?? @"D:\Software\Programs\Windhawk\windhawk.exe";
+            var steamPath = FindStartPath(legacyWorkflow, "steam-start") ?? @"D:\Steam\steam.exe";
+            var enabled = legacyWorkflow["enabled"]?.GetValue<bool>() ?? true;
+            var replacements = SetupTasksDefaults.CreateLegacy(true, enabled, true, windhawkPath, steamPath,
+                @"D:\Steam\steamapps\common\DesktopPlus\misc\EnableUIAccessNoUser.bat").Workflows.Take(2);
+            var replacementNodes = JsonSerializer.SerializeToNode(replacements, JsonOptions)?.AsArray()
+                ?? throw new InvalidOperationException("Could not split setup tasks.");
+            var index = workflows.IndexOf(legacyWorkflow);
+            workflows.RemoveAt(index);
+            workflows.Insert(index, replacementNodes[0]);
+            workflows.Insert(index + 1, replacementNodes[1]);
+            new SetupTaskStateStore().CopyCompletion("windhawk-steam", "windhawk-initialization", "steam-initialization");
+            return true;
+        }
 
         var migrated = SetupTasksDefaults.CreateLegacy(
             includeEnabled && setupTasks["enabled"]?.GetValue<bool>() is true,
@@ -524,6 +544,32 @@ public static class ConfigurationManager
             setupTasks["enabled"] = node["enabled"]?.DeepClone();
         return true;
     }
+
+    private static bool RepairSetupTaskWaitActions(JsonArray workflows)
+    {
+        var changed = false;
+        foreach (var workflow in workflows.OfType<JsonObject>())
+        {
+            if (workflow["actions"] is not JsonArray actions) continue;
+            foreach (var action in actions.OfType<JsonObject>())
+            {
+                if (action["id"]?.GetValue<string>()?.Equals("wait-for-startup", StringComparison.OrdinalIgnoreCase) is not true ||
+                    action["type"]?.GetValue<string>()?.Equals("startApplication", StringComparison.OrdinalIgnoreCase) is not true) continue;
+                action["type"] = "wait";
+                action["seconds"] = 3;
+                action.Remove("name");
+                action.Remove("path");
+                action.Remove("arguments");
+                action.Remove("workingDirectory");
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private static string? FindStartPath(JsonObject workflow, string actionId) =>
+        (workflow["actions"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(action =>
+            action["id"]?.GetValue<string>()?.Equals(actionId, StringComparison.OrdinalIgnoreCase) is true)?["path"]?.GetValue<string>();
 
     private static void MapLegacyGitValue(JsonObject git, string key, string oldValue, string newValue)
     {

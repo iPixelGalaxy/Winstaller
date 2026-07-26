@@ -93,18 +93,29 @@ public static class SetupTasksDefaults
         [
             new SetupWorkflow
             {
-                Id = "windhawk-steam",
-                Name = "Windhawk and Steam initialization",
+                Id = "windhawk-initialization",
+                Name = "Windhawk initialization",
                 Enabled = windhawkAndSteam,
                 Actions =
                 [
                     new StartApplicationAction { Id = "windhawk-start", Name = "Windhawk", Path = windhawkPath },
-                    new StartApplicationAction { Id = "steam-start", Name = "Steam", Path = steamPath },
                     new WaitAction { Id = "wait-for-startup", Seconds = 3 },
                     new CloseApplicationAction { Id = "close-windhawk", TargetKind = SetupTaskTargetKind.ExistingProcess, ProcessName = "windhawk" },
+                    new WaitAction { Id = "wait-for-close", Seconds = 2 },
+                    new KillApplicationAction { Id = "kill-windhawk", TargetKind = SetupTaskTargetKind.ExistingProcess, ProcessName = "windhawk" }
+                ]
+            },
+            new SetupWorkflow
+            {
+                Id = "steam-initialization",
+                Name = "Steam initialization",
+                Enabled = windhawkAndSteam,
+                Actions =
+                [
+                    new StartApplicationAction { Id = "steam-start", Name = "Steam", Path = steamPath },
+                    new WaitAction { Id = "wait-for-startup", Seconds = 3 },
                     new CloseApplicationAction { Id = "close-steam", TargetKind = SetupTaskTargetKind.ExistingProcess, ProcessName = "steam" },
                     new WaitAction { Id = "wait-for-close", Seconds = 2 },
-                    new KillApplicationAction { Id = "kill-windhawk", TargetKind = SetupTaskTargetKind.ExistingProcess, ProcessName = "windhawk" },
                     new KillApplicationAction { Id = "kill-steam", TargetKind = SetupTaskTargetKind.ExistingProcess, ProcessName = "steam" }
                 ]
             },

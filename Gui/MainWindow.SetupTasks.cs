@@ -9,6 +9,8 @@ namespace Winstaller.Gui;
 
 public sealed partial class MainWindow : Window
 {
+    private readonly Dictionary<string, TextBlock> _setupTaskStatusTexts = new(StringComparer.OrdinalIgnoreCase);
+
     private FrameworkElement BuildSetupTasksContent(SetupTasksConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };
@@ -19,8 +21,12 @@ public sealed partial class MainWindow : Window
             TextWrapping = TextWrapping.Wrap
         });
 
+        var workflowGrid = new Grid { ColumnSpacing = 10, RowSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var workflow in config.Workflows)
-            panel.Children.Add(BuildSetupWorkflowCard(config, workflow));
+            workflowGrid.Children.Add(BuildSetupWorkflowCard(config, workflow));
+        workflowGrid.SizeChanged += (_, _) => ArrangeSetupWorkflowCards(workflowGrid);
+        ArrangeSetupWorkflowCards(workflowGrid);
+        panel.Children.Add(workflowGrid);
 
         panel.Children.Add(ActionButton("+ Add workflow", () =>
         {
@@ -32,7 +38,7 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildSetupWorkflowCard(SetupTasksConfig config, SetupWorkflow workflow)
     {
-        var card = new StackPanel { Spacing = 12 };
+        var card = new StackPanel { Spacing = 8 };
         var header = new Grid { ColumnSpacing = 10 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -41,7 +47,7 @@ public sealed partial class MainWindow : Window
         title.LostFocus += (_, _) =>
         {
             workflow.Name = string.IsNullOrWhiteSpace(title.Text) ? "Untitled workflow" : title.Text.Trim();
-            SaveSetupTasks(config, workflow, behaviorChanged: false);
+            SaveSetupTasks(config, workflow, behaviorChanged: false, rerender: false);
         };
         header.Children.Add(title);
 
@@ -50,18 +56,20 @@ public sealed partial class MainWindow : Window
         {
             if (_isLoadingUi) return;
             workflow.Enabled = enabled.IsOn;
-            SaveSetupTasks(config, workflow, behaviorChanged: false);
+            SaveSetupTasks(config, workflow, behaviorChanged: false, rerender: false);
         };
         Grid.SetColumn(enabled, 1);
         header.Children.Add(enabled);
         card.Children.Add(header);
 
         var completedAt = new SetupTaskStateStore().GetCompletedAt(workflow.Id);
-        card.Children.Add(new TextBlock
+        var status = new TextBlock
         {
             Text = completedAt is null ? "Not run yet" : $"Completed {completedAt.Value.LocalDateTime:g}",
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
-        });
+        };
+        _setupTaskStatusTexts[workflow.Id] = status;
+        card.Children.Add(status);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(ActionButton(completedAt is null ? "Run" : "Run Again", async () => await RunSetupWorkflowWithOutputDialogAsync(workflow), primary: true));
@@ -98,11 +106,12 @@ public sealed partial class MainWindow : Window
         header.Children.Add(new TextBlock { Text = $"{index + 1}", Width = 22, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.65 });
 
         var type = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var kind in Enum.GetValues<SetupActionKind>()) type.Items.Add(kind);
-        type.SelectedItem = GetSetupActionKind(action);
+        foreach (var kind in Enum.GetValues<SetupActionKind>())
+            type.Items.Add(new ComboBoxItem { Content = GetSetupActionKindLabel(kind), Tag = kind });
+        type.SelectedItem = type.Items.OfType<ComboBoxItem>().First(item => Equals(item.Tag, GetSetupActionKind(action)));
         type.SelectionChanged += (_, _) =>
         {
-            if (_isLoadingUi || type.SelectedItem is not SetupActionKind next || next == GetSetupActionKind(action)) return;
+            if (_isLoadingUi || type.SelectedItem is not ComboBoxItem { Tag: SetupActionKind next } || next == GetSetupActionKind(action)) return;
             var replacement = CreateSetupAction(next);
             replacement.Id = action.Id;
             workflow.Actions[index] = replacement;
@@ -165,14 +174,14 @@ public sealed partial class MainWindow : Window
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(12),
+            Padding = new Thickness(8),
             Child = content
         };
     }
 
     private void BuildProcessTargetFields(StackPanel content, SetupTasksConfig config, SetupWorkflow workflow, ProcessTargetAction action)
     {
-        content.Children.Add(SetupEnumField("Target", action.TargetKind, value => action.TargetKind = value, config, workflow));
+        content.Children.Add(SetupEnumField("Target", action.TargetKind, value => action.TargetKind = value, config, workflow, rerender: true));
         if (action.TargetKind == SetupTaskTargetKind.ExistingProcess)
         {
             content.Children.Add(SetupTextField("Process name", action.ProcessName, value => action.ProcessName = value, config, workflow));
@@ -188,7 +197,7 @@ public sealed partial class MainWindow : Window
         {
             if (_isLoadingUi || combo.SelectedItem is not ComboBoxItem selected) return;
             action.StartedActionId = selected.Tag as string ?? string.Empty;
-            SaveSetupTasks(config, workflow);
+            SaveSetupTasks(config, workflow, rerender: false);
         };
         content.Children.Add(SetupFieldRow("Started application", combo));
     }
@@ -199,7 +208,7 @@ public sealed partial class MainWindow : Window
         box.LostFocus += (_, _) =>
         {
             setValue(box.Text.Trim());
-            SaveSetupTasks(config, workflow);
+            SaveSetupTasks(config, workflow, rerender: false);
         };
         return SetupFieldRow(label, box);
     }
@@ -211,7 +220,7 @@ public sealed partial class MainWindow : Window
         {
             if (_isLoadingUi || double.IsNaN(args.NewValue)) return;
             setValue(Math.Max(minimum, Convert.ToInt32(args.NewValue)));
-            SaveSetupTasks(config, workflow);
+            SaveSetupTasks(config, workflow, rerender: false);
         };
         return SetupFieldRow(label, box);
     }
@@ -223,34 +232,58 @@ public sealed partial class MainWindow : Window
         {
             if (_isLoadingUi) return;
             setValue(toggle.IsOn);
-            SaveSetupTasks(config, workflow);
+            SaveSetupTasks(config, workflow, rerender: false);
         };
         return SetupFieldRow(label, toggle);
     }
 
-    private FrameworkElement SetupEnumField<T>(string label, T value, Action<T> setValue, SetupTasksConfig config, SetupWorkflow workflow) where T : struct, Enum
+    private FrameworkElement SetupEnumField<T>(string label, T value, Action<T> setValue, SetupTasksConfig config, SetupWorkflow workflow, bool rerender = false) where T : struct, Enum
     {
         var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var item in Enum.GetValues<T>()) combo.Items.Add(item);
-        combo.SelectedItem = value;
+        foreach (var item in Enum.GetValues<T>())
+            combo.Items.Add(new ComboBoxItem { Content = item.ToString(), Tag = item });
+        combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().First(item => Equals(item.Tag, value));
         combo.SelectionChanged += (_, _) =>
         {
-            if (_isLoadingUi || combo.SelectedItem is not T selected) return;
+            if (_isLoadingUi || combo.SelectedItem is not ComboBoxItem { Tag: T selected }) return;
             setValue(selected);
-            SaveSetupTasks(config, workflow);
+            SaveSetupTasks(config, workflow, rerender: rerender);
         };
         return SetupFieldRow(label, combo);
     }
 
     private FrameworkElement SetupFieldRow(string label, FrameworkElement editor)
     {
-        var row = new Grid { ColumnSpacing = 12 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
         Grid.SetColumn(editor, 1);
         row.Children.Add(editor);
         return row;
+    }
+
+    private static void ArrangeSetupWorkflowCards(Grid grid)
+    {
+        const double minimumCardWidth = 520;
+        var columns = Math.Max(1, (int)Math.Floor(grid.ActualWidth / minimumCardWidth));
+        if (grid.ColumnDefinitions.Count == columns) return;
+
+        grid.ColumnDefinitions.Clear();
+        grid.RowDefinitions.Clear();
+        for (var index = 0; index < columns; index++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var rows = (int)Math.Ceiling(grid.Children.Count / (double)columns);
+        for (var index = 0; index < rows; index++)
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        for (var index = 0; index < grid.Children.Count; index++)
+        {
+            var card = (FrameworkElement)grid.Children[index];
+            Grid.SetRow(card, index / columns);
+            Grid.SetColumn(card, index % columns);
+        }
     }
 
     private void MoveSetupWorkflow(SetupTasksConfig config, SetupWorkflow workflow, int delta)
@@ -273,13 +306,18 @@ public sealed partial class MainWindow : Window
         SaveSetupTasks(config, workflow);
     }
 
-    private void SaveSetupTasks(SetupTasksConfig config, SetupWorkflow? workflow = null, bool behaviorChanged = true)
+    private void SaveSetupTasks(SetupTasksConfig config, SetupWorkflow? workflow = null, bool behaviorChanged = true, bool rerender = true)
     {
         if (behaviorChanged && workflow is not null)
+        {
             new SetupTaskStateStore().Clear(workflow.Id);
+            if (_setupTaskStatusTexts.TryGetValue(workflow.Id, out var status))
+                status.Text = "Not run yet";
+        }
         SaveConfiguration();
         var module = _modules.First(descriptor => ReferenceEquals(descriptor.Config, config));
-        RenderModule(module);
+        if (rerender)
+            RenderModule(module);
     }
 
     private static SetupActionKind GetSetupActionKind(SetupTaskAction action) => action switch
@@ -291,6 +329,17 @@ public sealed partial class MainWindow : Window
         RestartApplicationAction => SetupActionKind.RestartApplication,
         RunScriptAction => SetupActionKind.RunScript,
         _ => throw new InvalidOperationException($"Unknown setup action: {action.GetType().Name}")
+    };
+
+    private static string GetSetupActionKindLabel(SetupActionKind kind) => kind switch
+    {
+        SetupActionKind.StartApplication => "Start Application",
+        SetupActionKind.Wait => "Wait",
+        SetupActionKind.CloseApplication => "Close Application",
+        SetupActionKind.KillApplication => "Kill Application",
+        SetupActionKind.RestartApplication => "Restart Application",
+        SetupActionKind.RunScript => "Run Script",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
     private static SetupTaskAction CreateSetupAction(SetupActionKind kind) => kind switch
