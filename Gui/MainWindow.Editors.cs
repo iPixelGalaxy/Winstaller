@@ -403,7 +403,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Layout = new UniformGridLayout
             {
                 MinItemWidth = 250,
-                MinItemHeight = 128,
+                MinItemHeight = 88,
                 MinRowSpacing = 8,
                 MinColumnSpacing = 8,
                 ItemsStretch = UniformGridLayoutItemsStretch.Fill
@@ -435,6 +435,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var preview = new TextBlock
         {
             Text = "Aa",
@@ -469,24 +470,20 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                 await ShowMessageAsync("Delete font", $"Could not delete {fileName}: {ex.Message}");
             }
         });
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { remove } };
-        var content = new Grid();
-        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.Children.Add(header);
-        Grid.SetRow(footer, 1);
-        content.Children.Add(footer);
+        remove.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(remove, 2);
+        header.Children.Add(remove);
 
         return new Border
         {
-            Height = 128,
+            Height = 88,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
             Padding = new Thickness(14),
-            Child = content
+            Child = header
         };
     }
 
