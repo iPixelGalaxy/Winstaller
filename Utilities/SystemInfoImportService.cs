@@ -47,55 +47,62 @@ public static class SystemInfoImportService
     public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope, bool includeUpdates = false, Action<string>? progress = null)
     {
         var candidates = new List<SystemInfoImportCandidate>();
+        void Report(string message)
+        {
+            progress?.Invoke(message);
+            RunLog.Write("System Scan", message);
+        }
+
+        Report($"Started {scope} scan.");
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Path)
         {
-            progress?.Invoke("Scanning PATH entries…");
+            Report("Scanning PATH entries…");
             candidates.AddRange(FindPathCandidates(config));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.NetworkDrives)
         {
-            progress?.Invoke("Scanning network drives…");
+            Report("Scanning network drives…");
             candidates.AddRange(FindNetworkDriveCandidates(config, includeUpdates));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.ShellFolders)
         {
-            progress?.Invoke("Scanning shell folders…");
+            Report("Scanning shell folders…");
             candidates.AddRange(FindShellFolderCandidates(config, includeUpdates));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.AppInstaller)
         {
-            progress?.Invoke("Scanning installed apps with winget…");
+            Report("Scanning installed apps with winget…");
             candidates.AddRange(await FindWingetCandidatesAsync(config));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Fonts)
         {
-            progress?.Invoke("Scanning installed fonts…");
+            Report("Scanning installed fonts…");
             candidates.AddRange(FindFontCandidates(config));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Startup)
         {
-            progress?.Invoke("Scanning startup items…");
+            Report("Scanning startup items…");
             candidates.AddRange(FindStartupCandidates(config, includeUpdates));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Firewall)
         {
-            progress?.Invoke("Checking firewall backup…");
+            Report("Checking firewall backup…");
             candidates.Add(new(SystemInfoImportScope.Firewall, "Current firewall rules", "Capture active rules into managed backup", new FirewallCaptureCandidate()));
         }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Symlinks)
         {
-            progress?.Invoke("Scanning profile symlinks…");
-            candidates.AddRange(FindSymlinkCandidates(config));
+            candidates.AddRange(FindSymlinkCandidates(config, Report));
         }
 
+        Report($"Finished {scope} scan with {candidates.Count} candidate(s).");
         return candidates;
     }
 
@@ -628,15 +635,15 @@ public static class SystemInfoImportService
         }
     }
 
-    private static IEnumerable<SystemInfoImportCandidate> FindSymlinkCandidates(WinstallerConfig config)
+    private static IEnumerable<SystemInfoImportCandidate> FindSymlinkCandidates(WinstallerConfig config, Action<string> report)
     {
-        foreach (var symlink in FindSymlinks(AppDataRoaming, "Roaming", config.Symlinks.RoamingDirectories, config.Symlinks.IgnoredRoamingDirectories, config))
+        foreach (var symlink in FindSymlinks(AppDataRoaming, "Roaming", config.Symlinks.RoamingDirectories, config.Symlinks.IgnoredRoamingDirectories, config, report))
             yield return symlink;
 
-        foreach (var symlink in FindSymlinks(AppDataLocal, "Local", config.Symlinks.LocalDirectories, config.Symlinks.IgnoredLocalDirectories, config))
+        foreach (var symlink in FindSymlinks(AppDataLocal, "Local", config.Symlinks.LocalDirectories, config.Symlinks.IgnoredLocalDirectories, config, report))
             yield return symlink;
 
-        foreach (var symlink in FindSymlinks(AppDataLocalLow, "LocalLow", config.Symlinks.LocalLowDirectories, config.Symlinks.IgnoredLocalLowDirectories, config))
+        foreach (var symlink in FindSymlinks(AppDataLocalLow, "LocalLow", config.Symlinks.LocalLowDirectories, config.Symlinks.IgnoredLocalLowDirectories, config, report))
             yield return symlink;
     }
 
@@ -645,16 +652,28 @@ public static class SystemInfoImportService
         string section,
         List<string> configured,
         List<string> ignored,
-        WinstallerConfig config)
+        WinstallerConfig config,
+        Action<string> report)
     {
         if (!Directory.Exists(appDataPath))
             yield break;
 
-        foreach (var candidate in FindSymlinksRecursive(appDataPath, appDataPath, section, configured, ignored, config, 0))
+        var stats = new SymlinkScanStats();
+        report($"Scanning {section} AppData symlinks: {configured.Count} configured path(s)…");
+
+        foreach (var candidate in FindSymlinksRecursive(appDataPath, appDataPath, section, configured, ignored, config, 0, stats))
+        {
+            stats.Candidates++;
             yield return candidate;
+        }
 
         foreach (var candidate in FindConfiguredSymlinkRecoveries(appDataPath, section, configured, config))
+        {
+            stats.Candidates++;
             yield return candidate;
+        }
+
+        report($"{section} symlinks: scanned {stats.Visited} folder(s), skipped {stats.Pruned} excluded tree(s), found {stats.Candidates} candidate(s).");
     }
 
     private static IEnumerable<SystemInfoImportCandidate> FindSymlinksRecursive(
@@ -664,7 +683,8 @@ public static class SystemInfoImportService
         List<string> configured,
         List<string> ignored,
         WinstallerConfig config,
-        int depth)
+        int depth,
+        SymlinkScanStats stats)
     {
         IEnumerable<string> directories;
         try
@@ -684,6 +704,7 @@ public static class SystemInfoImportService
 
         foreach (var dir in directories)
         {
+            stats.Visited++;
             var leafName = Path.GetFileName(dir);
             var relativePath = SymlinkSafetyPolicy.NormalizeRelativePath(Path.GetRelativePath(rootPath, dir));
             var info = new DirectoryInfo(dir);
@@ -728,7 +749,10 @@ public static class SystemInfoImportService
             // Candidate discovery only needs top-level normal folders. Deep traversal exists
             // solely to find pre-existing links and recovery folders, so prune known heavy trees.
             if (isIgnored || isExcluded)
+            {
+                stats.Pruned++;
                 continue;
+            }
 
             if (existingSymlink && !Path.IsPathRooted(target) && target != "(unknown target)")
             {
@@ -747,10 +771,17 @@ public static class SystemInfoImportService
 
             if (!existingSymlink)
             {
-                foreach (var child in FindSymlinksRecursive(rootPath, dir, section, configured, ignored, config, depth + 1))
+                foreach (var child in FindSymlinksRecursive(rootPath, dir, section, configured, ignored, config, depth + 1, stats))
                     yield return child;
             }
         }
+    }
+
+    private sealed class SymlinkScanStats
+    {
+        public int Visited { get; set; }
+        public int Pruned { get; set; }
+        public int Candidates { get; set; }
     }
 
     private static IEnumerable<SystemInfoImportCandidate> FindConfiguredSymlinkRecoveries(

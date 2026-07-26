@@ -36,6 +36,7 @@ public sealed partial class MainWindow
         var status = new TextBlock { Text = "Scanning current Windows configuration…", Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
         scanStatus.Children.Add(status);
         page.Children.Add(scanStatus);
+        page.Children.Add(new TextBlock { Text = $"Scan log: {RunLog.Path}", FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
 
         var backupTasks = new StackPanel { Spacing = 6 };
         page.Children.Add(Card(new StackPanel
@@ -76,6 +77,7 @@ public sealed partial class MainWindow
             scan!.IsEnabled = false;
             spinner.Visibility = Visibility.Visible;
             status.Text = "Scanning current Windows configuration…";
+            RunLog.Write("Pre-reinstall Checklist", "Scan requested.");
             findings.Children.Clear();
             checks.Clear();
             ShowBackupTasks();
@@ -104,11 +106,13 @@ public sealed partial class MainWindow
                     findings.Children.Add(Card(groupPanel));
                 }
                 status.Text = candidates.Count == 0 ? "No new or changed system configuration found." : $"Found {candidates.Count} item(s). Review selections, then run checklist.";
+                RunLog.Write("Pre-reinstall Checklist", status.Text);
                 run!.IsEnabled = true;
             }
             catch (Exception ex)
             {
                 status.Text = $"Scan failed: {ex.Message}";
+                RunLog.WriteException("Pre-reinstall Checklist", "Scan failed", ex);
             }
             finally
             {
