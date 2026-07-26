@@ -61,6 +61,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         }
 
         var itemType = property.PropertyType.GetGenericArguments()[0];
+        var stringEntries = itemType == typeof(string)
+            ? list.Cast<object?>().Select(value => new StringSymlinkEntry(value?.ToString() ?? string.Empty)).ToList()
+            : null;
         var panel = new StackPanel { Spacing = 8 };
         var countText = new TextBlock
         {
@@ -82,7 +85,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         var viewItems = new ObservableCollection<IndexedItem>();
         items.ItemsSource = viewItems;
         items.ItemTemplate = itemType == typeof(string)
-            ? new RecyclableRowFactory(() => BuildCompactStringListItem(config, property, list, Refresh, placeholder))
+            ? new RecyclableRowFactory(() => BuildCompactStringListItem(config, property, list, stringEntries!, Refresh, placeholder))
             : itemType == typeof(SpecialSymlink)
                 ? new RecyclableRowFactory(() => BuildCompactSpecialSymlinkItem(config, list, Refresh))
                 : new CallbackElementFactory(data =>
@@ -106,12 +109,23 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
             emptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            if (stringEntries is not null)
+            {
+                while (stringEntries.Count > list.Count)
+                    stringEntries.RemoveAt(stringEntries.Count - 1);
+                while (stringEntries.Count < list.Count)
+                    stringEntries.Add(new StringSymlinkEntry(list[stringEntries.Count]?.ToString() ?? string.Empty));
+                for (var index = 0; index < list.Count; index++)
+                    stringEntries[index].Value = list[index]?.ToString() ?? string.Empty;
+            }
+
             while (viewItems.Count > list.Count)
                 viewItems.RemoveAt(viewItems.Count - 1);
 
             for (var index = 0; index < list.Count; index++)
             {
-                var value = list[index]!;
+                var value = stringEntries?[index] ?? list[index]!;
                 if (index == viewItems.Count)
                 {
                     viewItems.Add(new IndexedItem(value, index));
@@ -171,7 +185,11 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                 SaveConfiguration();
             countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
             emptyText.Visibility = Visibility.Collapsed;
-            viewItems.Add(new IndexedItem(item, index));
+            var viewItem = stringEntries is null
+                ? item
+                : new StringSymlinkEntry(item?.ToString() ?? string.Empty);
+            stringEntries?.Add((StringSymlinkEntry)viewItem);
+            viewItems.Add(new IndexedItem(viewItem, index));
             BringItemIntoView(index);
         });
         Grid.SetColumn(add, 2);
@@ -186,7 +204,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
     }
 
 
-    private ReusableSymlinkRow BuildCompactStringListItem(SymlinksConfig config, PropertyInfo property, IList list, Action refresh, string placeholder)
+    private ReusableSymlinkRow BuildCompactStringListItem(SymlinksConfig config, PropertyInfo property, IList list, List<StringSymlinkEntry> entries, Action refresh, string placeholder)
     {
         var row = new ReusableSymlinkRow { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -205,7 +223,13 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                 if (item is null)
                     return;
 
-                var currentValue = list[item.Index]?.ToString() ?? string.Empty;
+                if (item.Value is not StringSymlinkEntry entry)
+                    return;
+                var index = entries.IndexOf(entry);
+                if (index < 0 || index >= list.Count)
+                    return;
+
+                var currentValue = entry.Value;
                 if (IsShiftDown())
                 {
                     OpenFolder(GetManagedAppDataSymlinkTarget(config, property.Name, currentValue));
@@ -220,7 +244,11 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                 {
                     if (!ReferenceEquals(row.Item, item))
                         return;
-                    list[item.Index] = picked;
+                    var currentIndex = entries.IndexOf(entry);
+                    if (currentIndex < 0 || currentIndex >= list.Count)
+                        return;
+                    list[currentIndex] = picked;
+                    entry.Value = picked;
                     isBinding = true;
                     box!.Text = picked;
                     isBinding = false;
@@ -243,17 +271,20 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             if (item is null || !isDirty)
                 return;
 
-            if (item.Index < 0 || item.Index >= list.Count)
+            if (item.Value is not StringSymlinkEntry entry)
+                return;
+            var index = entries.IndexOf(entry);
+            if (index < 0 || index >= list.Count)
             {
-                // ItemsRepeater can recycle a previously bound row after its
-                // configuration item has been removed. Never let that stale
-                // textbox write back into a different list position.
+                // ItemsRepeater can recycle a row after its entry was removed.
+                // Stable entries prevent a stale textbox from targeting another row.
                 isDirty = false;
-                RunLog.Write("Symlinks", $"Skipped stale recycled {property.Name} row at index {item.Index}.");
+                RunLog.Write("Symlinks", $"Skipped stale recycled {property.Name} row.");
                 return;
             }
 
-            list[item.Index] = box!.Text.Trim();
+            entry.Value = box!.Text.Trim();
+            list[index] = entry.Value;
             iconButton!.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };
             SaveConfiguration();
             isDirty = false;
@@ -280,13 +311,17 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             var item = row.Item;
             return () =>
             {
-                if (item is null || item.Index >= list.Count)
+                if (item?.Value is not StringSymlinkEntry entry)
+                    return Task.CompletedTask;
+                var index = entries.IndexOf(entry);
+                if (index < 0 || index >= list.Count)
                     return Task.CompletedTask;
 
                 // Refresh recycles this row. Do not let its pending textbox save restore
                 // the value after it has been removed.
                 isDirty = false;
-                list.RemoveAt(item.Index);
+                entries.RemoveAt(index);
+                list.RemoveAt(index);
                 SaveConfiguration();
                 refresh();
                 return Task.CompletedTask;
@@ -298,7 +333,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         row.BindAction = item =>
         {
             isBinding = true;
-            box.Text = item.Value?.ToString() ?? string.Empty;
+            box.Text = (item.Value as StringSymlinkEntry)?.Value ?? string.Empty;
             isBinding = false;
             isDirty = false;
             iconButton.Content = new FontIcon { Glyph = "\uE8B7", FontSize = 16 };

@@ -218,6 +218,10 @@ private static string GetSettingDescription(PropertyInfo property)
     private sealed record AppBehaviorDialogState(string PackageId, AppInstallBehavior Behavior);
     private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, Action RefreshTiles, StackPanel Section);
     private sealed record IndexedItem(object Value, int Index);
+    private sealed class StringSymlinkEntry(string value)
+    {
+        public string Value { get; set; } = value;
+    }
 
     private FrameworkElement BuildProgressiveTileGrid<T>(IReadOnlyList<T> items, double minimumWidth, double minimumHeight, Func<T, FrameworkElement> create)
     {
