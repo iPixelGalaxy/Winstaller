@@ -421,7 +421,12 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             return BuildVRChatRegistryContent(vrchatRegistry);
         }
 
-        if (module.Config is SystemSettingsConfig or FirewallConfig or SetupTasksConfig)
+        if (module.Config is SystemSettingsConfig systemSettings)
+        {
+            return BuildSystemSettingsContent(systemSettings);
+        }
+
+        if (module.Config is FirewallConfig or SetupTasksConfig)
         {
             return BuildConfigEditor(module.Config, includeScalarSettings: true);
         }

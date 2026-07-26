@@ -13,7 +13,13 @@ public class SystemSettingsConfig
     public AppliedSetting<bool> Transparency { get; set; } = new();
     public AppliedSetting<int> UncAsIntranet { get; set; } = new();
     public AppliedSetting<int> SaveZoneInformation { get; set; } = new();
-    public AppliedSetting<int> ConsentPromptBehaviorAdmin { get; set; } = new();
-    public AppliedSetting<int> PromptOnSecureDesktop { get; set; } = new();
-    public AppliedSetting<int> EnableLua { get; set; } = new();
+    public AppliedSetting<UacLevel> Uac { get; set; } = new();
+}
+
+public enum UacLevel
+{
+    NeverNotify,
+    NotifyAppsWithoutSecureDesktop,
+    NotifyAppsWithSecureDesktop,
+    AlwaysNotify
 }

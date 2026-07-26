@@ -30,9 +30,21 @@ public class SystemSettingsModule : ModuleBase
             if (settings.Transparency.Apply && SetDword(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", settings.Transparency.Value ? 1 : 0)) _session?.RequestExplorerRestart();
             changedPolicy |= SetApplied(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap", "UNCAsIntranet", settings.UncAsIntranet);
             changedPolicy |= SetApplied(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Policies\Attachments", "SaveZoneInformation", settings.SaveZoneInformation);
-            changedPolicy |= SetApplied(Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "ConsentPromptBehaviorAdmin", settings.ConsentPromptBehaviorAdmin);
-            changedPolicy |= SetApplied(Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "PromptOnSecureDesktop", settings.PromptOnSecureDesktop);
-            changedPolicy |= SetApplied(Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLUA", settings.EnableLua);
+            if (settings.Uac.Apply)
+            {
+                var uac = settings.Uac.Value switch
+                {
+                    UacLevel.NeverNotify => (ConsentPromptBehaviorAdmin: 0, PromptOnSecureDesktop: 0, EnableLua: 1),
+                    UacLevel.NotifyAppsWithoutSecureDesktop => (ConsentPromptBehaviorAdmin: 5, PromptOnSecureDesktop: 0, EnableLua: 1),
+                    UacLevel.NotifyAppsWithSecureDesktop => (ConsentPromptBehaviorAdmin: 5, PromptOnSecureDesktop: 1, EnableLua: 1),
+                    UacLevel.AlwaysNotify => (ConsentPromptBehaviorAdmin: 2, PromptOnSecureDesktop: 1, EnableLua: 1),
+                    _ => throw new ArgumentOutOfRangeException(nameof(settings.Uac.Value))
+                };
+                const string systemPolicy = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+                changedPolicy |= SetDword(Registry.LocalMachine, systemPolicy, "ConsentPromptBehaviorAdmin", uac.ConsentPromptBehaviorAdmin);
+                changedPolicy |= SetDword(Registry.LocalMachine, systemPolicy, "PromptOnSecureDesktop", uac.PromptOnSecureDesktop);
+                changedPolicy |= SetDword(Registry.LocalMachine, systemPolicy, "EnableLUA", uac.EnableLua);
+            }
             if (changedPolicy) _session?.RequestPolicyRefresh();
             return Task.FromResult(true);
         }

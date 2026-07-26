@@ -1071,6 +1071,118 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         return panel;
     }
 
+    private FrameworkElement BuildSystemSettingsContent(SystemSettingsConfig settings)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(BuildAppliedSettingCard("Computer name", "Rename this PC. Windows applies it after restart.", settings.ComputerName, new TextBox
+        {
+            Text = settings.ComputerName.Value,
+            PlaceholderText = "Computer name",
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        }, value => settings.ComputerName.Value = (string)value));
+        panel.Children.Add(BuildAppliedSettingCard("Transparency effects", "Show transparency in Windows surfaces.", settings.Transparency, new ToggleSwitch
+        {
+            IsOn = settings.Transparency.Value
+        }, value => settings.Transparency.Value = (bool)value));
+        panel.Children.Add(BuildAppliedSettingCard("Treat UNC paths as intranet", "Apply Local Intranet zone rules to UNC network paths.", settings.UncAsIntranet, new ToggleSwitch
+        {
+            IsOn = settings.UncAsIntranet.Value != 0
+        }, value => settings.UncAsIntranet.Value = (bool)value ? 1 : 0));
+        panel.Children.Add(BuildAppliedSettingCard("Do not preserve download zone information", "Stop Windows saving source-zone metadata for downloaded files.", settings.SaveZoneInformation, new ToggleSwitch
+        {
+            IsOn = settings.SaveZoneInformation.Value != 0
+        }, value => settings.SaveZoneInformation.Value = (bool)value ? 1 : 0));
+        panel.Children.Add(BuildUacSettingCard(settings.Uac));
+        return panel;
+    }
+
+    private FrameworkElement BuildAppliedSettingCard<T>(string title, string description, AppliedSetting<T> setting, Control valueEditor, Action<object> setValue)
+    {
+        var apply = new ToggleSwitch { Header = "Apply this setting", IsOn = setting.Apply };
+        valueEditor.IsEnabled = setting.Apply;
+        apply.Toggled += (_, _) =>
+        {
+            if (_isLoadingUi) return;
+            setting.Apply = apply.IsOn;
+            valueEditor.IsEnabled = apply.IsOn;
+            SaveConfiguration();
+        };
+
+        switch (valueEditor)
+        {
+            case TextBox box:
+                box.LostFocus += (_, _) =>
+                {
+                    setValue(box.Text);
+                    SaveConfiguration();
+                };
+                break;
+            case ToggleSwitch toggle:
+                toggle.Toggled += (_, _) =>
+                {
+                    if (_isLoadingUi) return;
+                    setValue(toggle.IsOn);
+                    SaveConfiguration();
+                };
+                break;
+        }
+
+        return Card(new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock { Text = title, FontSize = 17, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
+                new TextBlock { Text = description, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
+                apply,
+                valueEditor
+            }
+        });
+    }
+
+    private FrameworkElement BuildUacSettingCard(AppliedSetting<UacLevel> setting)
+    {
+        var labels = new[]
+        {
+            "Never notify",
+            "Notify when apps change Windows, without secure desktop",
+            "Notify when apps change Windows",
+            "Always notify"
+        };
+        var current = Math.Clamp((int)setting.Value, 0, labels.Length - 1);
+        var selected = new TextBlock { Text = labels[current], FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } };
+        var slider = new Slider { Minimum = 0, Maximum = labels.Length - 1, StepFrequency = 1, TickFrequency = 1, Value = current, IsEnabled = setting.Apply };
+        var apply = new ToggleSwitch { Header = "Apply UAC setting", IsOn = setting.Apply };
+        apply.Toggled += (_, _) =>
+        {
+            if (_isLoadingUi) return;
+            setting.Apply = apply.IsOn;
+            slider.IsEnabled = apply.IsOn;
+            SaveConfiguration();
+        };
+        slider.ValueChanged += (_, args) =>
+        {
+            if (_isLoadingUi) return;
+            var value = Math.Clamp((int)Math.Round(args.NewValue), 0, labels.Length - 1);
+            setting.Value = (UacLevel)value;
+            selected.Text = labels[value];
+            SaveConfiguration();
+        };
+
+        return Card(new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock { Text = "User Account Control", FontSize = 17, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
+                new TextBlock { Text = "Choose when Windows asks permission before elevation.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.WrapWholeWords },
+                apply,
+                selected,
+                slider
+            }
+        });
+    }
+
     private FrameworkElement BuildConfigSection(object target, PropertyInfo property)
     {
         return IsSupportedList(property.PropertyType)
