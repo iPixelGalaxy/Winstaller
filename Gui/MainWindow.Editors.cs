@@ -1147,7 +1147,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             IsOn = settings.SaveZoneInformation.Value != 0
         }, value => settings.SaveZoneInformation.Value = (bool)value ? 1 : 0)
         };
-        panel.Children.Add(BuildProgressiveTileGrid(compactSettings, 210, 188, setting => setting));
+        panel.Children.Add(BuildProgressiveTileGrid(compactSettings, 360, 188, setting => setting));
         return panel;
     }
 
