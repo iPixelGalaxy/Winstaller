@@ -251,7 +251,7 @@ public sealed partial class MainWindow : Window
             new("System Settings", "Apply selected Windows settings", "\uE9D9", _config.SystemSettings, () => new SystemSettingsModule(_config), null),
             new("Firewall", "Restore managed firewall policy", "\uE7F4", _config.Firewall, () => new FirewallModule(_config), SystemInfoImportScope.Firewall),
             new("Setup Tasks", "Run one-time setup tasks", "\uE7C3", _config.SetupTasks, () => new SetupTasksModule(_config), null),
-            new("VRChat Registry", "Back up and restore VRChat settings and personal data", "\uE7B8", _config.VRChatRegistry, () => new VRChatRegistryModule(_config), null, "Assets/VRChat%20Win3UI%20Style%20Icon.png"),
+            new("VRChat Registry", "Back up and restore VRChat settings and personal data", "\uE7B8", _config.VRChatRegistry, () => new VRChatRegistryModule(_config), null, "Assets/VRChat%20Win3UI%20Style%20Icon.svg"),
         ];
     }
 

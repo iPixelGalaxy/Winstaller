@@ -458,7 +458,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
 
         return new ImageIcon
         {
-            Source = new BitmapImage(new Uri($"ms-appx:///{module.IconAsset}"))
+            Source = CreateModuleIconSource(module.IconAsset)
         };
     }
 
@@ -471,12 +471,16 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             Width = 26,
             Height = 26,
-            Source = new BitmapImage(new Uri($"ms-appx:///{module.IconAsset}")),
+            Source = CreateModuleIconSource(module.IconAsset),
             Stretch = Stretch.Uniform,
             VerticalAlignment = VerticalAlignment.Center,
             HighContrastAdjustment = ElementHighContrastAdjustment.None
         };
     }
+
+    private static ImageSource CreateModuleIconSource(string asset) => asset.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)
+        ? new SvgImageSource(new Uri($"ms-appx:///{asset}"))
+        : new BitmapImage(new Uri($"ms-appx:///{asset}"));
 
 
     private void RebuildNavigation()
