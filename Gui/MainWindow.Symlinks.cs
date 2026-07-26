@@ -214,15 +214,13 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         Grid.SetColumn(box, 1);
         row.Children.Add(box);
 
-        var removeButton = CompactRemoveButton(async () =>
+        var removeButton = CompactRemoveButton(
+            $"Remove this {SplitName(property.Name)} entry from symlink configuration? Existing files and symlinks stay untouched.",
+            () =>
         {
             var item = row.Item;
             if (item is null)
-                return;
-
-            var currentValue = list[item.Index]?.ToString() ?? string.Empty;
-            if (!await ConfirmSymlinkRemovalAsync(currentValue, SplitName(property.Name)))
-                return;
+                return Task.CompletedTask;
 
             // Refresh recycles this row. Do not let its pending textbox save restore
             // the value after it has been removed.
@@ -230,6 +228,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             list.RemoveAt(item.Index);
             SaveConfiguration();
             refresh();
+            return Task.CompletedTask;
         });
         Grid.SetColumn(removeButton, 2);
         row.Children.Add(removeButton);
@@ -395,15 +394,14 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         Grid.SetRow(targetRow, 1);
         outer.Children.Add(targetRow);
 
-        var removeButton = CompactRemoveButton(async () =>
+        var removeButton = CompactRemoveButton(
+            "Remove this Special entry from symlink configuration? Existing files and symlinks stay untouched.",
+            () =>
         {
             var item = outer.Item;
             var symlink = Current();
             if (item is null || symlink is null)
-                return;
-            var name = GetItemTitle(symlink, typeof(SpecialSymlink), item.Index);
-            if (!await ConfirmSymlinkRemovalAsync(name, "Special"))
-                return;
+                return Task.CompletedTask;
 
             // Refresh recycles this row. Its deferred field saves must not apply
             // to an item that has just been removed.
@@ -412,6 +410,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             list.RemoveAt(item.Index);
             SaveConfiguration();
             refresh();
+            return Task.CompletedTask;
         });
         Grid.SetRow(isFile, 0);
         Grid.SetColumn(isFile, 1);
@@ -520,7 +519,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         return button;
     }
 
-    private Button CompactRemoveButton(Func<Task> remove)
+    private Button CompactRemoveButton(string confirmationMessage, Func<Task> remove)
     {
         var button = new Button
         {
@@ -538,6 +537,9 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             button.IsEnabled = false;
             try
             {
+                if (!await ConfirmAsync("Remove configuration entry?", confirmationMessage, "Remove"))
+                    return;
+
                 await remove();
             }
             catch (Exception ex)

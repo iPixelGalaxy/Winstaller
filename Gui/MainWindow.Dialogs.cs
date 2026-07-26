@@ -26,15 +26,6 @@ namespace Winstaller.Gui;
 
 public sealed partial class MainWindow : Window
 {
-private Task<bool> ConfirmSymlinkRemovalAsync(string name, string category)
-    {
-        var label = string.IsNullOrWhiteSpace(name) ? "this entry" : $"\"{name}\"";
-        return ConfirmAsync(
-            "Remove symlink?",
-            $"Remove {label} from {category} symlink configuration? Existing files and symlinks stay untouched.",
-            "Remove");
-    }
-
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText)
     {
         if (!DispatcherQueue.HasThreadAccess)
