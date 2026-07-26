@@ -27,16 +27,18 @@ public class VRChatRegistryModule : ModuleBase
     {
         try
         {
+            RunLog.Write("VRChat Registry", "Capture started.");
             using var root = Registry.CurrentUser.OpenSubKey(RootPath);
-            if (root is null) { LastMessage = "VRChat registry key not found."; ConsoleHelper.WriteError(LastMessage); return Task.FromResult(false); }
+            if (root is null) { LastMessage = "VRChat registry key not found."; RunLog.Write("VRChat Registry", LastMessage); ConsoleHelper.WriteError(LastMessage); return Task.FromResult(false); }
             var backup = new VRChatRegistryBackup { CapturedAt = DateTimeOffset.UtcNow };
             ReadKey(root, string.Empty, backup.Values);
             SaveBackup(backup);
             LastMessage = $"Captured {backup.Values.Count} VRChat registry values.";
+            RunLog.Write("VRChat Registry", LastMessage);
             ConsoleHelper.WriteSuccess(LastMessage);
             return Task.FromResult(true);
         }
-        catch (Exception ex) { LastMessage = $"VRChat capture failed: {ex.Message}"; ConsoleHelper.WriteError(LastMessage); return Task.FromResult(false); }
+        catch (Exception ex) { LastMessage = $"VRChat capture failed: {ex.Message}"; RunLog.WriteException("VRChat Registry", "Capture failed", ex); ConsoleHelper.WriteError(LastMessage); return Task.FromResult(false); }
     }
 
     public Task<bool> RestoreAsync()
@@ -98,18 +100,20 @@ public class VRChatRegistryModule : ModuleBase
     {
         RegistryValueKind.Binary => Convert.ToBase64String((byte[])(value ?? Array.Empty<byte>())),
         RegistryValueKind.MultiString => JsonSerializer.Serialize((string[])(value ?? Array.Empty<string>())),
-        RegistryValueKind.DWord => Convert.ToInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
-        RegistryValueKind.QWord => Convert.ToInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+        RegistryValueKind.DWord => ToUInt32(value).ToString(CultureInfo.InvariantCulture),
+        RegistryValueKind.QWord => ToUInt64(value).ToString(CultureInfo.InvariantCulture),
         _ => value?.ToString() ?? string.Empty
     };
     private static object Decode(VRChatRegistryValue value) => value.Kind switch
     {
         RegistryValueKind.Binary => Convert.FromBase64String(value.Data),
         RegistryValueKind.MultiString => JsonSerializer.Deserialize<string[]>(value.Data) ?? [],
-        RegistryValueKind.DWord => int.Parse(value.Data, CultureInfo.InvariantCulture),
-        RegistryValueKind.QWord => long.Parse(value.Data, CultureInfo.InvariantCulture),
+        RegistryValueKind.DWord => unchecked((int)uint.Parse(value.Data, CultureInfo.InvariantCulture)),
+        RegistryValueKind.QWord => unchecked((long)ulong.Parse(value.Data, CultureInfo.InvariantCulture)),
         _ => value.Data
     };
+    private static uint ToUInt32(object? value) => value switch { int number => unchecked((uint)number), uint number => number, _ => Convert.ToUInt32(value, CultureInfo.InvariantCulture) };
+    private static ulong ToUInt64(object? value) => value switch { long number => unchecked((ulong)number), ulong number => number, _ => Convert.ToUInt64(value, CultureInfo.InvariantCulture) };
     private static VRChatRegistryGroup Classify(string name) => name.StartsWith("usr_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("unity.", StringComparison.OrdinalIgnoreCase) || name.Contains("Session", StringComparison.OrdinalIgnoreCase) || name.Contains("Inventory", StringComparison.OrdinalIgnoreCase) || name.Contains("CustomGroup", StringComparison.OrdinalIgnoreCase) || name.Contains("History", StringComparison.OrdinalIgnoreCase) || name.StartsWith("HasSeen", StringComparison.OrdinalIgnoreCase) || name.StartsWith("FirstTime", StringComparison.OrdinalIgnoreCase) ? VRChatRegistryGroup.Personal : VRChatRegistryGroup.Settings;
 }
 
