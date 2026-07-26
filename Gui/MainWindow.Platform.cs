@@ -304,8 +304,16 @@ private static void WriteDiagnosticLog(string message)
         var selectionLength = outputBox.SelectionLength;
         outputBox.Text += text;
 
-        outputBox.SelectionStart = Math.Clamp(selectionStart, 0, outputBox.Text.Length);
-        outputBox.SelectionLength = Math.Clamp(selectionLength, 0, outputBox.Text.Length - outputBox.SelectionStart);
+        if (followOutput)
+        {
+            outputBox.SelectionStart = outputBox.Text.Length;
+            outputBox.SelectionLength = 0;
+        }
+        else
+        {
+            outputBox.SelectionStart = Math.Clamp(selectionStart, 0, outputBox.Text.Length);
+            outputBox.SelectionLength = Math.Clamp(selectionLength, 0, outputBox.Text.Length - outputBox.SelectionStart);
+        }
 
         if (followOutput && state is not null)
             state.ScheduleScrollToEnd();
@@ -333,8 +341,14 @@ private static void WriteDiagnosticLog(string message)
             MaxHeight = 600,
             Padding = new Thickness(8, 8, 8, 20)
         };
-        ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Auto);
-        ScrollViewer.SetVerticalScrollBarVisibility(outputBox, ScrollBarVisibility.Auto);
+        outputBox.Resources["ScrollBarSize"] = 18d;
+        outputBox.Resources["ScrollBarVerticalThumbMinWidth"] = 12d;
+        outputBox.Resources["ScrollBarVerticalThumbMinHeight"] = 48d;
+        outputBox.Resources["ScrollBarHorizontalThumbMinHeight"] = 12d;
+        outputBox.Resources["ScrollBarHorizontalThumbMinWidth"] = 48d;
+        outputBox.Resources["ScrollBarThumbBackground"] = ResourceBrush("WinstallerSecondaryTextBrush");
+        ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Visible);
+        ScrollViewer.SetVerticalScrollBarVisibility(outputBox, ScrollBarVisibility.Visible);
 
         var scrollState = new LogScrollState(outputBox);
         _logScrollStates.Add(outputBox, scrollState);
@@ -367,8 +381,8 @@ private static void WriteDiagnosticLog(string message)
             if (_scrollViewer is null)
                 return;
 
-            _scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-            _scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            _scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Visible;
+            _scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Visible;
             _scrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(PauseOutputFollowingForNavigation), true);
