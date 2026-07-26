@@ -40,7 +40,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                 Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap
             });
-            return Card(panel);
+            return panel;
         }
 
         IReadOnlyList<string> fontFiles;
@@ -59,7 +59,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                 Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap
             });
-            return Card(panel);
+            return panel;
         }
 
         panel.Children.Add(new TextBlock
@@ -79,7 +79,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             tiles.Children.Add(BuildFontTile(fontFile, fontsDirectory, config));
         panel.Children.Add(tiles);
 
-        return Card(panel);
+        return panel;
     }
 
     private FrameworkElement BuildFontTile(string fontFile, string fontsDirectory, FontsConfig config)
