@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections;
+using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -225,8 +226,8 @@ private static string GetSettingDescription(PropertyInfo property)
 
     private FrameworkElement BuildProgressiveTileGrid<T>(IReadOnlyList<T> items, double minimumWidth, double minimumHeight, Func<T, FrameworkElement> create)
     {
-        var host = new Grid();
-        var initial = new ItemsRepeater
+        var visibleItems = new ObservableCollection<T>();
+        var repeater = new ItemsRepeater
         {
             Layout = new UniformGridLayout
             {
@@ -236,66 +237,17 @@ private static string GetSettingDescription(PropertyInfo property)
                 MinColumnSpacing = 8,
                 ItemsStretch = UniformGridLayoutItemsStretch.Fill
             },
-            ItemsSource = items
+            ItemsSource = visibleItems
         };
-        initial.ItemTemplate = new CallbackElementFactory(data => create((T)data!));
-        host.Children.Add(initial);
+        repeater.ItemTemplate = new CallbackElementFactory(data => create((T)data!));
 
         var started = false;
-        host.Loaded += async (_, _) =>
+        repeater.Loaded += async (_, _) =>
         {
             if (started)
                 return;
 
             started = true;
-            await Task.Delay(100).ConfigureAwait(false);
-
-            Grid? grid = null;
-            var tiles = new List<FrameworkElement>();
-            var arrangedColumns = -1;
-            var arrangedCount = -1;
-            var arranging = false;
-            void ArrangeTiles()
-            {
-                if (grid is null)
-                    return;
-
-                var columns = Math.Max(1, (int)((Math.Max(grid.ActualWidth, minimumWidth) + 8) / (minimumWidth + 8)));
-                if (arranging || (arrangedColumns == columns && arrangedCount == tiles.Count))
-                    return;
-
-                arranging = true;
-                try
-                {
-                grid.ColumnDefinitions.Clear();
-                grid.RowDefinitions.Clear();
-                grid.Children.Clear();
-                for (var column = 0; column < columns; column++)
-                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                for (var row = 0; row < (int)Math.Ceiling(tiles.Count / (double)columns); row++)
-                    grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(minimumHeight) });
-                for (var index = 0; index < tiles.Count; index++)
-                {
-                    Grid.SetRow(tiles[index], index / columns);
-                    Grid.SetColumn(tiles[index], index % columns);
-                    grid.Children.Add(tiles[index]);
-                }
-                    arrangedColumns = columns;
-                    arrangedCount = tiles.Count;
-                }
-                finally
-                {
-                    arranging = false;
-                }
-            }
-
-            await RunOnUiThreadAsync(() =>
-            {
-                grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
-                grid.SizeChanged += (_, _) => ArrangeTiles();
-                host.Children.Clear();
-                host.Children.Add(grid);
-            });
 
             for (var index = 0; index < items.Count; index += 12)
             {
@@ -303,13 +255,12 @@ private static string GetSettingDescription(PropertyInfo property)
                 await RunOnUiThreadAsync(() =>
                 {
                     foreach (var item in batch)
-                        tiles.Add(create(item));
-                    ArrangeTiles();
+                        visibleItems.Add(item);
                 });
                 await Task.Delay(1).ConfigureAwait(false);
             }
         };
-        return host;
+        return repeater;
     }
 
     private sealed class ReusableSymlinkRow : Grid
