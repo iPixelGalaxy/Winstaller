@@ -58,6 +58,8 @@ public sealed partial class MainWindow : Window
     private int _busyDepth;
     private bool _isRunning;
     private bool _isLoadingUi;
+    private bool _isScrollingVirtualizedContent;
+    private int _contentWarmupDepth;
     private int _pageRenderVersion;
     private string? _currentPageKey;
 
@@ -151,8 +153,29 @@ public sealed partial class MainWindow : Window
 
     private void SetScrollLoading(bool loading)
     {
+        _isScrollingVirtualizedContent = loading;
+        UpdateContentLoadingRing();
+    }
+
+    private void BeginContentWarmup()
+    {
+        _contentWarmupDepth++;
+        UpdateContentLoadingRing();
+    }
+
+    private void EndContentWarmup()
+    {
+        if (_contentWarmupDepth > 0)
+            _contentWarmupDepth--;
+        UpdateContentLoadingRing();
+    }
+
+    private void UpdateContentLoadingRing()
+    {
         var isVirtualizedPage = _currentPageKey is "Fonts" or "App Installer" or "VRChat Registry";
-        _scrollLoadRing.Visibility = loading && isVirtualizedPage ? Visibility.Visible : Visibility.Collapsed;
+        _scrollLoadRing.Visibility = isVirtualizedPage && (_isScrollingVirtualizedContent || _contentWarmupDepth > 0)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private Grid BuildTitleBar()

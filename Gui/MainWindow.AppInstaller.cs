@@ -32,17 +32,7 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
         foreach (var group in RecommendedAppCatalog.Groups.Append(new RecommendedAppGroupInfo(RecommendedAppGroup.None, "Apps")))
         {
             var packageIds = new List<string>();
-            var tiles = new ItemsRepeater
-            {
-                Layout = new UniformGridLayout
-                {
-                    MinItemWidth = 250,
-                    MinItemHeight = 128,
-                    MinRowSpacing = 8,
-                    MinColumnSpacing = 8,
-                    ItemsStretch = UniformGridLayoutItemsStretch.Fill
-                }
-            };
+            var tiles = new StackPanel();
             var isMaterialized = false;
             var chevron = new FontIcon
             {
@@ -82,9 +72,9 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
                 if (!isMaterialized)
                     return;
 
-                tiles.ItemsSource = packageIds.ToList();
+                tiles.Children.Clear();
+                tiles.Children.Add(BuildProgressiveTileGrid(packageIds.ToList(), 250, 128, packageId => BuildAppTile(packageId, config, Refresh)));
             }
-            tiles.ItemTemplate = new CallbackElementFactory(data => BuildAppTile((string)data!, config, Refresh));
             void MaterializeTiles()
             {
                 if (isMaterialized)

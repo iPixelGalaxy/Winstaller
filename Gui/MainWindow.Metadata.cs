@@ -218,6 +218,76 @@ private static string GetSettingDescription(PropertyInfo property)
     private sealed record AppBehaviorDialogState(string PackageId, AppInstallBehavior Behavior);
     private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, Action RefreshTiles, StackPanel Section);
     private sealed record IndexedItem(object Value, int Index);
+
+    private FrameworkElement BuildProgressiveTileGrid<T>(IReadOnlyList<T> items, double minimumWidth, double minimumHeight, Func<T, FrameworkElement> create)
+    {
+        var host = new Grid();
+        var initial = new ItemsRepeater
+        {
+            Layout = new UniformGridLayout
+            {
+                MinItemWidth = minimumWidth,
+                MinItemHeight = minimumHeight,
+                MinRowSpacing = 8,
+                MinColumnSpacing = 8,
+                ItemsStretch = UniformGridLayoutItemsStretch.Fill
+            },
+            ItemsSource = items
+        };
+        initial.ItemTemplate = new CallbackElementFactory(data => create((T)data!));
+        host.Children.Add(initial);
+
+        var started = false;
+        host.Loaded += async (_, _) =>
+        {
+            if (started)
+                return;
+
+            started = true;
+            await Task.Delay(1);
+            BeginContentWarmup();
+
+            var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+            var tiles = new List<FrameworkElement>();
+            void ArrangeTiles()
+            {
+                var columns = Math.Max(1, (int)((Math.Max(grid.ActualWidth, minimumWidth) + 8) / (minimumWidth + 8)));
+                grid.ColumnDefinitions.Clear();
+                grid.RowDefinitions.Clear();
+                grid.Children.Clear();
+                for (var column = 0; column < columns; column++)
+                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                for (var row = 0; row < (int)Math.Ceiling(tiles.Count / (double)columns); row++)
+                    grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(minimumHeight) });
+                for (var index = 0; index < tiles.Count; index++)
+                {
+                    Grid.SetRow(tiles[index], index / columns);
+                    Grid.SetColumn(tiles[index], index % columns);
+                    grid.Children.Add(tiles[index]);
+                }
+            }
+
+            grid.SizeChanged += (_, _) => ArrangeTiles();
+            host.Children.Clear();
+            host.Children.Add(grid);
+            try
+            {
+                for (var index = 0; index < items.Count; index += 12)
+                {
+                    foreach (var item in items.Skip(index).Take(12))
+                        tiles.Add(create(item));
+                    ArrangeTiles();
+                    await Task.Delay(1);
+                }
+            }
+            finally
+            {
+                EndContentWarmup();
+            }
+        };
+        return host;
+    }
+
     private sealed class ReusableSymlinkRow : Grid
     {
         public IndexedItem? Item { get; private set; }

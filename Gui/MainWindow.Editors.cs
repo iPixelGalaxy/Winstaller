@@ -110,19 +110,7 @@ public sealed partial class MainWindow : Window
             foreach (var category in values.GroupBy(VRChatRegistryModule.GetCategory).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
                 panel.Children.Add(new TextBlock { Text = category.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 8, 0, 0) });
-                var tiles = new ItemsRepeater
-                {
-                    Layout = new UniformGridLayout
-                    {
-                        MinItemWidth = 272,
-                        MinItemHeight = 74,
-                        MinRowSpacing = 8,
-                        MinColumnSpacing = 8,
-                        ItemsStretch = UniformGridLayoutItemsStretch.Fill
-                    },
-                    ItemsSource = category.ToList()
-                };
-                tiles.ItemTemplate = new CallbackElementFactory(data => BuildVRChatValueTile(config, backup, (VRChatRegistryValue)data!));
+                var tiles = BuildProgressiveTileGrid(category.ToList(), 272, 74, value => BuildVRChatValueTile(config, backup, value));
                 panel.Children.Add(tiles);
             }
         }
@@ -424,19 +412,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         });
 
-        var tiles = new ItemsRepeater
-        {
-            Layout = new UniformGridLayout
-            {
-                MinItemWidth = 250,
-                MinItemHeight = 88,
-                MinRowSpacing = 8,
-                MinColumnSpacing = 8,
-                ItemsStretch = UniformGridLayoutItemsStretch.Fill
-            },
-            ItemsSource = fontFiles
-        };
-        tiles.ItemTemplate = new CallbackElementFactory(data => BuildFontTile((string)data!, fontsDirectory, config));
+        var tiles = BuildProgressiveTileGrid(fontFiles, 250, 88, fontFile => BuildFontTile(fontFile, fontsDirectory, config));
         panel.Children.Add(tiles);
 
         return panel;
