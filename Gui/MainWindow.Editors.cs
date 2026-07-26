@@ -67,8 +67,12 @@ public sealed partial class MainWindow : Window
             File.Copy(source, destination, overwrite: true);
             if (!config.FilesToImport.Contains(destination, StringComparer.OrdinalIgnoreCase))
                 config.FilesToImport.Add(destination);
-            SaveConfiguration();
-            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            await RunOnUiThreadAsync(() =>
+            {
+                SaveConfiguration();
+                InvalidateCachedPage("Registry");
+                RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
