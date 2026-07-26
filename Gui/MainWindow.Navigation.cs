@@ -342,6 +342,10 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             return BuildRegistryContent(registry);
         }
+        if (module.Config is VRChatRegistryConfig vrchatRegistry)
+        {
+            return BuildVRChatRegistryContent(vrchatRegistry);
+        }
 
         if (module.Config is SystemSettingsConfig or FirewallConfig or SetupTasksConfig)
         {
@@ -374,7 +378,18 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         }
         _navigation.MenuItems.Add(new NavigationViewItemSeparator());
         _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Advanced" });
-        foreach (var module in _modules.Where(module => !IsBasicModule(module.Name)))
+        foreach (var module in _modules.Where(module => !IsBasicModule(module.Name) && !IsNicheModule(module.Name)))
+        {
+            _navigation.MenuItems.Add(new NavigationViewItem
+            {
+                Content = module.Name,
+                Icon = new FontIcon { Glyph = module.IconGlyph },
+                Tag = module
+            });
+        }
+        _navigation.MenuItems.Add(new NavigationViewItemSeparator());
+        _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Niche" });
+        foreach (var module in _modules.Where(module => IsNicheModule(module.Name)))
         {
             _navigation.MenuItems.Add(new NavigationViewItem
             {

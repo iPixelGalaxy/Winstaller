@@ -26,6 +26,52 @@ namespace Winstaller.Gui;
 
 public sealed partial class MainWindow : Window
 {
+    private FrameworkElement BuildVRChatRegistryContent(VRChatRegistryConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Stores a portable JSON backup of HKCU\\SOFTWARE\\VRChat\\VRChat. Restore writes selected values back to VRChat registry.",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(ActionButton("Capture Current VRChat Registry", async () =>
+        {
+            await new VRChatRegistryModule(_config).CaptureAsync();
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        }, primary: true));
+        panel.Children.Add(ActionButton("Restore Selected Groups", async () => await new VRChatRegistryModule(_config).RestoreAsync()));
+
+        var backupPath = Environment.ExpandEnvironmentVariables(config.BackupPath);
+        panel.Children.Add(new TextBlock
+        {
+            Text = File.Exists(backupPath)
+                ? $"Backup: {new FileInfo(backupPath).Length / 1024d:0.#} KB • {File.GetLastWriteTime(backupPath):g}"
+                : "No backup captured yet.",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
+        });
+        panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestoreSettings), "Settings", "Graphics, audio, input, safety, camera, accessibility, and other app settings."));
+        panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestorePersonalData), "Personal data", "Account-linked values, inventories, custom groups, histories, and session-related data."));
+        return panel;
+    }
+
+    private FrameworkElement BuildVRChatRestoreGroup(VRChatRegistryConfig config, string propertyName, string title, string description)
+    {
+        var property = typeof(VRChatRegistryConfig).GetProperty(propertyName)!;
+        var toggle = new ToggleSwitch { IsOn = (bool)property.GetValue(config)!, OffContent = string.Empty, OnContent = string.Empty, VerticalAlignment = VerticalAlignment.Center };
+        toggle.Toggled += (_, _) => { property.SetValue(config, toggle.IsOn); SaveConfiguration(); };
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var text = new StackPanel { Spacing = 2 };
+        text.Children.Add(new TextBlock { Text = title, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
+        text.Children.Add(new TextBlock { Text = description, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
+        row.Children.Add(text);
+        Grid.SetColumn(toggle, 1);
+        row.Children.Add(toggle);
+        return Card(row);
+    }
+
     private FrameworkElement BuildRegistryContent(RegistryConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };

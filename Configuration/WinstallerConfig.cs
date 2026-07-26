@@ -21,6 +21,7 @@ public class WinstallerConfig
     public SystemSettingsConfig SystemSettings { get; set; } = new();
     public FirewallConfig Firewall { get; set; } = new();
     public SetupTasksConfig SetupTasks { get; set; } = new();
+    public VRChatRegistryConfig VRChatRegistry { get; set; } = new();
 
     // Discord and Spotify as separate modules
     public DiscordConfig Discord { get; set; } = new();

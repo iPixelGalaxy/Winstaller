@@ -35,6 +35,7 @@ public static class ConfigurationManager
         new("systemSettings", "system-settings.json", nameof(WinstallerConfig.SystemSettings)),
         new("firewall", "firewall.json", nameof(WinstallerConfig.Firewall)),
         new("setupTasks", "setup-tasks.json", nameof(WinstallerConfig.SetupTasks)),
+        new("vrchatRegistry", "vrchat-registry.json", nameof(WinstallerConfig.VRChatRegistry)),
         new("discord", "discord.json", nameof(WinstallerConfig.Discord)),
         new("spotify", "spotify.json", nameof(WinstallerConfig.Spotify)),
         new("appDataUtility", "app-data-utility.json", nameof(WinstallerConfig.AppDataUtility)),
@@ -213,6 +214,11 @@ public static class ConfigurationManager
                 BackupPath = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "Firewall", "firewall-rules.wfw")
             },
             SetupTasks = new SetupTasksConfig(),
+            VRChatRegistry = new VRChatRegistryConfig
+            {
+                Enabled = false,
+                BackupPath = BootstrapManager.DataRoot is null ? @"<Placeholder>" : Path.Combine(BootstrapManager.DataDirectory, "VRChat", "registry-backup.json")
+            },
             Discord = new DiscordConfig
             {
                 Enabled = false,

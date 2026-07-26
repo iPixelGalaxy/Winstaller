@@ -80,6 +80,7 @@ internal class Program
             new SystemSettingsModule(_config),
             new FirewallModule(_config),
             new SetupTasksModule(_config),
+            new VRChatRegistryModule(_config),
 
             // Application-specific modules
             new DiscordModule(_config),

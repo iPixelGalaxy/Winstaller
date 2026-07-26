@@ -8,11 +8,11 @@ internal static class PersonalizedConfigurationMigration
     {
         if (BootstrapManager.DataRoot is null || !BootstrapManager.DataRoot.Equals(@"D:\.winstaller", StringComparison.OrdinalIgnoreCase)) return;
         var data = BootstrapManager.DataDirectory;
-        CopyFiles(@"D:\ReinstallFiles\Registry", Path.Combine(data, "Registry"), ["RightClickMenus.reg", "VRChatConfigs.reg", "WinRAR.reg", "MonitorConfig.reg", "Remove ms-gamebar.reg"]);
+        CopyFiles(@"D:\ReinstallFiles\Registry", Path.Combine(data, "Registry"), ["RightClickMenus.reg", "WinRAR.reg", "MonitorConfig.reg", "Remove ms-gamebar.reg"]);
         CopyFiles(@"D:\ReinstallFiles\Shortcuts", Path.Combine(data, "FilesAndShortcuts", "Shortcuts"), ["*.lnk"]);
         CopyFiles(@"D:\ReinstallFiles\Startup", Path.Combine(data, "FilesAndShortcuts", "Startup"), ["*.lnk"]);
         CopyFiles(@"D:\ReinstallFiles\Misc", Path.Combine(data, "FilesAndShortcuts", "Misc"), ["id_ed25519", "id_ecdsa", "known_hosts", "mpv.conf"]);
-        config.Registry = new RegistryConfig { Enabled = true, FilesToImport = new[] { "RightClickMenus.reg", "VRChatConfigs.reg", "WinRAR.reg", "MonitorConfig.reg", "Remove ms-gamebar.reg" }.Select(name => Path.Combine(data, "Registry", name)).ToList(), Modifications = [new() { Key = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ValueName = "Microsoft Edge Update", Delete = true }] };
+        config.Registry = new RegistryConfig { Enabled = true, FilesToImport = new[] { "RightClickMenus.reg", "WinRAR.reg", "MonitorConfig.reg", "Remove ms-gamebar.reg" }.Select(name => Path.Combine(data, "Registry", name)).ToList(), Modifications = [new() { Key = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ValueName = "Microsoft Edge Update", Delete = true }] };
         config.FileCopy = new FileCopyConfig { Enabled = true, Operations = DefaultFileOperations(data) };
         config.Startup = new StartupConfig { Enabled = true, Programs = [new() { Name = "VRCX", Path = @"D:\Software\Programs\VRCX\VRCX.exe" }, new() { Name = "Windhawk", Path = @"D:\Software\Programs\Windhawk\windhawk.exe", Arguments = "-tray-only", MachineLevel = true }] };
         config.SystemSettings = new SystemSettingsConfig { Enabled = true, ComputerName = new() { Apply = true, Value = "iPixelGalaxy-PC" }, Transparency = new() { Apply = true, Value = true }, UncAsIntranet = new() { Apply = true, Value = 1 }, SaveZoneInformation = new() { Apply = true, Value = 1 }, ConsentPromptBehaviorAdmin = new() { Apply = true, Value = 5 }, PromptOnSecureDesktop = new() { Apply = true, Value = 0 }, EnableLua = new() { Apply = true, Value = 1 } };

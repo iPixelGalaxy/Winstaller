@@ -227,6 +227,8 @@ private static string GetSettingDescription(PropertyInfo property)
         }
     }
 
+    private static bool IsNicheModule(string name) => name == "VRChat Registry";
+
     private sealed class ReusableSymlinkTile : Grid
     {
         public ReusableSymlinkTile(ReusableSymlinkRow row)
