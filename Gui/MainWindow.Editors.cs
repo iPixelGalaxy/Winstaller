@@ -217,7 +217,6 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private FrameworkElement BuildNetworkDrivesContent(NetworkDrivesConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };
-        var property = typeof(NetworkDrivesConfig).GetProperty(nameof(NetworkDrivesConfig.Drives))!;
         void Refresh()
         {
             RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
@@ -226,7 +225,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         var driveTiles = new List<FrameworkElement>();
         for (var index = 0; index < config.Drives.Count; index++)
         {
-            var tile = BuildListItemEditor(config.Drives, typeof(NetworkDriveMapping), index, Refresh, property);
+            var tile = BuildNetworkDriveTile(config, config.Drives[index], Refresh);
             tile.HorizontalAlignment = HorizontalAlignment.Stretch;
             driveTiles.Add(tile);
         }
@@ -238,6 +237,117 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Refresh();
         }));
         return panel;
+    }
+
+    private FrameworkElement BuildNetworkDriveTile(NetworkDrivesConfig config, NetworkDriveMapping drive, Action refresh)
+    {
+        TextBox TextField(string label, string value, Action<string> save)
+        {
+            var box = new TextBox { Header = label, Text = value, HorizontalAlignment = HorizontalAlignment.Stretch };
+            box.LostFocus += (_, _) => { save(box.Text); SaveConfiguration(); };
+            return box;
+        }
+
+        ToggleSwitch ToggleField(string label, bool value, Action<bool> save)
+        {
+            var toggle = new ToggleSwitch { Header = label, IsOn = value, HorizontalAlignment = HorizontalAlignment.Stretch };
+            toggle.Toggled += (_, _) => { save(toggle.IsOn); SaveConfiguration(); };
+            return toggle;
+        }
+
+        var password = new PasswordBox
+        {
+            Header = "Password",
+            Password = drive.Password,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(12, 0, 40, 0),
+            PasswordRevealMode = PasswordRevealMode.Hidden
+        };
+        var revealed = false;
+        var reveal = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE890", FontSize = 16 },
+            Width = 32,
+            Height = 32,
+            Padding = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderBrush = new SolidColorBrush(Colors.Transparent),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 4, 2)
+        };
+        reveal.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Colors.Transparent);
+        reveal.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Colors.Transparent);
+        ToolTipService.SetToolTip(reveal, "Show password");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(reveal, "Show password");
+        reveal.Click += (_, _) =>
+        {
+            revealed = !revealed;
+            password.PasswordRevealMode = revealed ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
+            reveal.Content = new FontIcon { Glyph = revealed ? "\uE7B3" : "\uE890", FontSize = 16 };
+            ToolTipService.SetToolTip(reveal, revealed ? "Hide password" : "Show password");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(reveal, revealed ? "Hide password" : "Show password");
+        };
+        password.LostFocus += (_, _) => { drive.Password = password.Password; SaveConfiguration(); };
+        var passwordField = new Grid();
+        passwordField.Children.Add(password);
+        passwordField.Children.Add(reveal);
+
+        Grid Row(params FrameworkElement[] fields)
+        {
+            var row = new Grid { ColumnSpacing = 12 };
+            for (var index = 0; index < fields.Length; index++)
+            {
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                Grid.SetColumn(fields[index], index);
+                row.Children.Add(fields[index]);
+            }
+            return row;
+        }
+
+        var title = string.IsNullOrWhiteSpace(drive.DriveLetter) ? "New network drive" : $"{drive.DriveLetter}: {drive.NetworkPath}";
+        var header = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children =
+            {
+                new FontIcon { Glyph = "\uE839", FontSize = 20, VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = title, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis }
+            }
+        };
+        var fields = new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                header,
+                Row(
+                    TextField("Drive Letter", drive.DriveLetter, value => drive.DriveLetter = value),
+                    TextField("Network Path", drive.NetworkPath, value => drive.NetworkPath = value),
+                    TextField("Label", drive.Label, value => drive.Label = value)),
+                Row(
+                    TextField("Username", drive.Username, value => drive.Username = value),
+                    passwordField),
+                Row(
+                    ToggleField("Persistent", drive.Persistent, value => drive.Persistent = value),
+                    ToggleField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value))
+            }
+        };
+        var remove = IconActionButton("\uE74D", "Remove drive", () =>
+        {
+            config.Drives.Remove(drive);
+            SaveConfiguration();
+            refresh();
+        });
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.Children.Add(fields);
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { remove } };
+        Grid.SetRow(footer, 1);
+        content.Children.Add(footer);
+        return Card(content);
     }
 
     private Grid BuildResponsiveTileGrid(IReadOnlyList<FrameworkElement> tiles)
@@ -761,38 +871,6 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                     property.SetValue(target, combo.SelectedItem);
             };
             editor = combo;
-        }
-        else if (target is NetworkDriveMapping && property.Name == nameof(NetworkDriveMapping.Password))
-        {
-            var password = new PasswordBox
-            {
-                Password = value?.ToString() ?? string.Empty,
-                PlaceholderText = "Password",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                PasswordRevealMode = PasswordRevealMode.Hidden
-            };
-            var revealed = false;
-            Button reveal = null!;
-            reveal = IconActionButton("\uE890", "Show password", () =>
-            {
-                revealed = !revealed;
-                password.PasswordRevealMode = revealed ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
-                reveal.Content = new FontIcon { Glyph = revealed ? "\uE7B3" : "\uE890", FontSize = 16 };
-                ToolTipService.SetToolTip(reveal, revealed ? "Hide password" : "Show password");
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(reveal, revealed ? "Hide password" : "Show password");
-            });
-            password.LostFocus += (_, _) =>
-            {
-                property.SetValue(target, password.Password);
-                SaveConfiguration();
-            };
-            var passwordRow = new Grid { ColumnSpacing = 6 };
-            passwordRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            passwordRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            passwordRow.Children.Add(password);
-            Grid.SetColumn(reveal, 1);
-            passwordRow.Children.Add(reveal);
-            editor = passwordRow;
         }
         else
         {
