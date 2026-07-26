@@ -405,7 +405,8 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
                 MinItemWidth = 250,
                 MinItemHeight = 166,
                 MinRowSpacing = 8,
-                MinColumnSpacing = 8
+                MinColumnSpacing = 8,
+                ItemsStretch = UniformGridLayoutItemsStretch.Fill
             },
             ItemsSource = fontFiles
         };
@@ -481,8 +482,8 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
 
         return new Border
         {
-            Width = 250,
             Height = 166,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
             BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
