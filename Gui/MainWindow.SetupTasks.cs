@@ -376,13 +376,20 @@ public sealed partial class MainWindow : Window
         var copy = ActionButton("Copy Full Log", () => CopyTextFromFile(RunLog.Path));
         copy.IsEnabled = false;
         var folder = ActionButton("Open Log Folder", () => OpenFolder(Path.GetDirectoryName(RunLog.Path) ?? BootstrapManager.LogsDirectory));
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Width = width, Children = { folder, copy } };
-        var dialog = new ContentDialog
+        ContentDialog dialog = null!;
+        var done = ActionButton("Done", () =>
+        {
+            dialog.Hide();
+            return Task.CompletedTask;
+        }, primary: true);
+        done.MinWidth = 96;
+        done.Visibility = Visibility.Collapsed;
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Width = width, Children = { folder, copy, done } };
+        dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Running {workflow.Name}",
             Content = new StackPanel { Spacing = 12, Width = width, Children = { progress, output, footer } },
-            CloseButtonText = string.Empty,
             DefaultButton = ContentDialogButton.None
         };
         dialog.Resources["ContentDialogMinWidth"] = width;
@@ -402,8 +409,7 @@ public sealed partial class MainWindow : Window
                 _activeOutputBox = null;
                 progress.IsIndeterminate = false;
                 copy.IsEnabled = true;
-                dialog.CloseButtonText = "Done";
-                dialog.CloseButtonStyle = CreateDoneButtonStyle();
+                done.Visibility = Visibility.Visible;
             });
         }
         await dialogTask;

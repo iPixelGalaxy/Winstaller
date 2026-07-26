@@ -1,7 +1,8 @@
 <Application
     x:Class="Winstaller.Gui.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Winstaller.Gui">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -9,6 +10,7 @@
             </ResourceDictionary.MergedDictionaries>
             <Style TargetType="TextBox">
                 <Setter Property="IsTabStop" Value="True" />
+                <Setter Property="local:TextBoxClipboardBehavior.IsEnabled" Value="True" />
             </Style>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">

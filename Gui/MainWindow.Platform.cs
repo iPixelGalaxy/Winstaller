@@ -291,6 +291,7 @@ private static void WriteDiagnosticLog(string message)
 
     private void AppendTextToOutputBox(TextBox outputBox, string text)
     {
+        var followOutput = _logScrollStates.TryGetValue(outputBox, out var state) && state.IsAtBottom;
         var selectionStart = outputBox.SelectionStart;
         var selectionLength = outputBox.SelectionLength;
         outputBox.Text += text;
@@ -298,22 +299,8 @@ private static void WriteDiagnosticLog(string message)
         outputBox.SelectionStart = Math.Clamp(selectionStart, 0, outputBox.Text.Length);
         outputBox.SelectionLength = Math.Clamp(selectionLength, 0, outputBox.Text.Length - outputBox.SelectionStart);
 
-        if (_logScrollStates.TryGetValue(outputBox, out var state) && state.FollowOutput)
-            DispatcherQueue.TryEnqueue(state.ScrollToEnd);
-    }
-
-    private static Style CreateDoneButtonStyle()
-    {
-        return new Style(typeof(Button))
-        {
-            BasedOn = (Style)Application.Current.Resources["AccentButtonStyle"],
-            Setters =
-            {
-                new Setter(FrameworkElement.WidthProperty, 96d),
-                new Setter(FrameworkElement.MinHeightProperty, 32d),
-                new Setter(Control.PaddingProperty, new Thickness(12, 6, 12, 6))
-            }
-        };
+        if (followOutput && state is not null)
+            state.ScheduleScrollToEnd();
     }
 
     private double GetLogDialogWidth()
@@ -360,8 +347,10 @@ private static void WriteDiagnosticLog(string message)
     private sealed class LogScrollState(TextBox outputBox)
     {
         private ScrollViewer? _scrollViewer;
+        private bool _scrollScheduled;
 
-        public bool FollowOutput { get; private set; } = true;
+        public bool IsAtBottom => _scrollViewer is null ||
+            _scrollViewer.VerticalOffset >= _scrollViewer.ScrollableHeight - 1;
 
         public void Attach()
         {
@@ -369,13 +358,24 @@ private static void WriteDiagnosticLog(string message)
             if (_scrollViewer is null)
                 return;
 
-            _scrollViewer.ViewChanged += (_, _) =>
-                FollowOutput = _scrollViewer.VerticalOffset >= _scrollViewer.ScrollableHeight - 1;
-            ScrollToEnd();
+            _scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+            _scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            ScheduleScrollToEnd();
         }
 
-        public void ScrollToEnd()
+        public void ScheduleScrollToEnd()
         {
+            if (_scrollViewer is null || _scrollScheduled)
+                return;
+
+            _scrollScheduled = true;
+            outputBox.LayoutUpdated += ScrollAfterLayout;
+        }
+
+        private void ScrollAfterLayout(object? sender, object args)
+        {
+            outputBox.LayoutUpdated -= ScrollAfterLayout;
+            _scrollScheduled = false;
             _scrollViewer?.ChangeView(null, _scrollViewer.ScrollableHeight, null, true);
         }
 

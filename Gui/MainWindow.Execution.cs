@@ -62,13 +62,21 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
         var copyLogButton = ActionButton("Copy Full Log", () => CopyTextFromFile(RunLog.Path));
         copyLogButton.IsEnabled = false;
         var openFolderButton = ActionButton("Open Log Folder", () => OpenFolder(Path.GetDirectoryName(RunLog.Path) ?? BootstrapManager.LogsDirectory));
+        ContentDialog dialog = null!;
+        var doneButton = ActionButton("Done", () =>
+        {
+            dialog.Hide();
+            return Task.CompletedTask;
+        }, primary: true);
+        doneButton.MinWidth = 96;
+        doneButton.Visibility = Visibility.Collapsed;
         var footer = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right,
             Width = logDialogWidth,
-            Children = { openFolderButton, copyLogButton }
+            Children = { openFolderButton, copyLogButton, doneButton }
         };
         var content = new StackPanel
         {
@@ -77,12 +85,11 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
             Children = { progress, outputBox, footer }
         };
 
-        var dialog = new ContentDialog
+        dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = modules.Count == 1 ? $"Running {modules[0].Name}" : $"Running {modules.Count} modules",
             Content = content,
-            CloseButtonText = string.Empty,
             DefaultButton = ContentDialogButton.None
         };
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
@@ -102,8 +109,7 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
                 _activeOutputBox = null;
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
-                dialog.CloseButtonText = "Done";
-                dialog.CloseButtonStyle = CreateDoneButtonStyle();
+                doneButton.Visibility = Visibility.Visible;
             });
         }
 

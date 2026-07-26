@@ -121,13 +121,21 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         });
         copyLogButton.HorizontalAlignment = HorizontalAlignment.Right;
         copyLogButton.IsEnabled = false;
+        ContentDialog dialog = null!;
+        var doneButton = ActionButton("Done", () =>
+        {
+            dialog.Hide();
+            return Task.CompletedTask;
+        }, primary: true);
+        doneButton.MinWidth = 96;
+        doneButton.Visibility = Visibility.Collapsed;
         var footer = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             Width = logDialogWidth,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { copyLogButton }
+            Children = { copyLogButton, doneButton }
         };
         var content = new StackPanel
         {
@@ -135,12 +143,11 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
             Width = logDialogWidth,
             Children = { progress, outputBox, footer }
         };
-        var dialog = new ContentDialog
+        dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Importing {SplitName(scope.ToString())}",
             Content = content,
-            CloseButtonText = string.Empty,
             DefaultButton = ContentDialogButton.None
         };
         dialog.Resources["ContentDialogMinWidth"] = logDialogWidth;
@@ -335,8 +342,7 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
                 FlushLog();
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
-                dialog.CloseButtonText = "Done";
-                dialog.CloseButtonStyle = CreateDoneButtonStyle();
+                doneButton.Visibility = Visibility.Visible;
                 EndLongOperation();
             });
         }
