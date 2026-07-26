@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _paneButton = new();
     private readonly Grid _titleBar = new();
     private readonly ProgressBar _busyBar = new();
+    private readonly ProgressRing _scrollLoadRing = new();
     private readonly StackPanel _topBarActions = new();
     private readonly List<TextBlock> _topBarActionLabels = [];
     private readonly Dictionary<RecommendedAppGroup, bool> _appInstallerGroupExpanded = [];
@@ -113,6 +114,12 @@ public sealed partial class MainWindow : Window
         _content.Spacing = 12;
         _content.Padding = new Thickness(28, 22, 28, 28);
         _contentScroll.Content = _content;
+        _contentScroll.ViewChanging += (_, _) => SetScrollLoading(true);
+        _contentScroll.ViewChanged += (_, args) =>
+        {
+            if (!args.IsIntermediate)
+                SetScrollLoading(false);
+        };
         _navigation.Content = _contentScroll;
 
         SetTitleBar(null);
@@ -129,6 +136,23 @@ public sealed partial class MainWindow : Window
 
         Grid.SetRow(_navigation, 2);
         RootGrid.Children.Add(_navigation);
+
+        _scrollLoadRing.Width = 28;
+        _scrollLoadRing.Height = 28;
+        _scrollLoadRing.IsActive = true;
+        _scrollLoadRing.IsHitTestVisible = false;
+        _scrollLoadRing.Visibility = Visibility.Collapsed;
+        _scrollLoadRing.HorizontalAlignment = HorizontalAlignment.Right;
+        _scrollLoadRing.VerticalAlignment = VerticalAlignment.Top;
+        _scrollLoadRing.Margin = new Thickness(0, 16, 20, 0);
+        Grid.SetRow(_scrollLoadRing, 2);
+        RootGrid.Children.Add(_scrollLoadRing);
+    }
+
+    private void SetScrollLoading(bool loading)
+    {
+        var isVirtualizedPage = _currentPageKey is "Fonts" or "App Installer" or "VRChat Registry";
+        _scrollLoadRing.Visibility = loading && isVirtualizedPage ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private Grid BuildTitleBar()

@@ -85,7 +85,6 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
                 tiles.ItemsSource = packageIds.ToList();
             }
             tiles.ItemTemplate = new CallbackElementFactory(data => BuildAppTile((string)data!, config, Refresh));
-            WarmItemsRepeater(tiles);
             void MaterializeTiles()
             {
                 if (isMaterialized)

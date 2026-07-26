@@ -218,23 +218,6 @@ private static string GetSettingDescription(PropertyInfo property)
     private sealed record AppBehaviorDialogState(string PackageId, AppInstallBehavior Behavior);
     private sealed record AppGroupSection(RecommendedAppGroupInfo Group, List<string> PackageIds, Action RefreshTiles, StackPanel Section);
     private sealed record IndexedItem(object Value, int Index);
-
-    private void WarmItemsRepeater(ItemsRepeater items)
-    {
-        var warmed = false;
-        items.VerticalCacheLength = 0.5;
-        items.Loaded += async (_, _) =>
-        {
-            if (warmed)
-                return;
-
-            warmed = true;
-            await Task.Delay(250);
-            if (items.XamlRoot is not null)
-                items.VerticalCacheLength = 1000;
-        };
-    }
-
     private sealed class ReusableSymlinkRow : Grid
     {
         public IndexedItem? Item { get; private set; }
