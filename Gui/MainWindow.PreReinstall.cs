@@ -112,7 +112,20 @@ public sealed partial class MainWindow
                             unchanged.Children.Add(new TextBlock { Text = SplitName(scope.ToString()) });
                         findingCards.Add(Card(unchanged));
                     }
-                    findings.Children.Add(BuildResponsiveTileGrid(findingCards));
+                    var resultGrid = new ItemsRepeater
+                    {
+                        Layout = new UniformGridLayout
+                        {
+                            MinItemWidth = 360,
+                            MinItemHeight = 96,
+                            MinRowSpacing = 8,
+                            MinColumnSpacing = 8,
+                            ItemsStretch = UniformGridLayoutItemsStretch.Fill
+                        },
+                        ItemsSource = findingCards,
+                        ItemTemplate = new CallbackElementFactory(data => (FrameworkElement)data!)
+                    };
+                    findings.Children.Add(resultGrid);
                     status.Text = candidates.Count == 0 ? "No new or changed system configuration found." : $"Found {candidates.Count} item(s). Review selections, then run checklist.";
                     RunLog.Write("Pre-reinstall Checklist", status.Text);
                     run!.IsEnabled = true;
