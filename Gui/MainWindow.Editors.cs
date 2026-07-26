@@ -43,43 +43,75 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildManagedRegistryFiles(RegistryConfig config)
     {
-        var panel = new StackPanel { Spacing = 8 };
+        var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(new TextBlock
         {
-            Text = "Files to Import",
-            FontSize = 18,
-            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+            Text = config.FilesToImport.Count == 0
+                ? "No .reg files imported."
+                : $"{config.FilesToImport.Count} registry file{(config.FilesToImport.Count == 1 ? string.Empty : "s")}",
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         });
         if (config.FilesToImport.Count == 0)
-        {
-            panel.Children.Add(new TextBlock { Text = "No .reg files imported.", Opacity = 0.65 });
-            return Card(panel);
-        }
+            return panel;
 
-        foreach (var path in config.FilesToImport)
+        var tiles = new VariableSizedWrapGrid
         {
-            var row = new Grid { ColumnSpacing = 12 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new FontIcon { Glyph = "\uE7B8", FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
-            var text = new StackPanel { Spacing = 2 };
-            text.Children.Add(new TextBlock { Text = Path.GetFileName(path), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
-            text.Children.Add(new TextBlock { Text = path, FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
-            Grid.SetColumn(text, 1);
-            row.Children.Add(text);
-            var remove = IconActionButton("\uE74D", "Remove from imports", () =>
-            {
-                config.FilesToImport.Remove(path);
-                SaveConfiguration();
-                InvalidateCachedPage("Registry");
-                RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
-            });
-            Grid.SetColumn(remove, 2);
-            row.Children.Add(remove);
-            panel.Children.Add(Card(row));
-        }
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        foreach (var path in config.FilesToImport)
+            tiles.Children.Add(BuildRegistryFileTile(path, config));
+        panel.Children.Add(tiles);
         return panel;
+    }
+
+    private FrameworkElement BuildRegistryFileTile(string path, RegistryConfig config)
+    {
+        var size = File.Exists(path) ? new FileInfo(path).Length : 0;
+        var labels = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        labels.Children.Add(CreateAppTileTitle(Path.GetFileName(path)));
+        labels.Children.Add(new TextBlock
+        {
+            Text = File.Exists(path) ? $"Registry file • {size / 1024d:0.#} KB" : "Registry file • missing",
+            FontSize = 11,
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        });
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.Children.Add(new FontIcon { Glyph = "\uE7B8", FontSize = 40, VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(labels, 1);
+        header.Children.Add(labels);
+
+        var remove = IconActionButton("\uE74D", "Remove from imports", () =>
+        {
+            config.FilesToImport.Remove(path);
+            SaveConfiguration();
+            InvalidateCachedPage("Registry");
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        });
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { remove } };
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.Children.Add(header);
+        Grid.SetRow(footer, 1);
+        content.Children.Add(footer);
+        var tile = new Border
+        {
+            Width = 250,
+            Height = 128,
+            Margin = new Thickness(0, 0, 8, 8),
+            Background = ResourceBrush("WinstallerCardBrush"),
+            BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(14),
+            Child = content
+        };
+        ToolTipService.SetToolTip(tile, path);
+        return tile;
     }
 
     private async Task ImportRegistryFileAsync(RegistryConfig config)
