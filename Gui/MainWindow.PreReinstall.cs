@@ -7,24 +7,6 @@ namespace Winstaller.Gui;
 
 public sealed partial class MainWindow
 {
-    private FrameworkElement PreReinstallChecklistCard()
-    {
-        var grid = new Grid { ColumnSpacing = 14 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.Children.Add(new FontIcon { Glyph = "\uE8B7", FontSize = 22, Width = 28, VerticalAlignment = VerticalAlignment.Center });
-        var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(new TextBlock { Text = "Pre-reinstall Checklist", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
-        text.Children.Add(new TextBlock { Text = "Review detected Windows changes and add selected items to Winstaller.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
-        Grid.SetColumn(text, 1);
-        grid.Children.Add(text);
-        var button = ActionButton("Open", RenderPreReinstallChecklist, primary: true);
-        Grid.SetColumn(button, 2);
-        grid.Children.Add(button);
-        return Card(grid);
-    }
-
     private FrameworkElement BuildPreReinstallChecklistPage()
     {
         var page = new StackPanel { Spacing = 12 };

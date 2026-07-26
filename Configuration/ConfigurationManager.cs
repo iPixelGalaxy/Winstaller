@@ -132,6 +132,17 @@ public static class ConfigurationManager
         SaveJson(DefaultConfigPath, general);
     }
 
+    public static bool IsGuidedSetupReminderHidden() =>
+        LoadJson(DefaultConfigPath, new GeneralConfig()).HideGuidedSetupReminder;
+
+    public static void SetGuidedSetupReminderHidden(bool hidden)
+    {
+        Directory.CreateDirectory(ConfigDirectory);
+        var general = LoadJson(DefaultConfigPath, new GeneralConfig());
+        general.HideGuidedSetupReminder = hidden;
+        SaveJson(DefaultConfigPath, general);
+    }
+
     public static WinstallerConfig CreateDefaultConfiguration()
     {
         return new WinstallerConfig

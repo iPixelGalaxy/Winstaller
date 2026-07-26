@@ -6,4 +6,5 @@ public sealed class GeneralConfig
     public string Theme { get; set; } = "system";
     public Dictionary<string, bool> Modules { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, bool> AppInstallerGroupExpanded { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool HideGuidedSetupReminder { get; set; }
 }

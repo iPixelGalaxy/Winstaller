@@ -50,6 +50,12 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             return;
         }
 
+        if (args.SelectedItemContainer?.Tag is string page && page == PreReinstallChecklistPageKey)
+        {
+            RenderPreReinstallChecklist();
+            return;
+        }
+
         RenderDashboard();
     }
 
@@ -88,8 +94,8 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             var page = new StackPanel { Spacing = 12 };
             page.Children.Add(PageTitle("Dashboard", "Choose what Winstaller should restore or install."));
-            page.Children.Add(GuidedSetupCard());
-            page.Children.Add(PreReinstallChecklistCard());
+            if (!ConfigurationManager.IsGuidedSetupReminderHidden())
+                page.Children.Add(GuidedSetupCard());
 
             var list = new StackPanel { Spacing = 8 };
             foreach (var module in _modules)
@@ -209,6 +215,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         _topBarActions.Children.Clear();
         _topBarActionLabels.Clear();
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Play, "Run All Enabled", async () => await ConfirmAndRunModulesAsync(_modules.Where(m => m.IsEnabled).ToList()), primary: true));
+        _topBarActions.Children.Add(TopBarActionButton(Symbol.Help, "Guided Setup", async () => await RunGuidedSetupAsync()));
         _topBarActions.Children.Add(TopBarActionButton(Symbol.Refresh, "Reload All Configs", () =>
         {
             LoadConfiguration();
@@ -250,9 +257,19 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         text.Children.Add(new TextBlock { Text = "Walk through standard restore setup.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
-        var button = ActionButton("Start", async () => await RunGuidedSetupAsync(), primary: true);
-        Grid.SetColumn(button, 2);
-        grid.Children.Add(button);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(ActionButton("Start", async () => await RunGuidedSetupAsync(), primary: true));
+        actions.Children.Add(ActionButton("Hide Reminder", async () =>
+        {
+            if (!await ConfirmAsync("Hide guided setup reminder?", "This removes it from Dashboard. Guided Setup remains in Dashboard top bar.", "Hide"))
+                return;
+
+            ConfigurationManager.SetGuidedSetupReminderHidden(true);
+            InvalidateCachedPage(DashboardPageKey);
+            RenderDashboard();
+        }));
+        Grid.SetColumn(actions, 2);
+        grid.Children.Add(actions);
         return Card(grid);
     }
 
@@ -443,6 +460,12 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             Content = "Dashboard",
             Icon = new SymbolIcon(Symbol.Home),
             Tag = "dashboard"
+        });
+        _navigation.MenuItems.Add(new NavigationViewItem
+        {
+            Content = "Pre-reinstall Checklist",
+            Icon = new SymbolIcon(Symbol.Accept),
+            Tag = PreReinstallChecklistPageKey
         });
         _navigation.MenuItems.Add(new NavigationViewItemSeparator());
         _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Basic" });
