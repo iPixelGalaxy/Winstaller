@@ -330,6 +330,10 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         {
             return BuildPathContent(path);
         }
+        if (module.Config is NetworkDrivesConfig networkDrives)
+        {
+            return BuildNetworkDrivesContent(networkDrives);
+        }
         if (module.Config is SymlinksConfig symlinks)
         {
             return BuildSymlinksContent(symlinks);

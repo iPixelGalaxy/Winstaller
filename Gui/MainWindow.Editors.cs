@@ -214,6 +214,32 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         return panel;
     }
 
+    private FrameworkElement BuildNetworkDrivesContent(NetworkDrivesConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        var property = typeof(NetworkDrivesConfig).GetProperty(nameof(NetworkDrivesConfig.Drives))!;
+        void Refresh()
+        {
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        }
+
+        var driveTiles = new List<FrameworkElement>();
+        for (var index = 0; index < config.Drives.Count; index++)
+        {
+            var tile = BuildListItemEditor(config.Drives, typeof(NetworkDriveMapping), index, Refresh, property);
+            tile.HorizontalAlignment = HorizontalAlignment.Stretch;
+            driveTiles.Add(tile);
+        }
+        panel.Children.Add(BuildResponsiveTileGrid(driveTiles));
+        panel.Children.Add(ActionButton("+ Add Drive", () =>
+        {
+            config.Drives.Add(new NetworkDriveMapping());
+            SaveConfiguration();
+            Refresh();
+        }));
+        return panel;
+    }
+
     private Grid BuildResponsiveTileGrid(IReadOnlyList<FrameworkElement> tiles)
     {
         var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
@@ -428,6 +454,38 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             };
 
             editor = box;
+        }
+        else if (target is NetworkDriveMapping && property.Name == nameof(NetworkDriveMapping.Password))
+        {
+            var password = new PasswordBox
+            {
+                Password = value?.ToString() ?? string.Empty,
+                PlaceholderText = "Password",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                PasswordRevealMode = PasswordRevealMode.Hidden
+            };
+            var revealed = false;
+            Button reveal = null!;
+            reveal = IconActionButton("\uE890", "Show password", () =>
+            {
+                revealed = !revealed;
+                password.PasswordRevealMode = revealed ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
+                reveal.Content = new FontIcon { Glyph = revealed ? "\uE7B3" : "\uE890", FontSize = 16 };
+                ToolTipService.SetToolTip(reveal, revealed ? "Hide password" : "Show password");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(reveal, revealed ? "Hide password" : "Show password");
+            });
+            password.LostFocus += (_, _) =>
+            {
+                property.SetValue(target, password.Password);
+                SaveConfiguration();
+            };
+            var passwordRow = new Grid { ColumnSpacing = 6 };
+            passwordRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            passwordRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            passwordRow.Children.Add(password);
+            Grid.SetColumn(reveal, 1);
+            passwordRow.Children.Add(reveal);
+            editor = passwordRow;
         }
         else
         {
