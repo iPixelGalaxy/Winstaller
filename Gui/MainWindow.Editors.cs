@@ -305,6 +305,23 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         passwordField.Children.Add(password);
         passwordField.Children.Add(reveal);
 
+        string GetTitle() => !string.IsNullOrWhiteSpace(drive.Label)
+            ? drive.Label
+            : string.IsNullOrWhiteSpace(drive.DriveLetter) ? "New network drive" : $"{drive.DriveLetter}: {drive.NetworkPath}";
+        var title = new TextBlock
+        {
+            Text = GetTitle(),
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var labelField = TextField("Label", drive.Label, value => drive.Label = value);
+        labelField.TextChanged += (_, _) =>
+        {
+            drive.Label = labelField.Text;
+            title.Text = GetTitle();
+        };
+
         var inputRow = new Grid { ColumnSpacing = 12 };
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
@@ -315,7 +332,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         {
             driveLetter,
             TextField("Network Path", drive.NetworkPath, value => drive.NetworkPath = value),
-            TextField("Label", drive.Label, value => drive.Label = value),
+            labelField,
             TextField("Username", drive.Username, value => drive.Username = value),
             passwordField
         };
@@ -324,52 +341,43 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Grid.SetColumn(inputFields[index], index);
             inputRow.Children.Add(inputFields[index]);
         }
-        var options = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 24,
-            Children =
-            {
-                CheckField("Persistent", drive.Persistent, value => drive.Persistent = value),
-                CheckField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value)
-            }
-        };
-
-        var title = string.IsNullOrWhiteSpace(drive.DriveLetter) ? "New network drive" : $"{drive.DriveLetter}: {drive.NetworkPath}";
-        var header = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Children =
-            {
-                new FontIcon { Glyph = "\uE839", FontSize = 20, VerticalAlignment = VerticalAlignment.Center },
-                new TextBlock { Text = title, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis }
-            }
-        };
-        var fields = new StackPanel
-        {
-            Spacing = 10,
-            Children =
-            {
-                header,
-                inputRow,
-                options
-            }
-        };
         var remove = IconActionButton("\uE74D", "Remove drive", () =>
         {
             config.Drives.Remove(drive);
             SaveConfiguration();
             refresh();
         });
-        var content = new Grid();
-        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.Children.Add(fields);
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { remove } };
-        Grid.SetRow(footer, 1);
-        content.Children.Add(footer);
-        return Card(content);
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 16,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                CheckField("Persistent", drive.Persistent, value => drive.Persistent = value),
+                CheckField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value),
+                remove
+            }
+        };
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new FontIcon { Glyph = "\uE839", FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(title, 1);
+        header.Children.Add(title);
+        Grid.SetColumn(actions, 2);
+        header.Children.Add(actions);
+        var fields = new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                header,
+                inputRow
+            }
+        };
+        return Card(fields);
     }
 
     private Grid BuildResponsiveTileGrid(IReadOnlyList<FrameworkElement> tiles)
