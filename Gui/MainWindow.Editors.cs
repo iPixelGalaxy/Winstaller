@@ -230,7 +230,7 @@ public sealed partial class MainWindow : Window
     private FrameworkElement BuildVRChatRestoreGroup(VRChatRegistryConfig config, string propertyName, string title, string description)
     {
         var property = typeof(VRChatRegistryConfig).GetProperty(propertyName)!;
-        var toggle = new ToggleSwitch { IsOn = (bool)property.GetValue(config)!, OffContent = string.Empty, OnContent = string.Empty, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        var toggle = new ToggleSwitch { IsOn = (bool)property.GetValue(config)!, OffContent = string.Empty, OnContent = string.Empty, Width = 52, MinWidth = 52, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         toggle.Toggled += (_, _) => { property.SetValue(config, toggle.IsOn); SaveConfiguration(); };
         var row = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -241,9 +241,7 @@ public sealed partial class MainWindow : Window
         row.Children.Add(text);
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
-        var card = Card(row);
-        card.SizeChanged += (_, _) => row.Width = Math.Max(0, card.ActualWidth - card.Padding.Left - card.Padding.Right);
-        return card;
+        return Card(row);
     }
 
     private static FrameworkElement BuildResponsiveRestoreGrid(IReadOnlyList<FrameworkElement> cards)
