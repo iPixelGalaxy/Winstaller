@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Winstaller.Configuration;
-using Winstaller.Modules;
 using Winstaller.Utilities;
 
 namespace Winstaller.Gui;
@@ -17,7 +16,7 @@ public sealed partial class MainWindow
         grid.Children.Add(new FontIcon { Glyph = "\uE8B7", FontSize = 22, Width = 28, VerticalAlignment = VerticalAlignment.Center });
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = "Pre-reinstall Checklist", FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
-        text.Children.Add(new TextBlock { Text = "Refresh backups, review detected changes, and save selected system configuration.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
+        text.Children.Add(new TextBlock { Text = "Review detected Windows changes and add selected items to Winstaller.", Foreground = ResourceBrush("WinstallerSecondaryTextBrush") });
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
         var button = ActionButton("Open", RenderPreReinstallChecklist, primary: true);
@@ -29,7 +28,7 @@ public sealed partial class MainWindow
     private FrameworkElement BuildPreReinstallChecklistPage()
     {
         var page = new StackPanel { Spacing = 12 };
-        page.Children.Add(PageTitle("Pre-reinstall Checklist", "Refresh managed backups, then review current Windows changes before reinstalling."));
+        page.Children.Add(PageTitle("Pre-reinstall Checklist", "Review current Windows changes and add selected items to their Winstaller sections."));
         var scanStatus = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var spinner = new ProgressRing { IsActive = true, Width = 20, Height = 20, Visibility = Visibility.Collapsed };
         scanStatus.Children.Add(spinner);
@@ -38,38 +37,11 @@ public sealed partial class MainWindow
         page.Children.Add(scanStatus);
         page.Children.Add(new TextBlock { Text = $"Scan log: {RunLog.Path}", FontSize = 12, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
 
-        var backupTasks = new StackPanel { Spacing = 6 };
-        page.Children.Add(Card(new StackPanel
-        {
-            Spacing = 8,
-            Children =
-            {
-                new TextBlock { Text = "Managed backups", FontSize = 18, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } },
-                backupTasks
-            }
-        }));
-
         var findings = new StackPanel { Spacing = 8 };
         page.Children.Add(findings);
         var checks = new List<(SystemInfoImportCandidate Candidate, CheckBox Check)>();
         Button? scan = null;
         Button? run = null;
-
-        void ShowBackupTasks()
-        {
-            backupTasks.Children.Clear();
-            AddTask("Files & Shortcuts", _config.FileCopy.Enabled, _config.FileCopy.Operations.Count(operation => !operation.SkipPreReinstallBackup));
-            AddTask("Windows Firewall", _config.Firewall.Enabled, null);
-            AddTask("VRChat Registry", _config.VRChatRegistry.Enabled, null);
-        }
-
-        void AddTask(string name, bool enabled, int? count)
-        {
-            var detail = enabled
-                ? count is null ? "Will refresh managed backup" : $"Will refresh {count} restore backup(s)"
-                : "Skipped because module is disabled";
-            backupTasks.Children.Add(new TextBlock { Text = $"{name}: {detail}", Foreground = enabled ? null : ResourceBrush("WinstallerSecondaryTextBrush") });
-        }
 
         async Task ScanAsync()
         {
@@ -80,7 +52,6 @@ public sealed partial class MainWindow
             RunLog.Write("Pre-reinstall Checklist", "Scan requested.");
             findings.Children.Clear();
             checks.Clear();
-            ShowBackupTasks();
             try
             {
                 var candidates = (await Task.Run(async () => await SystemInfoImportService.FindCandidatesAsync(
@@ -93,6 +64,7 @@ public sealed partial class MainWindow
                     .ToList();
                 await RunOnUiThreadAsync(() =>
                 {
+                    var findingCards = new List<FrameworkElement>();
                     foreach (var group in candidates.GroupBy(candidate => candidate.Group == "Changed" ? "Changed configuration" : $"New {SplitName(candidate.Scope.ToString())}"))
                     {
                         var groupPanel = new StackPanel { Spacing = 6 };
@@ -126,7 +98,7 @@ public sealed partial class MainWindow
                             else
                                 groupPanel.Children.Add(check);
                         }
-                        findings.Children.Add(Card(groupPanel));
+                        findingCards.Add(Card(groupPanel));
                     }
                     var scannedScopes = new[]
                     {
@@ -145,8 +117,9 @@ public sealed partial class MainWindow
                         unchanged.Children.Add(new TextBlock { Text = "No changes detected", FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 } });
                         foreach (var scope in unchangedScopes)
                             unchanged.Children.Add(new TextBlock { Text = SplitName(scope.ToString()) });
-                        findings.Children.Add(Card(unchanged));
+                        findingCards.Add(Card(unchanged));
                     }
+                    findings.Children.Add(BuildResponsiveTileGrid(findingCards));
                     status.Text = candidates.Count == 0 ? "No new or changed system configuration found." : $"Found {candidates.Count} item(s). Review selections, then run checklist.";
                     RunLog.Write("Pre-reinstall Checklist", status.Text);
                     run!.IsEnabled = true;
@@ -173,29 +146,18 @@ public sealed partial class MainWindow
         async Task RunAsync()
         {
             var selected = checks.Where(entry => entry.Check.IsChecked == true).Select(entry => entry.Candidate).ToList();
-            if (!await ConfirmAsync("Run pre-reinstall checklist?", $"This refreshes enabled backups and applies {selected.Count} selected system configuration item(s).", "Run"))
+            if (!await ConfirmAsync("Add selected items?", $"This adds {selected.Count} selected system configuration item(s) to Winstaller.", "Add"))
                 return;
 
             run!.IsEnabled = false;
             scan!.IsEnabled = false;
             BeginLongOperation();
-            status.Text = "Refreshing backups and applying selected configuration…";
+            status.Text = "Adding selected system configuration…";
             try
             {
-                var messages = await Task.Run(async () =>
+                var messages = await Task.Run(() =>
                 {
                     var output = new List<string>();
-                    if (_config.FileCopy.Enabled)
-                    {
-                        var result = PreReinstallChecklistService.RefreshFileBackups(_config.FileCopy, output.Add);
-                        output.Add($"Files & Shortcuts: {result.Updated} updated, {result.Removed} stale file(s) removed.");
-                        output.AddRange(result.Warnings);
-                    }
-                    if (_config.Firewall.Enabled)
-                        output.Add((await new FirewallModule(_config).CaptureAsync()) ? "Firewall backup refreshed." : "Firewall backup failed.");
-                    if (_config.VRChatRegistry.Enabled)
-                        output.Add((await new VRChatRegistryModule(_config).CaptureAsync()) ? "VRChat registry backup refreshed." : "VRChat registry backup failed.");
-
                     var applied = SystemInfoImportService.ApplyCandidatesWithResult(_config, selected, SymlinkImportMode.Copy, output.Add);
                     output.Add($"System configuration: {applied.Added} item(s) applied.");
                     output.AddRange(applied.SymlinkFailures.Select(failure => $"{failure.Title}: {failure.Message}"));
@@ -204,7 +166,7 @@ public sealed partial class MainWindow
                 });
                 foreach (var message in messages)
                     AppendOutput(message);
-                status.Text = "Checklist finished. See activity log for details.";
+                status.Text = "Selected items added. See activity log for details.";
             }
             catch (Exception ex)
             {
