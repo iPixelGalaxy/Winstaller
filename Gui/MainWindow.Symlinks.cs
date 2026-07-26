@@ -243,7 +243,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
 
     private ReusableSymlinkRow BuildCompactSpecialSymlinkItem(SymlinksConfig config, IList list, Action refresh)
     {
-        var outer = new ReusableSymlinkRow { ColumnSpacing = 4 };
+        var outer = new ReusableSymlinkRow { ColumnSpacing = 4, RowSpacing = 6 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -355,7 +355,12 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         Grid.SetColumn(targetBox, 1);
         targetRow.Children.Add(targetBox);
 
-        var isFile = new CheckBox { Content = "File", HorizontalAlignment = HorizontalAlignment.Right };
+        var isFile = new CheckBox
+        {
+            Content = "File",
+            FlowDirection = FlowDirection.RightToLeft,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
         isFile.Checked += (_, _) =>
         {
             if (isBinding)
