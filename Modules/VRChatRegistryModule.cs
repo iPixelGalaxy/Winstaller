@@ -112,7 +112,14 @@ public class VRChatRegistryModule : ModuleBase
         RegistryValueKind.QWord => unchecked((long)ulong.Parse(value.Data, CultureInfo.InvariantCulture)),
         _ => value.Data
     };
-    private static uint ToUInt32(object? value) => value switch { int number => unchecked((uint)number), uint number => number, _ => Convert.ToUInt32(value, CultureInfo.InvariantCulture) };
+    private static uint ToUInt32(object? value) => value switch
+    {
+        int number => unchecked((uint)number),
+        uint number => number,
+        long number => unchecked((uint)number),
+        ulong number => unchecked((uint)number),
+        _ => unchecked((uint)Convert.ToInt64(value, CultureInfo.InvariantCulture))
+    };
     private static ulong ToUInt64(object? value) => value switch { long number => unchecked((ulong)number), ulong number => number, _ => Convert.ToUInt64(value, CultureInfo.InvariantCulture) };
     private static VRChatRegistryGroup Classify(string name) => name.StartsWith("usr_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("unity.", StringComparison.OrdinalIgnoreCase) || name.Contains("Session", StringComparison.OrdinalIgnoreCase) || name.Contains("Inventory", StringComparison.OrdinalIgnoreCase) || name.Contains("CustomGroup", StringComparison.OrdinalIgnoreCase) || name.Contains("History", StringComparison.OrdinalIgnoreCase) || name.StartsWith("HasSeen", StringComparison.OrdinalIgnoreCase) || name.StartsWith("FirstTime", StringComparison.OrdinalIgnoreCase) ? VRChatRegistryGroup.Personal : VRChatRegistryGroup.Settings;
 }
