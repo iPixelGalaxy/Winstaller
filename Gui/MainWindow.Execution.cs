@@ -52,7 +52,7 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
     private async Task RunModulesWithOutputDialogAsync(IReadOnlyList<ModuleDescriptor> modules)
     {
         var logDialogWidth = GetLogDialogWidth();
-        var outputBox = CreateLogOutputBox(logDialogWidth);
+        var outputView = CreateLogOutputView(logDialogWidth, out var outputBox);
 
         var progress = new ProgressBar
         {
@@ -70,19 +70,19 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
         }, primary: true);
         doneButton.MinWidth = 96;
         doneButton.Visibility = Visibility.Collapsed;
-        var footer = new StackPanel
+        var footerButtons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Width = logDialogWidth,
             Children = { openFolderButton, copyLogButton, doneButton }
         };
+        var footer = new Grid { Width = logDialogWidth, Children = { footerButtons } };
         var content = new StackPanel
         {
             Spacing = 12,
             Width = logDialogWidth,
-            Children = { progress, outputBox, footer }
+            Children = { progress, outputView, footer }
         };
 
         dialog = new ContentDialog

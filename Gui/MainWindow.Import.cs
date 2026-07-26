@@ -107,7 +107,7 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         }
 
         var logDialogWidth = GetLogDialogWidth();
-        var outputBox = CreateLogOutputBox(logDialogWidth);
+        var outputView = CreateLogOutputView(logDialogWidth, out var outputBox);
 
         var progress = new ProgressBar
         {
@@ -129,19 +129,19 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         }, primary: true);
         doneButton.MinWidth = 96;
         doneButton.Visibility = Visibility.Collapsed;
-        var footer = new StackPanel
+        var footerButtons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            Width = logDialogWidth,
             HorizontalAlignment = HorizontalAlignment.Right,
             Children = { copyLogButton, doneButton }
         };
+        var footer = new Grid { Width = logDialogWidth, Children = { footerButtons } };
         var content = new StackPanel
         {
             Spacing = 12,
             Width = logDialogWidth,
-            Children = { progress, outputBox, footer }
+            Children = { progress, outputView, footer }
         };
         dialog = new ContentDialog
         {
@@ -318,7 +318,7 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
                                 });
                             }
                         }, primary: true);
-                        footer.Children.Insert(0, button);
+                        footerButtons.Children.Insert(0, button);
                     });
                 }
                 else

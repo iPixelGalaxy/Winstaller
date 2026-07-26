@@ -371,7 +371,7 @@ public sealed partial class MainWindow : Window
     private async Task RunSetupWorkflowWithOutputDialogAsync(SetupWorkflow workflow)
     {
         var width = GetLogDialogWidth();
-        var output = CreateLogOutputBox(width);
+        var outputView = CreateLogOutputView(width, out var output);
         var progress = new ProgressBar { IsIndeterminate = true, MinWidth = width };
         var copy = ActionButton("Copy Full Log", () => CopyTextFromFile(RunLog.Path));
         copy.IsEnabled = false;
@@ -384,12 +384,13 @@ public sealed partial class MainWindow : Window
         }, primary: true);
         done.MinWidth = 96;
         done.Visibility = Visibility.Collapsed;
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Width = width, Children = { folder, copy, done } };
+        var footerButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Children = { folder, copy, done } };
+        var footer = new Grid { Width = width, Children = { footerButtons } };
         dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Running {workflow.Name}",
-            Content = new StackPanel { Spacing = 12, Width = width, Children = { progress, output, footer } },
+            Content = new StackPanel { Spacing = 12, Width = width, Children = { progress, outputView, footer } },
             DefaultButton = ContentDialogButton.None
         };
         dialog.Resources["ContentDialogMinWidth"] = width;
