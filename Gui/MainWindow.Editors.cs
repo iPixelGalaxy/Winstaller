@@ -150,11 +150,8 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private FrameworkElement BuildShellFoldersContent(ShellFoldersConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };
-        var folders = new VariableSizedWrapGrid
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
+        var folders = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        var folderTiles = new List<FrameworkElement>();
         void Refresh()
         {
             RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
@@ -162,10 +159,31 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         for (var index = 0; index < config.Folders.Count; index++)
         {
             var tile = BuildListItemEditor(config.Folders, typeof(ShellFolderMapping), index, Refresh);
-            tile.Width = 360;
-            tile.Margin = new Thickness(0, 0, 8, 8);
-            folders.Children.Add(tile);
+            tile.HorizontalAlignment = HorizontalAlignment.Stretch;
+            folderTiles.Add(tile);
         }
+        void ArrangeTiles()
+        {
+            var columns = RootGrid.ActualWidth >= 960 ? 2 : 1;
+            if (folders.ColumnDefinitions.Count == columns)
+                return;
+
+            folders.ColumnDefinitions.Clear();
+            folders.RowDefinitions.Clear();
+            folders.Children.Clear();
+            for (var column = 0; column < columns; column++)
+                folders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (var row = 0; row < (int)Math.Ceiling(folderTiles.Count / (double)columns); row++)
+                folders.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (var index = 0; index < folderTiles.Count; index++)
+            {
+                Grid.SetRow(folderTiles[index], index / columns);
+                Grid.SetColumn(folderTiles[index], index % columns);
+                folders.Children.Add(folderTiles[index]);
+            }
+        }
+        folders.SizeChanged += (_, _) => ArrangeTiles();
+        ArrangeTiles();
         panel.Children.Add(folders);
 
         var presets = GetShellFolderPresets()
