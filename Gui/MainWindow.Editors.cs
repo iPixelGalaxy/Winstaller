@@ -150,7 +150,23 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     private FrameworkElement BuildShellFoldersContent(ShellFoldersConfig config)
     {
         var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(BuildListSection(config, typeof(ShellFoldersConfig).GetProperty(nameof(ShellFoldersConfig.Folders))!, allowAdd: false));
+        var folders = new VariableSizedWrapGrid
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        void Refresh()
+        {
+            RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+        }
+        for (var index = 0; index < config.Folders.Count; index++)
+        {
+            var tile = BuildListItemEditor(config.Folders, typeof(ShellFolderMapping), index, Refresh);
+            tile.Width = 360;
+            tile.Margin = new Thickness(0, 0, 8, 8);
+            folders.Children.Add(tile);
+        }
+        panel.Children.Add(folders);
 
         var presets = GetShellFolderPresets()
             .Where(preset => !config.Folders.Any(folder => folder.RegistryValue.Equals(preset.RegistryValue, StringComparison.OrdinalIgnoreCase)))
