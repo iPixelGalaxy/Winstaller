@@ -69,8 +69,12 @@ public sealed partial class MainWindow : Window
                 : "No backup captured yet.",
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         });
-        panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestoreSettings), "Settings", "Graphics, audio, input, safety, camera, accessibility, and other app settings."));
-        panel.Children.Add(BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestorePersonalData), "Personal data", "Account-linked values, inventories, custom groups, histories, and session-related data."));
+        var restoreGroups = new FrameworkElement[]
+        {
+            BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestoreSettings), "Settings", "Graphics, audio, input, safety, camera, accessibility, and other app settings."),
+            BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestorePersonalData), "Personal data", "Account-linked values, inventories, custom groups, histories, and session-related data.")
+        };
+        panel.Children.Add(BuildProgressiveTileGrid(restoreGroups, 360, 124, group => group));
         var backupValues = new StackPanel { Spacing = 12 };
         backupValues.Children.Add(new StackPanel
         {
@@ -226,9 +230,9 @@ public sealed partial class MainWindow : Window
     private FrameworkElement BuildVRChatRestoreGroup(VRChatRegistryConfig config, string propertyName, string title, string description)
     {
         var property = typeof(VRChatRegistryConfig).GetProperty(propertyName)!;
-        var toggle = new ToggleSwitch { IsOn = (bool)property.GetValue(config)!, OffContent = string.Empty, OnContent = string.Empty, VerticalAlignment = VerticalAlignment.Center };
+        var toggle = new ToggleSwitch { IsOn = (bool)property.GetValue(config)!, OffContent = string.Empty, OnContent = string.Empty, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         toggle.Toggled += (_, _) => { property.SetValue(config, toggle.IsOn); SaveConfiguration(); };
-        var row = new Grid { ColumnSpacing = 12 };
+        var row = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 2 };
