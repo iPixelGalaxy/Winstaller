@@ -87,14 +87,17 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
                     var item = (IndexedItem)data!;
                     return BuildListItemEditor(list, itemType, item.Index, Refresh, property);
                 });
-        panel.Children.Add(emptyText);
-        panel.Children.Add(new ScrollViewer
+        var listScroll = new ScrollViewer
         {
             Content = items,
-            MaxHeight = 620,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
-        });
+        };
+        void UpdateListHeight() => listScroll.Height = Math.Max(240, RootGrid.ActualHeight - 230);
+        UpdateListHeight();
+        RootGrid.SizeChanged += (_, _) => UpdateListHeight();
+        panel.Children.Add(emptyText);
+        panel.Children.Add(listScroll);
 
         void Refresh()
         {
@@ -108,6 +111,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         var header = new Grid { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.Children.Add(new FontIcon
         {
             Glyph = GetConfigGlyph(property, null),
@@ -126,13 +130,15 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         Grid.SetColumn(text, 1);
         header.Children.Add(text);
 
-        panel.Children.Add(ActionButton($"+ Add {title}", () =>
+        var add = ActionButton($"+ Add {title}", () =>
         {
             list.Add(CreateDefaultItem(itemType));
             if (itemType != typeof(string))
                 SaveConfiguration();
             Refresh();
-        }));
+        });
+        Grid.SetColumn(add, 2);
+        header.Children.Add(add);
 
         Refresh();
         return new StackPanel
