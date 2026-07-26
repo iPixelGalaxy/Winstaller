@@ -354,7 +354,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         Grid.SetColumn(targetBox, 1);
         targetRow.Children.Add(targetBox);
 
-        var isFile = new CheckBox { Content = "Is File?", HorizontalAlignment = HorizontalAlignment.Right };
+        var isFile = new CheckBox { Content = "File", HorizontalAlignment = HorizontalAlignment.Right };
         isFile.Checked += (_, _) =>
         {
             if (isBinding)
