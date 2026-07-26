@@ -746,6 +746,187 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         return grid;
     }
 
+    private FrameworkElement BuildStartupContent(StartupConfig config)
+    {
+        var panel = new StackPanel { Spacing = 12 };
+        void Refresh() => RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Startup Programs",
+            FontSize = 18,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
+        });
+        panel.Children.Add(BuildResponsiveTileGrid(config.Programs
+            .Select(program => BuildStartupProgramTile(config, program, Refresh))
+            .Cast<FrameworkElement>()
+            .ToList()));
+        panel.Children.Add(ActionButton("+ Add Startup Program", () =>
+        {
+            config.Programs.Add(new StartupProgram());
+            SaveConfiguration();
+            Refresh();
+        }));
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Processes To Run",
+            FontSize = 18,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            Margin = new Thickness(0, 12, 0, 0)
+        });
+        panel.Children.Add(BuildResponsiveTileGrid(config.ProcessesToRun
+            .Select(process => BuildStartupProcessTile(config, process, Refresh))
+            .Cast<FrameworkElement>()
+            .ToList()));
+        panel.Children.Add(ActionButton("+ Add Process", () =>
+        {
+            config.ProcessesToRun.Add(new ProcessToRun());
+            SaveConfiguration();
+            Refresh();
+        }));
+
+        return panel;
+    }
+
+    private FrameworkElement BuildStartupProgramTile(StartupConfig config, StartupProgram program, Action refresh)
+    {
+        TextBox TextField(string label, string value, Action<string> save)
+        {
+            var box = new TextBox { Header = label, Text = value, HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(12, 4, 12, 4) };
+            box.LostFocus += (_, _) => { save(box.Text); SaveConfiguration(); };
+            return box;
+        }
+
+        CheckBox CheckField(string label, bool value, Action<bool> save)
+        {
+            var checkBox = new CheckBox { Content = label, IsChecked = value, VerticalAlignment = VerticalAlignment.Center };
+            checkBox.Checked += (_, _) => { save(true); SaveConfiguration(); };
+            checkBox.Unchecked += (_, _) => { save(false); SaveConfiguration(); };
+            return checkBox;
+        }
+
+        var title = new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(program.Name) ? "New startup program" : program.Name,
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var name = TextField("Name", program.Name, value => program.Name = value);
+        name.TextChanged += (_, _) => title.Text = string.IsNullOrWhiteSpace(name.Text) ? "New startup program" : name.Text;
+
+        var remove = IconActionButton("\uE74D", "Remove startup program", () =>
+        {
+            config.Programs.Remove(program);
+            SaveConfiguration();
+            refresh();
+        });
+        remove.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(title);
+        var enabled = CheckField("Enabled", program.Enabled, value => program.Enabled = value);
+        Grid.SetColumn(enabled, 1);
+        header.Children.Add(enabled);
+        var allUsers = CheckField("All Users", program.MachineLevel, value => program.MachineLevel = value);
+        Grid.SetColumn(allUsers, 2);
+        header.Children.Add(allUsers);
+        Grid.SetColumn(remove, 3);
+        header.Children.Add(remove);
+
+        var fields = new Grid { ColumnSpacing = 12 };
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var inputs = new FrameworkElement[]
+        {
+            name,
+            TextField("Executable Path", program.Path, value => program.Path = value),
+            TextField("Arguments", program.Arguments, value => program.Arguments = value)
+        };
+        for (var index = 0; index < inputs.Length; index++)
+        {
+            Grid.SetColumn(inputs[index], index);
+            fields.Children.Add(inputs[index]);
+        }
+
+        return Card(new StackPanel { Spacing = 10, Children = { header, fields } });
+    }
+
+    private FrameworkElement BuildStartupProcessTile(StartupConfig config, ProcessToRun process, Action refresh)
+    {
+        TextBox TextField(string label, string value, Action<string> save)
+        {
+            var box = new TextBox { Header = label, Text = value, HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(12, 4, 12, 4) };
+            box.LostFocus += (_, _) => { save(box.Text); SaveConfiguration(); };
+            return box;
+        }
+
+        var title = new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(process.Path) ? "New startup process" : Path.GetFileName(process.Path),
+            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 },
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var path = TextField("Executable Path", process.Path, value => process.Path = value);
+        path.TextChanged += (_, _) => title.Text = string.IsNullOrWhiteSpace(path.Text) ? "New startup process" : Path.GetFileName(path.Text);
+
+        var waitForExit = new CheckBox { Content = "Wait For Exit", IsChecked = process.WaitForExit, VerticalAlignment = VerticalAlignment.Center };
+        waitForExit.Checked += (_, _) => { process.WaitForExit = true; SaveConfiguration(); };
+        waitForExit.Unchecked += (_, _) => { process.WaitForExit = false; SaveConfiguration(); };
+        var killAfter = new NumberBox
+        {
+            Header = "Kill After Seconds",
+            Value = process.KillAfterSeconds ?? double.NaN,
+            PlaceholderText = "Optional",
+            Width = 150,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
+        };
+        killAfter.ValueChanged += (_, args) =>
+        {
+            process.KillAfterSeconds = double.IsNaN(args.NewValue) ? null : Convert.ToInt32(args.NewValue);
+            SaveConfiguration();
+        };
+        var remove = IconActionButton("\uE74D", "Remove startup process", () =>
+        {
+            config.ProcessesToRun.Remove(process);
+            SaveConfiguration();
+            refresh();
+        });
+        remove.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(title);
+        Grid.SetColumn(waitForExit, 1);
+        header.Children.Add(waitForExit);
+        Grid.SetColumn(killAfter, 2);
+        header.Children.Add(killAfter);
+        Grid.SetColumn(remove, 3);
+        header.Children.Add(remove);
+
+        var fields = new Grid { ColumnSpacing = 12 };
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var inputs = new FrameworkElement[] { path, TextField("Arguments", process.Arguments, value => process.Arguments = value) };
+        for (var index = 0; index < inputs.Length; index++)
+        {
+            Grid.SetColumn(inputs[index], index);
+            fields.Children.Add(inputs[index]);
+        }
+
+        return Card(new StackPanel { Spacing = 10, Children = { header, fields } });
+    }
+
 
     private FrameworkElement BuildConfigEditor(object config, bool includeScalarSettings = true)
     {
