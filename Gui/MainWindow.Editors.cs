@@ -74,7 +74,7 @@ public sealed partial class MainWindow : Window
             BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestoreSettings), "Settings", "Graphics, audio, input, safety, camera, accessibility, and other app settings."),
             BuildVRChatRestoreGroup(config, nameof(VRChatRegistryConfig.RestorePersonalData), "Personal data", "Account-linked values, inventories, custom groups, histories, and session-related data.")
         };
-        panel.Children.Add(BuildProgressiveTileGrid(restoreGroups, 360, 124, group => group));
+        panel.Children.Add(BuildResponsiveRestoreGrid(restoreGroups));
         var backupValues = new StackPanel { Spacing = 12 };
         backupValues.Children.Add(new StackPanel
         {
@@ -242,6 +242,43 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
         return Card(row);
+    }
+
+    private static FrameworkElement BuildResponsiveRestoreGrid(IReadOnlyList<FrameworkElement> cards)
+    {
+        var grid = new Grid
+        {
+            ColumnSpacing = 12,
+            RowSpacing = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var columns = 0;
+
+        void ArrangeCards()
+        {
+            var newColumns = grid.ActualWidth >= 760 ? 2 : 1;
+            if (newColumns == columns)
+                return;
+
+            columns = newColumns;
+            grid.ColumnDefinitions.Clear();
+            grid.RowDefinitions.Clear();
+            grid.Children.Clear();
+            for (var column = 0; column < columns; column++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (var row = 0; row < (int)Math.Ceiling(cards.Count / (double)columns); row++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (var index = 0; index < cards.Count; index++)
+            {
+                Grid.SetRow(cards[index], index / columns);
+                Grid.SetColumn(cards[index], index % columns);
+                grid.Children.Add(cards[index]);
+            }
+        }
+
+        grid.Loaded += (_, _) => ArrangeCards();
+        grid.SizeChanged += (_, _) => ArrangeCards();
+        return grid;
     }
 
     private FrameworkElement BuildRegistryContent(RegistryConfig config)
