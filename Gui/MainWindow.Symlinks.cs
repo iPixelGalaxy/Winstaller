@@ -245,7 +245,6 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
     {
         var outer = new ReusableSymlinkRow { ColumnSpacing = 4 };
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var isBinding = false;
         var sourceDirty = false;
@@ -321,6 +320,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         var sourceRow = new Grid { ColumnSpacing = 6 };
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         sourceRow.Children.Add(sourceButton);
         sourceBox = CompactTextBox(string.Empty, "Source", value =>
         {
@@ -339,6 +339,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         var targetRow = new Grid { ColumnSpacing = 6 };
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         targetRow.Children.Add(targetButton);
         targetBox = CompactTextBox(string.Empty, "Target override", value =>
         {
@@ -394,12 +395,11 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             SaveConfiguration();
             refresh();
         });
-        var actions = new StackPanel { Width = 64, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
-        actions.Children.Add(isFile);
+        Grid.SetColumn(isFile, 2);
+        sourceRow.Children.Add(isFile);
         removeButton.HorizontalAlignment = HorizontalAlignment.Right;
-        actions.Children.Add(removeButton);
-        Grid.SetColumn(actions, 1);
-        outer.Children.Add(actions);
+        Grid.SetColumn(removeButton, 2);
+        targetRow.Children.Add(removeButton);
 
         void SetSpecialSymlinkGlyphs(SpecialSymlink symlink)
         {
