@@ -223,6 +223,10 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             var currentValue = list[item.Index]?.ToString() ?? string.Empty;
             if (!await ConfirmSymlinkRemovalAsync(currentValue, SplitName(property.Name)))
                 return;
+
+            // Refresh recycles this row. Do not let its pending textbox save restore
+            // the value after it has been removed.
+            isDirty = false;
             list.RemoveAt(item.Index);
             SaveConfiguration();
             refresh();
@@ -400,6 +404,11 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             var name = GetItemTitle(symlink, typeof(SpecialSymlink), item.Index);
             if (!await ConfirmSymlinkRemovalAsync(name, "Special"))
                 return;
+
+            // Refresh recycles this row. Its deferred field saves must not apply
+            // to an item that has just been removed.
+            sourceDirty = false;
+            targetDirty = false;
             list.RemoveAt(item.Index);
             SaveConfiguration();
             refresh();

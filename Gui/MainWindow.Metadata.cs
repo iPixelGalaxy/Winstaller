@@ -41,8 +41,18 @@ private static string GetSettingDescription(PropertyInfo property)
 
     private static bool IsBasicModule(string name)
     {
-        return name is "Symlinks" or "App Installer" or "Fonts" or "Shell Folders" or "Path" or "Network Drives";
+        return name is "App Installer" or "Startup" or "System Settings" or "Fonts" or "Shell Folders";
     }
+
+    private static readonly string[] BasicModuleOrder =
+    [
+        "App Installer", "Startup", "System Settings", "Fonts", "Shell Folders"
+    ];
+
+    private static readonly string[] AdvancedModuleOrder =
+    [
+        "Symlinks", "Path", "Network Drives", "Firewall", "Files & Shortcuts", "Setup Tasks", "Registry"
+    ];
 
     private static bool HasIgnoredItems(object config)
     {

@@ -387,8 +387,12 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         });
         _navigation.MenuItems.Add(new NavigationViewItemSeparator());
         _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Basic" });
-        foreach (var module in _modules.Where(module => IsBasicModule(module.Name)))
+        foreach (var moduleName in BasicModuleOrder)
         {
+            var module = _modules.FirstOrDefault(module => module.Name == moduleName);
+            if (module is null)
+                continue;
+
             _navigation.MenuItems.Add(new NavigationViewItem
             {
                 Content = module.Name,
@@ -398,8 +402,12 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
         }
         _navigation.MenuItems.Add(new NavigationViewItemSeparator());
         _navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Advanced" });
-        foreach (var module in _modules.Where(module => !IsBasicModule(module.Name) && !IsNicheModule(module.Name)))
+        foreach (var moduleName in AdvancedModuleOrder)
         {
+            var module = _modules.FirstOrDefault(module => module.Name == moduleName);
+            if (module is null)
+                continue;
+
             _navigation.MenuItems.Add(new NavigationViewItem
             {
                 Content = module.Name,
