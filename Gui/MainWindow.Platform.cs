@@ -289,23 +289,17 @@ private static void WriteDiagnosticLog(string message)
         AppendTextToOutputBox(outputBox, chunk);
     }
 
-    private static void AppendTextToOutputBox(TextBox outputBox, string text)
+    private void AppendTextToOutputBox(TextBox outputBox, string text)
     {
         var selectionStart = outputBox.SelectionStart;
         var selectionLength = outputBox.SelectionLength;
-        var wasAtEnd = selectionStart + selectionLength >= outputBox.Text.Length;
-
-        var combined = outputBox.Text + text;
-        outputBox.Text = combined;
-        if (wasAtEnd)
-        {
-            outputBox.SelectionStart = outputBox.Text.Length;
-            outputBox.SelectionLength = 0;
-            return;
-        }
+        outputBox.Text += text;
 
         outputBox.SelectionStart = Math.Clamp(selectionStart, 0, outputBox.Text.Length);
         outputBox.SelectionLength = Math.Clamp(selectionLength, 0, outputBox.Text.Length - outputBox.SelectionStart);
+
+        if (_logScrollStates.TryGetValue(outputBox, out var state) && state.FollowOutput)
+            DispatcherQueue.TryEnqueue(state.ScrollToEnd);
     }
 
     private static Style CreateDoneButtonStyle()
@@ -325,39 +319,10 @@ private static void WriteDiagnosticLog(string message)
     private double GetLogDialogWidth()
     {
         var rootWidth = RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1900;
-        return Math.Min(1900, Math.Max(1100, rootWidth - 96));
-    }
-
-    private void EnableAppSettingsTextCopy(TextBox box)
-    {
-        box.KeyDown += (_, args) =>
-        {
-            if (args.Key == Windows.System.VirtualKey.C &&
-                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
-                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
-            {
-                CopyText(box.SelectedText);
-                args.Handled = true;
-            }
-        };
-
-        var menu = new MenuFlyout();
-        var copy = new MenuFlyoutItem { Text = "Copy" };
-        copy.Click += (_, _) => CopyText(box.SelectedText);
-        var selectAll = new MenuFlyoutItem { Text = "Select All" };
-        selectAll.Click += (_, _) => box.SelectAll();
-        menu.Items.Add(copy);
-        menu.Items.Add(selectAll);
-        box.ContextFlyout = menu;
-    }
-
-    private void EnableAppSettingsTextCopyInTree(DependencyObject root)
-    {
-        if (root is TextBox box)
-            EnableAppSettingsTextCopy(box);
-
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
-            EnableAppSettingsTextCopyInTree(VisualTreeHelper.GetChild(root, index));
+        var navigationWidth = _navigation.IsPaneOpen ? _navigation.OpenPaneLength : 48;
+        var contentWidth = Math.Max(0, rootWidth - navigationWidth - 56);
+        var preferredWidth = Math.Clamp(contentWidth * 0.65, 720, 1100);
+        return Math.Min(preferredWidth, Math.Max(320, rootWidth - 64));
     }
     private TextBox CreateLogOutputBox(double width)
     {
@@ -370,29 +335,64 @@ private static void WriteDiagnosticLog(string message)
             MinWidth = width,
             Width = width,
             MinHeight = 520,
-            MaxHeight = 720
+            MaxHeight = 720,
+            Padding = new Thickness(8, 8, 8, 20)
         };
+        ScrollViewer.SetHorizontalScrollBarVisibility(outputBox, ScrollBarVisibility.Auto);
+        ScrollViewer.SetVerticalScrollBarVisibility(outputBox, ScrollBarVisibility.Auto);
 
-        outputBox.KeyDown += (_, args) =>
-        {
-            if (args.Key == Windows.System.VirtualKey.C &&
-                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
-                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
-            {
-                CopyText(string.IsNullOrEmpty(outputBox.SelectedText) ? outputBox.Text : outputBox.SelectedText);
-                args.Handled = true;
-            }
-        };
+        var scrollState = new LogScrollState(outputBox);
+        _logScrollStates.Add(outputBox, scrollState);
+        outputBox.Loaded += (_, _) => DispatcherQueue.TryEnqueue(scrollState.Attach);
+        outputBox.Unloaded += (_, _) => _logScrollStates.Remove(outputBox);
 
         var logMenu = new MenuFlyout();
         var copySelectionItem = new MenuFlyoutItem { Text = "Copy Selection" };
         copySelectionItem.Click += (_, _) => CopyText(outputBox.SelectedText);
-        var copyAllItem = new MenuFlyoutItem { Text = "Copy All Visible Log" };
+        var copyAllItem = new MenuFlyoutItem { Text = "Copy All Log" };
         copyAllItem.Click += (_, _) => CopyText(outputBox.Text);
         logMenu.Items.Add(copySelectionItem);
         logMenu.Items.Add(copyAllItem);
         outputBox.ContextFlyout = logMenu;
         return outputBox;
+    }
+
+    private sealed class LogScrollState(TextBox outputBox)
+    {
+        private ScrollViewer? _scrollViewer;
+
+        public bool FollowOutput { get; private set; } = true;
+
+        public void Attach()
+        {
+            _scrollViewer = FindDescendant<ScrollViewer>(outputBox);
+            if (_scrollViewer is null)
+                return;
+
+            _scrollViewer.ViewChanged += (_, _) =>
+                FollowOutput = _scrollViewer.VerticalOffset >= _scrollViewer.ScrollableHeight - 1;
+            ScrollToEnd();
+        }
+
+        public void ScrollToEnd()
+        {
+            _scrollViewer?.ChangeView(null, _scrollViewer.ScrollableHeight, null, true);
+        }
+
+        private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+        {
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            {
+                var child = VisualTreeHelper.GetChild(root, index);
+                if (child is T result)
+                    return result;
+
+                if (FindDescendant<T>(child) is { } descendant)
+                    return descendant;
+            }
+
+            return null;
+        }
     }
 
     private void CopyText(string text)

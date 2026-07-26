@@ -306,7 +306,7 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
             isDirty = true;
             SaveBox(defocus: false, sanitizeSymlinks: false);
         };
-        box.LostFocus += (_, _) => SaveBox();
+        box.LostFocus += (_, _) => SaveBox(defocus: false);
         box.KeyDown += (_, args) =>
         {
             if (args.Key == Windows.System.VirtualKey.Enter)
@@ -585,7 +585,6 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         box.LostFocus += (_, _) =>
         {
             save(box.Text.Trim());
-            DefocusTextBox(box);
         };
         box.KeyDown += (_, args) =>
         {

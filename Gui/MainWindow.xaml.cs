@@ -51,6 +51,7 @@ public sealed partial class MainWindow : Window
     private List<ModuleDescriptor> _modules = [];
     private ElementTheme _requestedTheme = ElementTheme.Default;
     private TextBox? _activeOutputBox;
+    private readonly Dictionary<TextBox, LogScrollState> _logScrollStates = [];
     private readonly object _outputLock = new();
     private readonly StringBuilder _pendingOutputText = new();
     private bool _outputFlushQueued;

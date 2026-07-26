@@ -387,8 +387,6 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
             : new AppInstallBehavior { DisplayName = isNew ? string.Empty : GetKnownPackageName(packageId!) };
         var name = new TextBox { Text = isNew ? behavior.DisplayName : GetAppDisplayName(config, packageId!), PlaceholderText = "App name" };
         var id = new TextBox { Text = packageId ?? string.Empty, PlaceholderText = "Winget package ID" };
-        EnableAppSettingsTextCopy(name);
-        EnableAppSettingsTextCopy(id);
         var iconPreviewActive = true;
         var iconPreview = CreateAppIconView(id.Text, 64, name.Text, () => iconPreviewActive);
         var iconGeneration = 0;
@@ -440,7 +438,6 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
         AppInstallMode SelectedMode() => (AppInstallMode)Math.Clamp(mode.SelectedIndex, 0, 3);
         var lockVersion = new CheckBox { Content = "Lock version", IsChecked = behavior.LockVersion };
         var version = new TextBox { Text = behavior.Version, PlaceholderText = "Version" };
-        EnableAppSettingsTextCopy(version);
         void UpdateVersionState()
         {
             version.IsEnabled = lockVersion.IsChecked is true;
@@ -500,7 +497,6 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
             {
                 customOptions.Children.Add(BuildGitInstallOptions(behavior.Git));
             }
-            EnableAppSettingsTextCopyInTree(customOptions);
         }
         id.TextChanged += (_, _) => { RefreshModes(); RefreshCustomOptions(); };
         mode.SelectionChanged += (_, _) => RefreshCustomOptions();
