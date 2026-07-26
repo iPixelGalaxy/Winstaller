@@ -1024,6 +1024,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         options.Children.Add(CheckField("Replace Existing", operation.Overwrite, value => operation.Overwrite = value));
         options.Children.Add(CheckField("Rewrite Shortcut Profile Paths", operation.RewriteShortcutProfilePaths, value => operation.RewriteShortcutProfilePaths = value));
         options.Children.Add(CheckField("Protect Private Key", operation.ProtectPrivateKeyAcl, value => operation.ProtectPrivateKeyAcl = value));
+        options.Children.Add(CheckField("Do Not Back Up", operation.SkipPreReinstallBackup, value => operation.SkipPreReinstallBackup = value));
 
         return Card(new StackPanel { Spacing = 10, Children = { header, firstRow, locations, options } });
     }

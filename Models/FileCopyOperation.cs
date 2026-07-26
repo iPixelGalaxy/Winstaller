@@ -13,6 +13,7 @@ public class FileCopyOperation
     public bool Overwrite { get; set; } = true;
     public bool RewriteShortcutProfilePaths { get; set; }
     public bool ProtectPrivateKeyAcl { get; set; }
+    public bool SkipPreReinstallBackup { get; set; }
     // Retained for file-copy.json compatibility. Empty destination files are no longer created.
     public bool CreateEmptyFirst { get; set; }
 }

@@ -60,6 +60,7 @@ public sealed partial class MainWindow : Window
     private string? _currentPageKey;
 
     private const string DashboardPageKey = "Dashboard";
+    private const string PreReinstallChecklistPageKey = "PreReinstallChecklist";
 
     public MainWindow()
     {

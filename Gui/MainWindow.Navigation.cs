@@ -88,6 +88,7 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             var page = new StackPanel { Spacing = 12 };
             page.Children.Add(PageTitle("Dashboard", "Choose what Winstaller should restore or install."));
             page.Children.Add(GuidedSetupCard());
+            page.Children.Add(PreReinstallChecklistCard());
 
             var list = new StackPanel { Spacing = 8 };
             foreach (var module in _modules)
@@ -108,6 +109,17 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             Spacing = 12,
             Children = { ModulePageHeader(module), BuildModuleContent(module) }
         });
+        _isLoadingUi = false;
+    }
+
+    private void RenderPreReinstallChecklist()
+    {
+        _isLoadingUi = true;
+        _topBarActions.Children.Clear();
+        _topBarActionLabels.Clear();
+        _topBarActions.Children.Add(TopBarActionButton(Symbol.Back, "Dashboard", RenderDashboard));
+        UpdateTopBarActionLabelVisibility();
+        ShowCachedPage(PreReinstallChecklistPageKey, BuildPreReinstallChecklistPage);
         _isLoadingUi = false;
     }
 

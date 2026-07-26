@@ -23,7 +23,8 @@ public sealed record SystemInfoImportCandidate(
     string Title,
     string Detail,
     object Value,
-    string Group = "");
+    string Group = "",
+    bool IsUpdate = false);
 
 public enum SymlinkImportMode
 {
@@ -43,7 +44,7 @@ public static class SystemInfoImportService
     private static string AppDataLocalLow => Path.Combine(UserProfile, "AppData", "LocalLow");
     private const string BackupSuffix = ".winstaller-backup";
 
-    public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope)
+    public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope, bool includeUpdates = false)
     {
         var candidates = new List<SystemInfoImportCandidate>();
 
@@ -51,10 +52,10 @@ public static class SystemInfoImportService
             candidates.AddRange(FindPathCandidates(config));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.NetworkDrives)
-            candidates.AddRange(FindNetworkDriveCandidates(config));
+            candidates.AddRange(FindNetworkDriveCandidates(config, includeUpdates));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.ShellFolders)
-            candidates.AddRange(FindShellFolderCandidates(config));
+            candidates.AddRange(FindShellFolderCandidates(config, includeUpdates));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.AppInstaller)
             candidates.AddRange(await FindWingetCandidatesAsync(config));
@@ -63,7 +64,7 @@ public static class SystemInfoImportService
             candidates.AddRange(FindFontCandidates(config));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Startup)
-            candidates.AddRange(FindStartupCandidates(config));
+            candidates.AddRange(FindStartupCandidates(config, includeUpdates));
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Firewall)
             candidates.Add(new(SystemInfoImportScope.Firewall, "Current firewall rules", "Capture active rules into managed backup", new FirewallCaptureCandidate()));
@@ -107,8 +108,16 @@ public static class SystemInfoImportService
                     break;
 
                 case NetworkDriveMapping drive:
-                    if (!config.NetworkDrives.Drives.Any(existing =>
-                            existing.DriveLetter.Equals(drive.DriveLetter, StringComparison.OrdinalIgnoreCase)))
+                    var configuredDrive = config.NetworkDrives.Drives.FirstOrDefault(existing =>
+                        existing.DriveLetter.Equals(drive.DriveLetter, StringComparison.OrdinalIgnoreCase));
+                    if (candidate.IsUpdate && configuredDrive is not null)
+                    {
+                        configuredDrive.NetworkPath = drive.NetworkPath;
+                        configuredDrive.Label = drive.Label;
+                        configuredDrive.Persistent = drive.Persistent;
+                        added++;
+                    }
+                    else if (configuredDrive is null)
                     {
                         config.NetworkDrives.Drives.Add(drive);
                         added++;
@@ -116,8 +125,15 @@ public static class SystemInfoImportService
                     break;
 
                 case ShellFolderMapping folder:
-                    if (!config.ShellFolders.Folders.Any(existing =>
-                            existing.RegistryValue.Equals(folder.RegistryValue, StringComparison.OrdinalIgnoreCase)))
+                    var configuredFolder = config.ShellFolders.Folders.FirstOrDefault(existing =>
+                        existing.RegistryValue.Equals(folder.RegistryValue, StringComparison.OrdinalIgnoreCase));
+                    if (candidate.IsUpdate && configuredFolder is not null)
+                    {
+                        configuredFolder.Path = folder.Path;
+                        configuredFolder.FolderName = folder.FolderName;
+                        added++;
+                    }
+                    else if (configuredFolder is null)
                     {
                         config.ShellFolders.Folders.Add(folder);
                         added++;
@@ -147,9 +163,17 @@ public static class SystemInfoImportService
                     break;
 
                 case StartupProgram startup:
-                    if (!config.Startup.Programs.Any(existing =>
-                            existing.Name.Equals(startup.Name, StringComparison.OrdinalIgnoreCase) &&
-                            existing.MachineLevel == startup.MachineLevel))
+                    var configuredStartup = config.Startup.Programs.FirstOrDefault(existing =>
+                        existing.Name.Equals(startup.Name, StringComparison.OrdinalIgnoreCase) &&
+                        existing.MachineLevel == startup.MachineLevel);
+                    if (candidate.IsUpdate && configuredStartup is not null)
+                    {
+                        configuredStartup.Path = startup.Path;
+                        configuredStartup.Arguments = startup.Arguments;
+                        configuredStartup.Enabled = startup.Enabled;
+                        added++;
+                    }
+                    else if (configuredStartup is null)
                     {
                         config.Startup.Programs.Add(startup);
                         added++;
@@ -390,19 +414,13 @@ public static class SystemInfoImportService
                 entry));
     }
 
-    private static IEnumerable<SystemInfoImportCandidate> FindNetworkDriveCandidates(WinstallerConfig config)
+    private static IEnumerable<SystemInfoImportCandidate> FindNetworkDriveCandidates(WinstallerConfig config, bool includeUpdates)
     {
-        var configured = config.NetworkDrives.Drives
-            .Select(drive => drive.DriveLetter)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var found = new Dictionary<string, NetworkDriveMapping>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Network))
         {
             var letter = drive.Name.TrimEnd('\\', ':');
-            if (configured.Contains(letter))
-                continue;
-
             var path = GetNetworkPath(letter);
             if (string.IsNullOrWhiteSpace(path))
                 continue;
@@ -419,21 +437,28 @@ public static class SystemInfoImportService
 
         foreach (var mapping in GetNetUseMappings())
         {
-            if (!configured.Contains(mapping.DriveLetter))
-                found.TryAdd(mapping.DriveLetter, mapping);
+            found.TryAdd(mapping.DriveLetter, mapping);
         }
 
         foreach (var mapping in found.Values.OrderBy(drive => drive.DriveLetter, StringComparer.OrdinalIgnoreCase))
         {
+            var existing = config.NetworkDrives.Drives.FirstOrDefault(drive => drive.DriveLetter.Equals(mapping.DriveLetter, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null && (!includeUpdates ||
+                (existing.NetworkPath.Equals(mapping.NetworkPath, StringComparison.OrdinalIgnoreCase) &&
+                 existing.Label.Equals(mapping.Label, StringComparison.OrdinalIgnoreCase) &&
+                 existing.Persistent == mapping.Persistent)))
+                continue;
             yield return new SystemInfoImportCandidate(
                 SystemInfoImportScope.NetworkDrives,
                 $"{mapping.DriveLetter}: -> {mapping.NetworkPath}",
                 string.IsNullOrWhiteSpace(mapping.Label) ? "Network drive" : mapping.Label,
-                mapping);
+                mapping,
+                existing is null ? string.Empty : "Changed",
+                existing is not null);
         }
     }
 
-    private static IEnumerable<SystemInfoImportCandidate> FindShellFolderCandidates(WinstallerConfig config)
+    private static IEnumerable<SystemInfoImportCandidate> FindShellFolderCandidates(WinstallerConfig config, bool includeUpdates)
     {
         var knownFolders = new Dictionary<string, (string RegValue, string FriendlyName)>
         {
@@ -445,21 +470,18 @@ public static class SystemInfoImportService
             { "Videos", ("My Video", "Videos") }
         };
 
-        var configured = config.ShellFolders.Folders
-            .Select(folder => folder.RegistryValue)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders");
         if (key is null)
             yield break;
 
         foreach (var (_, (regValue, friendlyName)) in knownFolders)
         {
-            if (configured.Contains(regValue))
-                continue;
-
             var path = key.GetValue(regValue) as string ?? string.Empty;
             if (string.IsNullOrWhiteSpace(path))
+                continue;
+
+            var existing = config.ShellFolders.Folders.FirstOrDefault(folder => folder.RegistryValue.Equals(regValue, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null && (!includeUpdates || existing.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
                 continue;
 
             var mapping = new ShellFolderMapping
@@ -473,7 +495,9 @@ public static class SystemInfoImportService
                 SystemInfoImportScope.ShellFolders,
                 friendlyName,
                 path,
-                mapping);
+                mapping,
+                existing is null ? string.Empty : "Changed",
+                existing is not null);
         }
     }
 
@@ -547,29 +571,35 @@ public static class SystemInfoImportService
         }
     }
 
-    private static IEnumerable<SystemInfoImportCandidate> FindStartupCandidates(WinstallerConfig config)
+    private static IEnumerable<SystemInfoImportCandidate> FindStartupCandidates(WinstallerConfig config, bool includeUpdates)
     {
         foreach (var candidate in ReadStartupKey(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Run", false))
         {
-            if (!HasStartupProgram(config, candidate.Name, candidate.MachineLevel))
+            var existing = GetStartupProgram(config, candidate.Name, candidate.MachineLevel);
+            if (existing is null || (includeUpdates && !StartupProgramsMatch(existing, candidate)))
             {
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Startup,
                     candidate.Name,
                     GetStartupCandidateDetail(candidate),
-                    candidate);
+                    candidate,
+                    existing is null ? string.Empty : "Changed",
+                    existing is not null);
             }
         }
 
         foreach (var candidate in ReadStartupKey(Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
         {
-            if (!HasStartupProgram(config, candidate.Name, candidate.MachineLevel))
+            var existing = GetStartupProgram(config, candidate.Name, candidate.MachineLevel);
+            if (existing is null || (includeUpdates && !StartupProgramsMatch(existing, candidate)))
             {
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Startup,
                     candidate.Name,
                     GetStartupCandidateDetail(candidate),
-                    candidate);
+                    candidate,
+                    existing is null ? string.Empty : "Changed",
+                    existing is not null);
             }
         }
     }
@@ -1178,12 +1208,17 @@ public static class SystemInfoImportService
         return $"{command}\n{registration}; {(program.Enabled ? "enabled" : "disabled")}";
     }
 
-    private static bool HasStartupProgram(WinstallerConfig config, string name, bool machineLevel)
+    private static StartupProgram? GetStartupProgram(WinstallerConfig config, string name, bool machineLevel)
     {
-        return config.Startup.Programs.Any(existing =>
+        return config.Startup.Programs.FirstOrDefault(existing =>
             existing.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
             existing.MachineLevel == machineLevel);
     }
+
+    private static bool StartupProgramsMatch(StartupProgram left, StartupProgram right) =>
+        left.Path.Equals(right.Path, StringComparison.OrdinalIgnoreCase) &&
+        left.Arguments.Equals(right.Arguments, StringComparison.Ordinal) &&
+        left.Enabled == right.Enabled;
 
     private static HashSet<string> GetConfiguredPackageIds(WinstallerConfig config)
     {
