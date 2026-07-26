@@ -40,7 +40,7 @@ public sealed partial class MainWindow : Window
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
             TextWrapping = TextWrapping.Wrap
         };
-        panel.Children.Add(ActionButton("Capture Current VRChat Registry", async () =>
+        var captureButton = ActionButton("Capture Current VRChat Registry", async () =>
         {
             captureStatus.Text = "Capturing current VRChat registry…";
             var module = new VRChatRegistryModule(_config);
@@ -57,9 +57,15 @@ public sealed partial class MainWindow : Window
                 InvalidateCachedPage("VRChat Registry");
                 RenderModule(_modules.First(descriptor => ReferenceEquals(descriptor.Config, config)));
             });
-        }, primary: true));
+        }, primary: true);
+        var restoreButton = ActionButton("Restore Selected Groups", async () => await new VRChatRegistryModule(_config).RestoreAsync());
+        panel.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children = { captureButton, restoreButton }
+        });
         panel.Children.Add(captureStatus);
-        panel.Children.Add(ActionButton("Restore Selected Groups", async () => await new VRChatRegistryModule(_config).RestoreAsync()));
 
         var backupPath = Environment.ExpandEnvironmentVariables(config.BackupPath);
         panel.Children.Add(new TextBlock
