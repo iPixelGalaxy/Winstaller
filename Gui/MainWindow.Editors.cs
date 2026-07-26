@@ -93,7 +93,10 @@ public sealed partial class MainWindow : Window
             foreach (var category in values.GroupBy(VRChatRegistryModule.GetCategory).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
                 panel.Children.Add(new TextBlock { Text = category.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 8, 0, 0) });
-                panel.Children.Add(BuildResponsiveTileGrid(category.Select(value => BuildVRChatValueTile(config, value)).ToList()));
+                var tiles = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
+                foreach (var value in category)
+                    tiles.Children.Add(BuildVRChatValueTile(config, value));
+                panel.Children.Add(tiles);
             }
         }
         return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = isExpanded };
@@ -110,15 +113,29 @@ public sealed partial class MainWindow : Window
             SaveConfiguration();
         };
         var row = new Grid { ColumnSpacing = 12 };
+        row.VerticalAlignment = VerticalAlignment.Center;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap });
-        text.Children.Add(new TextBlock { Text = value.Name, FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+        text.Children.Add(new TextBlock { Text = GuessVRChatDescription(value), FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(text);
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
-        return Card(row);
+        var tile = new Border
+        {
+            Width = 272,
+            Height = 82,
+            Margin = new Thickness(0, 0, 8, 8),
+            Background = ResourceBrush("WinstallerCardBrush"),
+            BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(28),
+            Padding = new Thickness(16, 10, 14, 10),
+            Child = row
+        };
+        ToolTipService.SetToolTip(tile, $"Likely meaning. Registry value: {value.Name}");
+        return tile;
     }
 
     private static string DescribeVRChatValue(string name)
@@ -134,6 +151,26 @@ public sealed partial class MainWindow : Window
             result.Append(current);
         }
         return result.ToString().Replace("Trust Level", string.Empty).Replace("Can Use", "Can use").Replace("Can Speak", "Can speak").Trim();
+    }
+
+    private static string GuessVRChatDescription(VRChatRegistryValue value)
+    {
+        var name = value.Name;
+        if (name.StartsWith("CustomTrustLevel_", StringComparison.OrdinalIgnoreCase)) return "Likely custom Safety Shield rule for this trust rank.";
+        if (name.StartsWith("Screenmanager", StringComparison.OrdinalIgnoreCase)) return "Likely saved display or fullscreen preference.";
+        return VRChatRegistryModule.GetCategory(value) switch
+        {
+            "Audio & Voice" => "Likely audio, voice, microphone, or volume preference.",
+            "Input & Movement" => "Likely input, comfort, turning, or movement preference.",
+            "Safety & Avatars" => "Likely avatar visibility, safety, or performance preference.",
+            "Camera & Mirrors" => "Likely camera, drone, mirror, or photo preference.",
+            "User Interface & Accessibility" => "Likely menu, HUD, notification, or accessibility preference.",
+            "Social & Privacy" => "Likely social, friend, group, or privacy preference.",
+            "Account & Session" => "Likely account or session data.",
+            "Saved Collections & History" => "Likely saved collection, favorite, or history data.",
+            "Personal UI State" => "Likely personal UI state or dismissed prompt data.",
+            _ => "Likely VRChat preference; exact meaning is undocumented."
+        };
     }
 
     private FrameworkElement BuildVRChatRestoreGroup(VRChatRegistryConfig config, string propertyName, string title, string description)
