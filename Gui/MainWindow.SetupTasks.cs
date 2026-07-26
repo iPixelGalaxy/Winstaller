@@ -403,6 +403,7 @@ public sealed partial class MainWindow : Window
                 progress.IsIndeterminate = false;
                 copy.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
+                dialog.CloseButtonStyle = CreateDoneButtonStyle();
             });
         }
         await dialogTask;

@@ -103,6 +103,7 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
+                dialog.CloseButtonStyle = CreateDoneButtonStyle();
             });
         }
 

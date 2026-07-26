@@ -336,6 +336,7 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
                 progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 dialog.CloseButtonText = "Done";
+                dialog.CloseButtonStyle = CreateDoneButtonStyle();
                 EndLongOperation();
             });
         }

@@ -291,19 +291,11 @@ private static void WriteDiagnosticLog(string message)
 
     private static void AppendTextToOutputBox(TextBox outputBox, string text)
     {
-        const int maxVisibleCharacters = 200_000;
         var selectionStart = outputBox.SelectionStart;
         var selectionLength = outputBox.SelectionLength;
         var wasAtEnd = selectionStart + selectionLength >= outputBox.Text.Length;
 
         var combined = outputBox.Text + text;
-        var trimOffset = 0;
-        if (combined.Length > maxVisibleCharacters)
-        {
-            trimOffset = combined.Length - maxVisibleCharacters;
-            combined = combined[trimOffset..];
-        }
-
         outputBox.Text = combined;
         if (wasAtEnd)
         {
@@ -312,8 +304,22 @@ private static void WriteDiagnosticLog(string message)
             return;
         }
 
-        outputBox.SelectionStart = Math.Clamp(selectionStart - trimOffset, 0, outputBox.Text.Length);
+        outputBox.SelectionStart = Math.Clamp(selectionStart, 0, outputBox.Text.Length);
         outputBox.SelectionLength = Math.Clamp(selectionLength, 0, outputBox.Text.Length - outputBox.SelectionStart);
+    }
+
+    private static Style CreateDoneButtonStyle()
+    {
+        return new Style(typeof(Button))
+        {
+            BasedOn = (Style)Application.Current.Resources["AccentButtonStyle"],
+            Setters =
+            {
+                new Setter(FrameworkElement.WidthProperty, 96d),
+                new Setter(FrameworkElement.MinHeightProperty, 32d),
+                new Setter(Control.PaddingProperty, new Thickness(12, 6, 12, 6))
+            }
+        };
     }
 
     private double GetLogDialogWidth()

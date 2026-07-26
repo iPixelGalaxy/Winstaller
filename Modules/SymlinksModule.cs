@@ -129,7 +129,7 @@ public class SymlinksModule : ModuleBase
                 return false;
             }
 
-            var targetDir = isDirectory ? targetPath : Path.GetDirectoryName(targetPath);
+            var targetDir = Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
             {
                 Directory.CreateDirectory(targetDir);
@@ -138,8 +138,7 @@ public class SymlinksModule : ModuleBase
 
             if (TryGetSourceAttributes(sourcePath, out var attributes) && !attributes.HasFlag(FileAttributes.ReparsePoint))
             {
-                ConsoleHelper.WriteWarning($"    Source exists and is not a symlink, skipping to avoid deleting app data: {sourcePath}");
-                return false;
+                return await MigrateSourceDataAndCreateSymlink(sourcePath, targetPath, isDirectory);
             }
 
             if (attributes.HasFlag(FileAttributes.ReparsePoint) && !Config.Symlinks.Resymlink)
@@ -169,6 +168,71 @@ public class SymlinksModule : ModuleBase
             ConsoleHelper.WriteError($"    Error: {ex.Message}");
             return false;
         }
+    }
+
+    private Task<bool> MigrateSourceDataAndCreateSymlink(string sourcePath, string targetPath, bool isDirectory)
+    {
+        try
+        {
+            var targetExists = isDirectory ? Directory.Exists(targetPath) : File.Exists(targetPath);
+            if (targetExists)
+            {
+                if (isDirectory && !Directory.EnumerateFileSystemEntries(targetPath).Any())
+                {
+                    Directory.Delete(targetPath);
+                    Console.WriteLine($"    Removed empty target directory left by an earlier symlink attempt: {targetPath}");
+                }
+                else
+                {
+                    ConsoleHelper.WriteWarning($"    Target already contains data; skipped migration to prevent overwrite: {targetPath}");
+                    return Task.FromResult(false);
+                }
+            }
+
+            var backupPath = sourcePath + ".winstaller-backup";
+            if (Config.Symlinks.CreateBackupFolders && (isDirectory ? Directory.Exists(backupPath) : File.Exists(backupPath)))
+            {
+                ConsoleHelper.WriteWarning($"    Backup already exists; source data left unchanged: {backupPath}");
+                return Task.FromResult(false);
+            }
+
+            Console.WriteLine($"    Copying source data: {sourcePath} -> {targetPath}");
+            if (isDirectory)
+                CopyDirectory(sourcePath, targetPath);
+            else
+                File.Copy(sourcePath, targetPath);
+
+            if (Config.Symlinks.CreateBackupFolders)
+            {
+                Console.WriteLine($"    Moving original to backup: {backupPath}");
+                if (isDirectory) Directory.Move(sourcePath, backupPath); else File.Move(sourcePath, backupPath);
+            }
+            else
+            {
+                Console.WriteLine($"    Removing original after copy: {sourcePath}");
+                if (isDirectory) Directory.Delete(sourcePath, true); else File.Delete(sourcePath);
+            }
+
+            if (!TryReplaceSymlink(sourcePath, targetPath, isDirectory, out var error))
+                throw error!;
+
+            return Task.FromResult(true);
+        }
+        catch (Exception ex)
+        {
+            ConsoleHelper.WriteError($"    Data migration failed: {ex.Message}");
+            return Task.FromResult(false);
+        }
+    }
+
+    private static void CopyDirectory(string sourcePath, string targetPath)
+    {
+        Directory.CreateDirectory(targetPath);
+        foreach (var directory in Directory.EnumerateDirectories(sourcePath, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(targetPath, Path.GetRelativePath(sourcePath, directory)));
+
+        foreach (var file in Directory.EnumerateFiles(sourcePath, "*", SearchOption.AllDirectories))
+            File.Copy(file, Path.Combine(targetPath, Path.GetRelativePath(sourcePath, file)));
     }
 
     private static bool TryGetSourceAttributes(string sourcePath, out FileAttributes attributes)
