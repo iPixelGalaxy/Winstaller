@@ -103,9 +103,11 @@ private FrameworkElement BuildSymlinksContent(SymlinksConfig config)
         {
             countText.Text = $"{list.Count} item{(list.Count == 1 ? string.Empty : "s")}";
             emptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            items.ItemsSource = null;
             items.ItemsSource = list.Cast<object>()
                 .Select((item, index) => new IndexedItem(item, index))
                 .ToList();
+            items.InvalidateMeasure();
         }
 
         var header = new Grid { ColumnSpacing = 8 };
