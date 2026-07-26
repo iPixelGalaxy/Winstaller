@@ -90,36 +90,50 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            foreach (var value in values)
+            foreach (var category in values.GroupBy(VRChatRegistryModule.GetCategory).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
-                var id = VRChatRegistryModule.GetValueId(value);
-                var toggle = new ToggleSwitch { IsOn = !config.ExcludedValueIds.Contains(id, StringComparer.OrdinalIgnoreCase), OffContent = string.Empty, OnContent = string.Empty, VerticalAlignment = VerticalAlignment.Center };
-                toggle.Toggled += (_, _) =>
-                {
-                    config.ExcludedValueIds.RemoveAll(existing => existing.Equals(id, StringComparison.OrdinalIgnoreCase));
-                    if (!toggle.IsOn) config.ExcludedValueIds.Add(id);
-                    SaveConfiguration();
-                };
-                var row = new Grid { ColumnSpacing = 12 };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var text = new StackPanel { Spacing = 2 };
-                text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap });
-                text.Children.Add(new TextBlock { Text = value.Name, FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
-                row.Children.Add(text);
-                Grid.SetColumn(toggle, 1);
-                row.Children.Add(toggle);
-                panel.Children.Add(Card(row));
+                panel.Children.Add(new TextBlock { Text = category.Key, FontSize = 16, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, Margin = new Thickness(0, 8, 0, 0) });
+                panel.Children.Add(BuildResponsiveTileGrid(category.Select(value => BuildVRChatValueTile(config, value)).ToList()));
             }
         }
         return new Expander { Header = $"{title} ({values.Count})", Content = panel, IsExpanded = isExpanded };
+    }
+
+    private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryValue value)
+    {
+        var id = VRChatRegistryModule.GetValueId(value);
+        var toggle = new ToggleSwitch { IsOn = !config.ExcludedValueIds.Contains(id, StringComparer.OrdinalIgnoreCase), OffContent = string.Empty, OnContent = string.Empty, VerticalAlignment = VerticalAlignment.Center };
+        toggle.Toggled += (_, _) =>
+        {
+            config.ExcludedValueIds.RemoveAll(existing => existing.Equals(id, StringComparison.OrdinalIgnoreCase));
+            if (!toggle.IsOn) config.ExcludedValueIds.Add(id);
+            SaveConfiguration();
+        };
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var text = new StackPanel { Spacing = 2 };
+        text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = value.Name, FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+        row.Children.Add(text);
+        Grid.SetColumn(toggle, 1);
+        row.Children.Add(toggle);
+        return Card(row);
     }
 
     private static string DescribeVRChatValue(string name)
     {
         var hash = name.LastIndexOf("_h", StringComparison.OrdinalIgnoreCase);
         var readable = hash > 0 ? name[..hash] : name;
-        return readable.Replace("CustomTrustLevel_", "Safety: ").Replace("VRC_", string.Empty).Replace("_", " ");
+        readable = readable.Replace("CustomTrustLevel_", string.Empty).Replace("VRC_", string.Empty).Replace("_", " ");
+        var result = new StringBuilder(readable.Length + 12);
+        for (var index = 0; index < readable.Length; index++)
+        {
+            var current = readable[index];
+            if (index > 0 && char.IsUpper(current) && char.IsLower(readable[index - 1])) result.Append(' ');
+            result.Append(current);
+        }
+        return result.ToString().Replace("Trust Level", string.Empty).Replace("Can Use", "Can use").Replace("Can Speak", "Can speak").Trim();
     }
 
     private FrameworkElement BuildVRChatRestoreGroup(VRChatRegistryConfig config, string propertyName, string title, string description)

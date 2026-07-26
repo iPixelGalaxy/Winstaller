@@ -86,6 +86,25 @@ public class VRChatRegistryModule : ModuleBase
 
     public static string GetValueId(VRChatRegistryValue value) => $"{value.SubKey}\\{value.Name}";
 
+    public static string GetCategory(VRChatRegistryValue value)
+    {
+        var name = value.Name;
+        if (value.Group == VRChatRegistryGroup.Personal)
+        {
+            if (name.StartsWith("unity.", StringComparison.OrdinalIgnoreCase) || name.Contains("Session", StringComparison.OrdinalIgnoreCase)) return "Account & Session";
+            if (name.Contains("Inventory", StringComparison.OrdinalIgnoreCase) || name.Contains("CustomGroup", StringComparison.OrdinalIgnoreCase) || name.Contains("History", StringComparison.OrdinalIgnoreCase)) return "Saved Collections & History";
+            return "Personal UI State";
+        }
+        if (name.StartsWith("CustomTrustLevel_", StringComparison.OrdinalIgnoreCase) || name.Contains("Safety", StringComparison.OrdinalIgnoreCase) || name.Contains("Shield", StringComparison.OrdinalIgnoreCase) || name.Contains("Avatar", StringComparison.OrdinalIgnoreCase)) return "Safety & Avatars";
+        if (name.StartsWith("Screenmanager", StringComparison.OrdinalIgnoreCase) || name.Contains("Graphics", StringComparison.OrdinalIgnoreCase) || name.Contains("Resolution", StringComparison.OrdinalIgnoreCase) || name.Contains("Quality", StringComparison.OrdinalIgnoreCase)) return "Graphics & Display";
+        if (name.Contains("AUDIO", StringComparison.OrdinalIgnoreCase) || name.Contains("VOICE", StringComparison.OrdinalIgnoreCase) || name.Contains("MIC", StringComparison.OrdinalIgnoreCase)) return "Audio & Voice";
+        if (name.StartsWith("VRC_INPUT", StringComparison.OrdinalIgnoreCase) || name.Contains("LOCOMOTION", StringComparison.OrdinalIgnoreCase) || name.Contains("TURN", StringComparison.OrdinalIgnoreCase) || name.Contains("HEAD_LOOK", StringComparison.OrdinalIgnoreCase)) return "Input & Movement";
+        if (name.Contains("CAMERA", StringComparison.OrdinalIgnoreCase) || name.Contains("DRONE", StringComparison.OrdinalIgnoreCase) || name.Contains("MIRROR", StringComparison.OrdinalIgnoreCase)) return "Camera & Mirrors";
+        if (name.StartsWith("UI.", StringComparison.OrdinalIgnoreCase) || name.Contains("HUD", StringComparison.OrdinalIgnoreCase) || name.Contains("MENU", StringComparison.OrdinalIgnoreCase) || name.Contains("NOTIFICATION", StringComparison.OrdinalIgnoreCase) || name.Contains("ANIMATION", StringComparison.OrdinalIgnoreCase)) return "User Interface & Accessibility";
+        if (name.Contains("FRIEND", StringComparison.OrdinalIgnoreCase) || name.Contains("DISCORD", StringComparison.OrdinalIgnoreCase) || name.Contains("SOCIAL", StringComparison.OrdinalIgnoreCase) || name.Contains("GROUP", StringComparison.OrdinalIgnoreCase)) return "Social & Privacy";
+        return "Other Settings";
+    }
+
     private static void ReadKey(RegistryKey key, string relativePath, List<VRChatRegistryValue> values)
     {
         foreach (var name in key.GetValueNames())
