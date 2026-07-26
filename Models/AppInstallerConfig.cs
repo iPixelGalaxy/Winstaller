@@ -74,9 +74,9 @@ public class GitInstallOptions
 public class DiscordInstallOptions
 {
     public bool InstallDiscord { get; set; } = true;
-    public bool InstallVencord { get; set; } = true;
+    public bool InstallEquicord { get; set; } = true;
     public bool InstallOpenAsar { get; set; } = true;
-    public string VencordInstallerUrl { get; set; } = "https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli.exe";
+    public string EquicordInstallerUrl { get; set; } = "https://github.com/Equicord/Equilotl/releases/latest/download/EquilotlCli.exe";
     public string DiscordLocation { get; set; } = @"%LOCALAPPDATA%\Discord";
 }
 

@@ -6,7 +6,7 @@ using System.Net.Http;
 namespace Winstaller.Modules;
 
 /// <summary>
-/// Module for installing Discord with Vencord and OpenAsar
+/// Module for installing Discord with Equicord and OpenAsar
 /// </summary>
 public class DiscordModule : ModuleBase
 {
@@ -15,7 +15,7 @@ public class DiscordModule : ModuleBase
     public DiscordModule(WinstallerConfig config) : base(config) { }
 
     public override string Name => "Discord";
-    public override string Description => "Installs Discord with Vencord and OpenAsar customizations";
+    public override string Description => "Installs Discord with Equicord and OpenAsar customizations";
     public override bool IsEnabled => Config.Discord.Enabled;
 
     public override async Task<bool> ExecuteAsync()
@@ -37,10 +37,10 @@ public class DiscordModule : ModuleBase
                 success = false;
         }
 
-        // Vencord installation
-        if (Config.Discord.InstallVencord)
+        // Equicord installation
+        if (Config.Discord.InstallEquicord)
         {
-            if (!await InstallVencordAsync())
+            if (!await InstallEquicordAsync())
                 success = false;
         }
 
@@ -69,20 +69,20 @@ public class DiscordModule : ModuleBase
         return true;
     }
 
-    private async Task<bool> InstallVencordAsync()
+    private async Task<bool> InstallEquicordAsync()
     {
-        ConsoleHelper.WriteSubHeader("Installing Vencord");
+        ConsoleHelper.WriteSubHeader("Installing Equicord");
 
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var installerPath = Path.Combine(tempDir, "VencordInstallerCli.exe");
+            var installerPath = Path.Combine(tempDir, "EquilotlCli.exe");
 
-            // Download Vencord Installer
-            Console.WriteLine("Downloading Vencord Installer...");
-            using var response = await HttpClient.GetAsync(Config.Discord.VencordInstallerUrl);
+            // Download Equicord installer
+            Console.WriteLine("Downloading Equilotl CLI...");
+            using var response = await HttpClient.GetAsync(Config.Discord.EquicordInstallerUrl);
             response.EnsureSuccessStatusCode();
 
             await using var fileStream = new FileStream(installerPath, FileMode.Create);
@@ -98,17 +98,17 @@ public class DiscordModule : ModuleBase
 
             var discordLocation = ExpandEnvironmentVariables(Config.Discord.DiscordLocation);
 
-            // Run Vencord installer
-            Console.WriteLine("Running Vencord installer...");
+            // Run Equicord installer
+            Console.WriteLine("Running Equilotl CLI...");
             var result = await RunProcessAsync(installerPath, $"-install -location \"{discordLocation}\"", 120000);
 
             if (result != 0)
             {
-                ConsoleHelper.WriteWarning($"Vencord installation returned non-zero exit code: {result}");
+                ConsoleHelper.WriteWarning($"Equicord installation returned non-zero exit code: {result}");
             }
             else
             {
-                ConsoleHelper.WriteSuccess("Vencord installed successfully");
+                ConsoleHelper.WriteSuccess("Equicord installed successfully");
             }
 
             // Install OpenAsar if configured
@@ -131,7 +131,7 @@ public class DiscordModule : ModuleBase
         }
         catch (Exception ex)
         {
-            ConsoleHelper.WriteError($"Error installing Vencord: {ex.Message}");
+            ConsoleHelper.WriteError($"Error installing Equicord: {ex.Message}");
             return false;
         }
         finally
@@ -149,9 +149,9 @@ public class DiscordModule : ModuleBase
             {
                 await InstallDiscordAsync();
             }),
-            new MenuOption("Install Vencord/OpenAsar Only", async () =>
+            new MenuOption("Install Equicord/OpenAsar Only", async () =>
             {
-                await InstallVencordAsync();
+                await InstallEquicordAsync();
             }),
             new MenuOption("Kill Discord Processes", async () =>
             {
@@ -168,10 +168,10 @@ public class DiscordModule : ModuleBase
         ConsoleHelper.WriteSubHeader("Discord Configuration");
 
         Console.WriteLine($"\n  Install Discord: {Config.Discord.InstallDiscord}");
-        Console.WriteLine($"  Install Vencord: {Config.Discord.InstallVencord}");
+        Console.WriteLine($"  Install Equicord: {Config.Discord.InstallEquicord}");
         Console.WriteLine($"  Install OpenAsar: {Config.Discord.InstallOpenAsar}");
         Console.WriteLine($"  Discord Location: {Config.Discord.DiscordLocation}");
-        Console.WriteLine($"  Vencord URL: {Config.Discord.VencordInstallerUrl}");
+        Console.WriteLine($"  Equicord URL: {Config.Discord.EquicordInstallerUrl}");
 
         return Task.CompletedTask;
     }

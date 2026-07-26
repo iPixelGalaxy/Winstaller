@@ -480,10 +480,10 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
             }
             if (typedId.Equals("Discord.Discord", StringComparison.OrdinalIgnoreCase))
             {
-                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallVencord))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallEquicord))!));
                 customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.InstallOpenAsar))!));
                 customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.DiscordLocation))!));
-                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.VencordInstallerUrl))!));
+                customOptions.Children.Add(BuildInlineObjectPropertyEditor(behavior.Discord, typeof(DiscordInstallOptions).GetProperty(nameof(DiscordInstallOptions.EquicordInstallerUrl))!));
             }
             else if (typedId.Equals("Spotify.Spotify", StringComparison.OrdinalIgnoreCase))
             {
@@ -643,9 +643,9 @@ private FrameworkElement BuildAppInstallerTiles(AppInstallerConfig config)
             Discord = new DiscordInstallOptions
             {
                 InstallDiscord = source.Discord.InstallDiscord,
-                InstallVencord = source.Discord.InstallVencord,
+                InstallEquicord = source.Discord.InstallEquicord,
                 InstallOpenAsar = source.Discord.InstallOpenAsar,
-                VencordInstallerUrl = source.Discord.VencordInstallerUrl,
+                EquicordInstallerUrl = source.Discord.EquicordInstallerUrl,
                 DiscordLocation = source.Discord.DiscordLocation
             },
             Spotify = new SpotifyInstallOptions

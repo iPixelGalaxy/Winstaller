@@ -224,9 +224,9 @@ public static class ConfigurationManager
             {
                 Enabled = false,
                 InstallDiscord = true,
-                InstallVencord = true,
+                InstallEquicord = true,
                 InstallOpenAsar = true,
-                VencordInstallerUrl = "https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli.exe",
+                EquicordInstallerUrl = "https://github.com/Equicord/Equilotl/releases/latest/download/EquilotlCli.exe",
                 DiscordLocation = @"%LOCALAPPDATA%\Discord"
             },
             Spotify = new SpotifyConfig

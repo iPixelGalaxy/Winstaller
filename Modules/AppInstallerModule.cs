@@ -197,7 +197,7 @@ public class AppInstallerModule : ModuleBase
 
     private async Task<bool> ApplyDiscordOptionsAsync(DiscordInstallOptions options)
     {
-        if (!options.InstallVencord)
+        if (!options.InstallEquicord)
             return true;
 
         await RunCmdAsync("taskkill /F /IM discord.exe", 5000);
@@ -205,8 +205,8 @@ public class AppInstallerModule : ModuleBase
         Directory.CreateDirectory(tempDir);
         try
         {
-            var installerPath = Path.Combine(tempDir, "VencordInstallerCli.exe");
-            using var response = await HttpClient.GetAsync(options.VencordInstallerUrl);
+            var installerPath = Path.Combine(tempDir, "EquilotlCli.exe");
+            using var response = await HttpClient.GetAsync(options.EquicordInstallerUrl);
             response.EnsureSuccessStatusCode();
             await using (var fileStream = new FileStream(installerPath, FileMode.Create))
             {
