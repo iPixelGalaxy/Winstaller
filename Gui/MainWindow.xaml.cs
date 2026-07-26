@@ -59,6 +59,8 @@ public sealed partial class MainWindow : Window
     private bool _isLoadingUi;
     private int _pageRenderVersion;
     private string? _currentPageKey;
+    private Task<VRChatRegistryBackup?>? _vrchatBackupPreloadTask;
+    private Task<IReadOnlyList<string>>? _fontPreloadTask;
 
     private const string DashboardPageKey = "Dashboard";
     private const string PreReinstallChecklistPageKey = "PreReinstallChecklist";
@@ -228,6 +230,7 @@ public sealed partial class MainWindow : Window
         _pageScrollOffsets.Clear();
         _currentPageKey = null;
         _config = ConfigurationManager.LoadConfiguration();
+        StartStartupPreload();
         _appInstallerGroupExpanded.Clear();
         foreach (var (groupName, isExpanded) in ConfigurationManager.LoadAppInstallerGroupExpanded())
         {
@@ -250,6 +253,37 @@ public sealed partial class MainWindow : Window
             new("Setup Tasks", "Run one-time setup tasks", "\uE7C3", _config.SetupTasks, () => new SetupTasksModule(_config), null),
             new("VRChat Registry", "Back up and restore VRChat settings and personal data", "\uE7B8", _config.VRChatRegistry, () => new VRChatRegistryModule(_config), null),
         ];
+    }
+
+    private void StartStartupPreload()
+    {
+        _vrchatBackupPreloadTask = Task.Run(() => new VRChatRegistryModule(_config).LoadBackup());
+        _fontPreloadTask = Task.Run(() =>
+        {
+            var directory = Environment.ExpandEnvironmentVariables(_config.Fonts.FontsDirectory)
+                .Replace("{USERNAME}", Environment.UserName, StringComparison.OrdinalIgnoreCase);
+            if (!Directory.Exists(directory)) return (IReadOnlyList<string>)[];
+            var files = Directory.GetFiles(directory, "*.ttf")
+                .Concat(Directory.GetFiles(directory, "*.otf"))
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var file in files) FontPreviewService.GetFontFamily(file);
+            return files;
+        });
+        _ = PreloadAppMetadataAsync();
+    }
+
+    private async Task PreloadAppMetadataAsync()
+    {
+        try
+        {
+            await Task.WhenAll(RecommendedAppCatalog.Apps
+                .Select(app => WingetPackageMetadataService.GetAsync(app.PackageId)));
+        }
+        catch (Exception ex)
+        {
+            RunLog.WriteException("Startup", "App metadata preload failed", ex);
+        }
     }
 
 

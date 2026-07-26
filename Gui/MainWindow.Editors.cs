@@ -85,7 +85,7 @@ public sealed partial class MainWindow : Window
 
     private async Task LoadVRChatBackupValuesAsync(VRChatRegistryConfig config, StackPanel backupValues)
     {
-        var backup = await Task.Run(() => new VRChatRegistryModule(_config).LoadBackup()).ConfigureAwait(false);
+        var backup = await (_vrchatBackupPreloadTask ?? Task.Run(() => new VRChatRegistryModule(_config).LoadBackup())).ConfigureAwait(false);
         await RunOnUiThreadAsync(() =>
         {
             backupValues.Children.Clear();
@@ -386,7 +386,11 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         }
 
         IReadOnlyList<string> fontFiles;
-        try
+        if (_fontPreloadTask is { IsCompletedSuccessfully: true })
+        {
+            fontFiles = _fontPreloadTask.Result;
+        }
+        else try
         {
             fontFiles = Directory.GetFiles(fontsDirectory, "*.ttf")
                 .Concat(Directory.GetFiles(fontsDirectory, "*.otf"))
