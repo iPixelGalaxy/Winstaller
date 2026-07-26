@@ -9,4 +9,5 @@ public class StartupProgram
     public string Path { get; set; } = string.Empty;
     public string Arguments { get; set; } = string.Empty;
     public bool MachineLevel { get; set; } = false;
+    public bool Enabled { get; set; } = true;
 }

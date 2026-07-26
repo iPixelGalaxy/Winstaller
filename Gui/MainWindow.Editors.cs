@@ -1175,7 +1175,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
 
         row.Children.Add(new TextBlock
         {
-            Text = SplitName(property.Name),
+            Text = GetInlinePropertyName(target, property),
             VerticalAlignment = VerticalAlignment.Center
         });
 
@@ -1257,6 +1257,21 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         Grid.SetColumn(editor, 1);
         row.Children.Add(editor);
         return row;
+    }
+
+    private static string GetInlinePropertyName(object target, PropertyInfo property)
+    {
+        if (target is StartupProgram)
+        {
+            return property.Name switch
+            {
+                "MachineLevel" => "Add To All Users Registry",
+                "Enabled" => "Start Enabled",
+                _ => SplitName(property.Name)
+            };
+        }
+
+        return SplitName(property.Name);
     }
 
     private static bool IsSupportedList(Type type)

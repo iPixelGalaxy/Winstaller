@@ -40,25 +40,7 @@ public class StartupModule : ModuleBase
 
                 try
                 {
-                    var keyPath = startup.MachineLevel
-                        ? @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-                        : @"Software\Microsoft\Windows\CurrentVersion\Run";
-
-                    var root = startup.MachineLevel ? Registry.LocalMachine : Registry.CurrentUser;
-
-                    using var key = root.OpenSubKey(keyPath, true);
-                    if (key == null)
-                    {
-                        ConsoleHelper.WriteError($"    Failed to open Run registry key");
-                        success = false;
-                        continue;
-                    }
-
-                    var value = string.IsNullOrEmpty(startup.Arguments)
-                        ? $"\"{ExpandEnvironmentVariables(startup.Path)}\""
-                        : $"\"{ExpandEnvironmentVariables(startup.Path)}\" {startup.Arguments}";
-
-                    key.SetValue(startup.Name, value);
+                    ConfigureStartupProgram(startup);
                     ConsoleHelper.WriteSuccess($"    Added {startup.Name}");
                 }
                 catch (Exception ex)
@@ -140,22 +122,8 @@ public class StartupModule : ModuleBase
 
             try
             {
-                var keyPath = startup.MachineLevel
-                    ? @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-                    : @"Software\Microsoft\Windows\CurrentVersion\Run";
-
-                var root = startup.MachineLevel ? Registry.LocalMachine : Registry.CurrentUser;
-
-                using var key = root.OpenSubKey(keyPath, true);
-                if (key != null)
-                {
-                    var value = string.IsNullOrEmpty(startup.Arguments)
-                        ? $"\"{ExpandEnvironmentVariables(startup.Path)}\""
-                        : $"\"{ExpandEnvironmentVariables(startup.Path)}\" {startup.Arguments}";
-
-                    key.SetValue(startup.Name, value);
-                    ConsoleHelper.WriteSuccess($"    Added");
-                }
+                ConfigureStartupProgram(startup);
+                ConsoleHelper.WriteSuccess($"    Added");
             }
             catch (Exception ex)
             {
@@ -164,6 +132,28 @@ public class StartupModule : ModuleBase
         }
 
         return Task.CompletedTask;
+    }
+
+    private static void ConfigureStartupProgram(StartupProgram startup)
+    {
+        var keyPath = startup.MachineLevel
+            ? @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+            : @"Software\Microsoft\Windows\CurrentVersion\Run";
+        var root = startup.MachineLevel ? Registry.LocalMachine : Registry.CurrentUser;
+
+        using var key = root.OpenSubKey(keyPath, true)
+            ?? throw new InvalidOperationException("Failed to open Run registry key.");
+
+        var value = string.IsNullOrEmpty(startup.Arguments)
+            ? $"\"{ExpandEnvironmentVariables(startup.Path)}\""
+            : $"\"{ExpandEnvironmentVariables(startup.Path)}\" {startup.Arguments}";
+        key.SetValue(startup.Name, value, RegistryValueKind.String);
+
+        using var approvalKey = root.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run", true);
+        if (startup.Enabled)
+            approvalKey.DeleteValue(startup.Name, false);
+        else
+            approvalKey.SetValue(startup.Name, new byte[] { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, RegistryValueKind.Binary);
     }
 
     private async Task RunProcessesOnly()
@@ -249,8 +239,10 @@ public class StartupModule : ModuleBase
         Console.WriteLine($"\nStartup Programs ({Config.Startup.Programs.Count}):");
         foreach (var prog in Config.Startup.Programs)
         {
-            var level = prog.MachineLevel ? "[Machine]" : "[User]";
-            Console.WriteLine($"  {level} {prog.Name}: {prog.Path}");
+            var registration = prog.MachineLevel ? "All users registry Run" : "Current user registry Run";
+            var status = prog.Enabled ? "Enabled" : "Disabled";
+            var command = string.IsNullOrWhiteSpace(prog.Arguments) ? prog.Path : $"{prog.Path} {prog.Arguments}";
+            Console.WriteLine($"  [{registration}; {status}] {prog.Name}: {command}");
         }
 
         Console.WriteLine($"\nProcesses to Run ({Config.Startup.ProcessesToRun.Count}):");

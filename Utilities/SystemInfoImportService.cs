@@ -556,7 +556,7 @@ public static class SystemInfoImportService
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Startup,
                     candidate.Name,
-                    candidate.Path,
+                    GetStartupCandidateDetail(candidate),
                     candidate);
             }
         }
@@ -568,7 +568,7 @@ public static class SystemInfoImportService
                 yield return new SystemInfoImportCandidate(
                     SystemInfoImportScope.Startup,
                     candidate.Name,
-                    candidate.Path,
+                    GetStartupCandidateDetail(candidate),
                     candidate);
             }
         }
@@ -1127,14 +1127,55 @@ public static class SystemInfoImportService
             if (string.IsNullOrWhiteSpace(value))
                 continue;
 
+            var (programPath, arguments) = SplitStartupCommand(value);
+
             yield return new StartupProgram
             {
                 Name = name,
-                Path = value,
-                Arguments = string.Empty,
-                MachineLevel = machineLevel
+                Path = programPath,
+                Arguments = arguments,
+                MachineLevel = machineLevel,
+                Enabled = IsStartupEnabled(root, name)
             };
         }
+    }
+
+    private static (string Path, string Arguments) SplitStartupCommand(string command)
+    {
+        command = command.Trim();
+        if (command.StartsWith('"'))
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            if (closingQuote > 0)
+                return (command[1..closingQuote], command[(closingQuote + 1)..].Trim());
+        }
+
+        foreach (var extension in new[] { ".exe", ".com", ".bat", ".cmd", ".vbs", ".js" })
+        {
+            var extensionIndex = command.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
+            if (extensionIndex >= 0)
+            {
+                var pathEnd = extensionIndex + extension.Length;
+                return (command[..pathEnd], command[pathEnd..].Trim());
+            }
+        }
+
+        return (command, string.Empty);
+    }
+
+    private static bool IsStartupEnabled(RegistryKey root, string name)
+    {
+        using var key = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run");
+        return key?.GetValue(name) is not byte[] value || value.Length == 0 || value[0] != 3;
+    }
+
+    private static string GetStartupCandidateDetail(StartupProgram program)
+    {
+        var command = string.IsNullOrWhiteSpace(program.Arguments)
+            ? program.Path
+            : $"{program.Path} {program.Arguments}";
+        var registration = program.MachineLevel ? "All users registry Run" : "Current user registry Run";
+        return $"{command}\n{registration}; {(program.Enabled ? "enabled" : "disabled")}";
     }
 
     private static bool HasStartupProgram(WinstallerConfig config, string name, bool machineLevel)
