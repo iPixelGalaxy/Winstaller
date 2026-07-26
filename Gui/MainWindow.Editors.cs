@@ -30,13 +30,7 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
     {
         var fontsDirectory = Environment.ExpandEnvironmentVariables(config.FontsDirectory)
             .Replace("{USERNAME}", Environment.UserName, StringComparison.OrdinalIgnoreCase);
-        var panel = new StackPanel { Spacing = 10 };
-        panel.Children.Add(new TextBlock
-        {
-            Text = "Fonts to install",
-            FontSize = 17,
-            FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }
-        });
+        var panel = new StackPanel { Spacing = 12 };
 
         if (!Directory.Exists(fontsDirectory))
         {
@@ -76,24 +70,80 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Foreground = ResourceBrush("WinstallerSecondaryTextBrush")
         });
 
-        panel.Children.Add(new ItemsRepeater
+        var tiles = new VariableSizedWrapGrid
         {
-            ItemsSource = fontFiles,
-            VerticalCacheLength = 1,
-            Layout = new StackLayout { Spacing = 10 },
-            ItemTemplate = new CallbackElementFactory(data => new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 10,
-                Children =
-                {
-                    new FontIcon { Glyph = "\uE8D2", FontSize = 16, VerticalAlignment = VerticalAlignment.Center },
-                    new TextBlock { Text = Path.GetFileName((string)data!), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap }
-                }
-            })
-        });
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        foreach (var fontFile in fontFiles)
+            tiles.Children.Add(BuildFontTile(fontFile, fontsDirectory, config));
+        panel.Children.Add(tiles);
 
         return Card(panel);
+    }
+
+    private FrameworkElement BuildFontTile(string fontFile, string fontsDirectory, FontsConfig config)
+    {
+        var fileName = Path.GetFileName(fontFile);
+        var isOpenType = fontFile.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
+        var type = isOpenType ? "OpenType Font" : "TrueType Font";
+        var size = new FileInfo(fontFile).Length;
+        var details = new TextBlock
+        {
+            Text = $"{type} • {size / 1024d:0.#} KB",
+            FontSize = 11,
+            Foreground = ResourceBrush("WinstallerSecondaryTextBrush"),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var title = CreateAppTileTitle(fileName);
+        var labels = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { title, details } };
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.Children.Add(new FontIcon { Glyph = "\uE8D2", FontSize = 40, VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(labels, 1);
+        header.Children.Add(labels);
+
+        var remove = IconActionButton("\uE74D", "Delete font", async () =>
+        {
+            if (!await ConfirmAsync("Delete font?", $"Delete {fileName} from Winstaller's fonts folder? This permanently removes the font file; it does not uninstall an installed font.", "Delete"))
+                return;
+
+            try
+            {
+                var expectedDirectory = Path.GetFullPath(fontsDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var fileDirectory = Path.GetDirectoryName(Path.GetFullPath(fontFile))?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(expectedDirectory, fileDirectory, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Font file is outside Winstaller's fonts folder.");
+
+                File.Delete(fontFile);
+                RenderModule(_modules.First(module => ReferenceEquals(module.Config, config)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                await ShowMessageAsync("Delete font", $"Could not delete {fileName}: {ex.Message}");
+            }
+        });
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { remove } };
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.Children.Add(header);
+        Grid.SetRow(footer, 1);
+        content.Children.Add(footer);
+
+        return new Border
+        {
+            Width = 250,
+            Height = 128,
+            Margin = new Thickness(0, 0, 8, 8),
+            Background = ResourceBrush("WinstallerCardBrush"),
+            BorderBrush = ResourceBrush("WinstallerCardStrokeBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(14),
+            Child = content
+        };
     }
 
 
