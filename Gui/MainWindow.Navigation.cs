@@ -443,7 +443,12 @@ private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewD
             return BuildSystemSettingsContent(systemSettings);
         }
 
-        if (module.Config is FirewallConfig or SetupTasksConfig)
+        if (module.Config is SetupTasksConfig setupTasks)
+        {
+            return BuildSetupTasksContent(setupTasks);
+        }
+
+        if (module.Config is FirewallConfig)
         {
             return BuildConfigEditor(module.Config, includeScalarSettings: true);
         }

@@ -17,7 +17,13 @@ internal static class PersonalizedConfigurationMigration
         config.Startup = new StartupConfig { Enabled = true, Programs = [new() { Name = "VRCX", Path = @"D:\Software\Programs\VRCX\VRCX.exe" }, new() { Name = "Windhawk", Path = @"D:\Software\Programs\Windhawk\windhawk.exe", Arguments = "-tray-only", MachineLevel = true }] };
         config.SystemSettings = new SystemSettingsConfig { Enabled = true, ComputerName = new() { Apply = true, Value = "iPixelGalaxy-PC" }, Transparency = new() { Apply = true, Value = true }, UncAsIntranet = new() { Apply = true, Value = 1 }, SaveZoneInformation = new() { Apply = true, Value = 1 }, Uac = new() { Apply = true, Value = UacLevel.NotifyAppsWithoutSecureDesktop } };
         config.Firewall = new FirewallConfig { Enabled = true, BackupPath = Path.Combine(data, "Firewall", "firewall-rules.wfw"), RestoreBackup = true };
-        config.SetupTasks = new SetupTasksConfig { Enabled = true };
+        config.SetupTasks = SetupTasksDefaults.CreateLegacy(
+            enabled: true,
+            windhawkAndSteam: true,
+            desktopPlusUiAccess: true,
+            windhawkPath: @"D:\Software\Programs\Windhawk\windhawk.exe",
+            steamPath: @"D:\Steam\steam.exe",
+            desktopPlusBatchPath: @"D:\Steam\steamapps\common\DesktopPlus\misc\EnableUIAccessNoUser.bat");
     }
     private static List<FileCopyOperation> DefaultFileOperations(string data)
     {

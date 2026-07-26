@@ -342,6 +342,8 @@ public static class ConfigurationManager
             var root = JsonNode.Parse(json)?.AsObject();
             if (root?["appInstaller"] is JsonObject appInstaller)
                 MigrateAppInstallerJson(appInstaller);
+            if (root?["setupTasks"] is JsonObject setupTasks && MigrateSetupTasksJson(setupTasks, includeEnabled: true))
+                SaveJson(path, root);
             return JsonSerializer.Deserialize<WinstallerConfig>(root?.ToJsonString() ?? json, JsonOptions) ?? CreateDefaultConfiguration();
         }
         catch
@@ -397,10 +399,13 @@ public static class ConfigurationManager
         try
         {
             var json = File.ReadAllText(path);
-            if (type == typeof(AppInstallerConfig) && JsonNode.Parse(json) is JsonObject appInstaller)
+            if (JsonNode.Parse(json) is JsonObject module)
             {
-                MigrateAppInstallerJson(appInstaller);
-                json = appInstaller.ToJsonString();
+                if (type == typeof(AppInstallerConfig))
+                    MigrateAppInstallerJson(module);
+                if (type == typeof(SetupTasksConfig) && MigrateSetupTasksJson(module, includeEnabled: false))
+                    SaveJson(path, module);
+                json = module.ToJsonString();
             }
             return JsonSerializer.Deserialize(json, type, JsonOptions) ?? fallback;
         }
@@ -493,6 +498,31 @@ public static class ConfigurationManager
             if (git["defaultBranch"]?.GetValue<string>()?.Equals("InstallerDefault", StringComparison.OrdinalIgnoreCase) is true)
                 git["defaultBranch"] = string.Empty;
         }
+    }
+
+    private static bool MigrateSetupTasksJson(JsonObject setupTasks, bool includeEnabled)
+    {
+        if (setupTasks["workflows"] is JsonArray)
+            return false;
+
+        var migrated = SetupTasksDefaults.CreateLegacy(
+            includeEnabled && setupTasks["enabled"]?.GetValue<bool>() is true,
+            setupTasks["windhawkAndSteam"]?.GetValue<bool>() ?? true,
+            setupTasks["desktopPlusUiAccess"]?.GetValue<bool>() ?? true,
+            setupTasks["windhawkPath"]?.GetValue<string>() ?? @"D:\Software\Programs\Windhawk\windhawk.exe",
+            setupTasks["steamPath"]?.GetValue<string>() ?? @"D:\Steam\steam.exe",
+            setupTasks["desktopPlusBatchPath"]?.GetValue<string>() ?? @"D:\Steam\steamapps\common\DesktopPlus\misc\EnableUIAccessNoUser.bat");
+        var node = JsonSerializer.SerializeToNode(migrated, JsonOptions)?.AsObject()
+            ?? throw new InvalidOperationException("Could not migrate setup tasks.");
+        setupTasks["workflows"] = node["workflows"]?.DeepClone();
+        setupTasks.Remove("windhawkAndSteam");
+        setupTasks.Remove("desktopPlusUiAccess");
+        setupTasks.Remove("windhawkPath");
+        setupTasks.Remove("steamPath");
+        setupTasks.Remove("desktopPlusBatchPath");
+        if (includeEnabled)
+            setupTasks["enabled"] = node["enabled"]?.DeepClone();
+        return true;
     }
 
     private static void MapLegacyGitValue(JsonObject git, string key, string oldValue, string newValue)
