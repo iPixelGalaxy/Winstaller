@@ -244,16 +244,18 @@ private static string GetSettingDescription(PropertyInfo property)
                 return;
 
             started = true;
-            await Task.Delay(100);
-            BeginContentWarmup();
+            await Task.Delay(100).ConfigureAwait(false);
 
-            var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+            Grid? grid = null;
             var tiles = new List<FrameworkElement>();
             var arrangedColumns = -1;
             var arrangedCount = -1;
             var arranging = false;
             void ArrangeTiles()
             {
+                if (grid is null)
+                    return;
+
                 var columns = Math.Max(1, (int)((Math.Max(grid.ActualWidth, minimumWidth) + 8) / (minimumWidth + 8)));
                 if (arranging || (arrangedColumns == columns && arrangedCount == tiles.Count))
                     return;
@@ -283,22 +285,32 @@ private static string GetSettingDescription(PropertyInfo property)
                 }
             }
 
-            grid.SizeChanged += (_, _) => ArrangeTiles();
-            host.Children.Clear();
-            host.Children.Add(grid);
             try
             {
+                await RunOnUiThreadAsync(() =>
+                {
+                    BeginContentWarmup();
+                    grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+                    grid.SizeChanged += (_, _) => ArrangeTiles();
+                    host.Children.Clear();
+                    host.Children.Add(grid);
+                });
+
                 for (var index = 0; index < items.Count; index += 12)
                 {
-                    foreach (var item in items.Skip(index).Take(12))
-                        tiles.Add(create(item));
-                    ArrangeTiles();
-                    await Task.Delay(1);
+                    var batch = items.Skip(index).Take(12).ToList();
+                    await RunOnUiThreadAsync(() =>
+                    {
+                        foreach (var item in batch)
+                            tiles.Add(create(item));
+                        ArrangeTiles();
+                    });
+                    await Task.Delay(1).ConfigureAwait(false);
                 }
             }
             finally
             {
-                EndContentWarmup();
+                await RunOnUiThreadAsync(EndContentWarmup);
             }
         };
         return host;
