@@ -107,20 +107,21 @@ public sealed partial class MainWindow : Window
 
     private FrameworkElement BuildVRChatValueTile(VRChatRegistryConfig config, VRChatRegistryBackup backup, VRChatRegistryValue value)
     {
+        var editor = BuildVRChatValueEditor(backup, value);
+        var editorWidth = editor is ToggleSwitch ? 56 : 104;
         var row = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         row.VerticalAlignment = VerticalAlignment.Center;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(editorWidth) });
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = DescribeVRChatValue(value.Name), FontSize = 14, FontWeight = new Windows.UI.Text.FontWeight { Weight = 600 }, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
         text.Children.Add(new TextBlock { Text = GuessVRChatDescription(value), FontSize = 11, Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(text);
-        var editor = BuildVRChatValueEditor(backup, value);
         Grid.SetColumn(editor, 1);
         row.Children.Add(editor);
         var tile = new Border
         {
-            Width = 272,
+            Width = editor is ToggleSwitch ? 272 : 320,
             Height = 74,
             Margin = new Thickness(0, 0, 8, 8),
             Background = ResourceBrush("WinstallerCardBrush"),
@@ -139,20 +140,21 @@ public sealed partial class MainWindow : Window
         void Save() => new VRChatRegistryModule(_config).SaveBackup(backup);
         if (value.Kind == Microsoft.Win32.RegistryValueKind.DWord && (value.Data == "0" || value.Data == "1"))
         {
-            var toggle = new ToggleSwitch { IsOn = value.Data == "1", OffContent = string.Empty, OnContent = string.Empty, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            var toggle = new ToggleSwitch { IsOn = value.Data == "1", OffContent = string.Empty, OnContent = string.Empty, Width = 52, MinWidth = 52, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
             toggle.Toggled += (_, _) => { value.Data = toggle.IsOn ? "1" : "0"; Save(); };
             return toggle;
         }
-        if ((value.Kind is Microsoft.Win32.RegistryValueKind.DWord or Microsoft.Win32.RegistryValueKind.QWord) && double.TryParse(value.Data, System.Globalization.CultureInfo.InvariantCulture, out var number) && number <= 9007199254740991d)
+        if ((value.Kind is Microsoft.Win32.RegistryValueKind.DWord or Microsoft.Win32.RegistryValueKind.QWord) && ulong.TryParse(value.Data, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _))
         {
-            var box = new NumberBox { Value = number, MinWidth = 82, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-            box.ValueChanged += (_, args) =>
+            var box = new TextBox { Text = value.Data, Width = 100, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
+            box.LostFocus += (_, _) =>
             {
-                if (!double.IsNaN(args.NewValue) && args.NewValue >= 0)
+                if (ulong.TryParse(box.Text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number))
                 {
-                    value.Data = Math.Round(args.NewValue).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    value.Data = number.ToString(System.Globalization.CultureInfo.InvariantCulture);
                     Save();
                 }
+                else box.Text = value.Data;
             };
             return box;
         }
