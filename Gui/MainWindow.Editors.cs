@@ -248,12 +248,24 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             return box;
         }
 
-        ToggleSwitch ToggleField(string label, bool value, Action<bool> save)
+        CheckBox CheckField(string label, bool value, Action<bool> save)
         {
-            var toggle = new ToggleSwitch { Header = label, IsOn = value, HorizontalAlignment = HorizontalAlignment.Stretch };
-            toggle.Toggled += (_, _) => { save(toggle.IsOn); SaveConfiguration(); };
-            return toggle;
+            var checkBox = new CheckBox { Content = label, IsChecked = value, VerticalAlignment = VerticalAlignment.Center };
+            checkBox.Checked += (_, _) => { save(true); SaveConfiguration(); };
+            checkBox.Unchecked += (_, _) => { save(false); SaveConfiguration(); };
+            return checkBox;
         }
+
+        var driveLetter = new ComboBox { Header = "Drive Letter", Width = 92, HorizontalAlignment = HorizontalAlignment.Left };
+        driveLetter.Items.Add(string.Empty);
+        foreach (var letter in Enumerable.Range('A', 26).Select(value => ((char)value).ToString()))
+            driveLetter.Items.Add(letter);
+        driveLetter.SelectedItem = drive.DriveLetter.Trim().TrimEnd(':').ToUpperInvariant();
+        driveLetter.SelectionChanged += (_, _) =>
+        {
+            drive.DriveLetter = driveLetter.SelectedItem?.ToString() ?? string.Empty;
+            SaveConfiguration();
+        };
 
         var password = new PasswordBox
         {
@@ -293,17 +305,35 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
         passwordField.Children.Add(password);
         passwordField.Children.Add(reveal);
 
-        Grid Row(params FrameworkElement[] fields)
+        var inputRow = new Grid { ColumnSpacing = 12 };
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var inputFields = new FrameworkElement[]
         {
-            var row = new Grid { ColumnSpacing = 12 };
-            for (var index = 0; index < fields.Length; index++)
-            {
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                Grid.SetColumn(fields[index], index);
-                row.Children.Add(fields[index]);
-            }
-            return row;
+            driveLetter,
+            TextField("Network Path", drive.NetworkPath, value => drive.NetworkPath = value),
+            TextField("Label", drive.Label, value => drive.Label = value),
+            TextField("Username", drive.Username, value => drive.Username = value),
+            passwordField
+        };
+        for (var index = 0; index < inputFields.Length; index++)
+        {
+            Grid.SetColumn(inputFields[index], index);
+            inputRow.Children.Add(inputFields[index]);
         }
+        var options = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 24,
+            Children =
+            {
+                CheckField("Persistent", drive.Persistent, value => drive.Persistent = value),
+                CheckField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value)
+            }
+        };
 
         var title = string.IsNullOrWhiteSpace(drive.DriveLetter) ? "New network drive" : $"{drive.DriveLetter}: {drive.NetworkPath}";
         var header = new StackPanel
@@ -322,16 +352,8 @@ private FrameworkElement BuildFontsContent(FontsConfig config)
             Children =
             {
                 header,
-                Row(
-                    TextField("Drive Letter", drive.DriveLetter, value => drive.DriveLetter = value),
-                    TextField("Network Path", drive.NetworkPath, value => drive.NetworkPath = value),
-                    TextField("Label", drive.Label, value => drive.Label = value)),
-                Row(
-                    TextField("Username", drive.Username, value => drive.Username = value),
-                    passwordField),
-                Row(
-                    ToggleField("Persistent", drive.Persistent, value => drive.Persistent = value),
-                    ToggleField("Delete First", drive.DeleteFirst, value => drive.DeleteFirst = value))
+                inputRow,
+                options
             }
         };
         var remove = IconActionButton("\uE74D", "Remove drive", () =>
