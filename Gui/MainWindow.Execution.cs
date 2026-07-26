@@ -54,11 +54,6 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
         var logDialogWidth = GetLogDialogWidth();
         var outputView = CreateLogOutputView(logDialogWidth, out var outputBox);
 
-        var progress = new ProgressBar
-        {
-            IsIndeterminate = true,
-            MinWidth = logDialogWidth
-        };
         var copyLogButton = ActionButton("Copy Full Log", () => CopyTextFromFile(RunLog.Path));
         copyLogButton.IsEnabled = false;
         var openFolderButton = ActionButton("Open Log Folder", () => OpenFolder(Path.GetDirectoryName(RunLog.Path) ?? BootstrapManager.LogsDirectory));
@@ -82,7 +77,7 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
         {
             Spacing = 12,
             Width = logDialogWidth,
-            Children = { progress, outputView, footer }
+            Children = { outputView, footer }
         };
 
         dialog = new ContentDialog
@@ -108,7 +103,6 @@ private async Task ConfirmAndRunModulesAsync(IReadOnlyList<ModuleDescriptor> mod
             {
                 FlushOutputText(outputBox);
                 _activeOutputBox = null;
-                progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 doneButton.Visibility = Visibility.Visible;
             });

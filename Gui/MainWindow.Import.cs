@@ -109,11 +109,6 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         var logDialogWidth = GetLogDialogWidth();
         var outputView = CreateLogOutputView(logDialogWidth, out var outputBox);
 
-        var progress = new ProgressBar
-        {
-            IsIndeterminate = true,
-            MinWidth = logDialogWidth
-        };
         var copyLogButton = ActionButton("Copy Full Log", () =>
         {
             CopyTextFromFile(RunLog.Path);
@@ -141,7 +136,7 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
         {
             Spacing = 12,
             Width = logDialogWidth,
-            Children = { progress, outputView, footer }
+            Children = { outputView, footer }
         };
         dialog = new ContentDialog
         {
@@ -272,7 +267,6 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
                                 await RunOnUiThreadAsync(() =>
                                 {
                                     button.IsEnabled = false;
-                                    progress.IsIndeterminate = true;
                                 });
                                 Log("Killing detected locking apps...");
                                 foreach (var processInfo in lockingProcesses)
@@ -314,7 +308,6 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
                             {
                                 await RunOnUiThreadAsync(() =>
                                 {
-                                    progress.IsIndeterminate = false;
                                     EndLongOperation();
                                 });
                             }
@@ -341,7 +334,6 @@ private async Task ImportSystemInfoAsync(SystemInfoImportScope scope, ModuleDesc
             await RunOnUiThreadAsync(() =>
             {
                 FlushLog();
-                progress.IsIndeterminate = false;
                 copyLogButton.IsEnabled = true;
                 doneButton.Visibility = Visibility.Visible;
                 EndLongOperation();

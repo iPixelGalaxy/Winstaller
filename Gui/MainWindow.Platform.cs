@@ -375,7 +375,11 @@ private static void WriteDiagnosticLog(string message)
         var scrollState = new LogScrollState(logBox, verticalScrollBar, horizontalScrollBar);
         _logScrollStates.Add(logBox, scrollState);
         logBox.Loaded += (_, _) => DispatcherQueue.TryEnqueue(scrollState.Attach);
-        logBox.Unloaded += (_, _) => _logScrollStates.Remove(logBox);
+        logBox.Unloaded += (_, _) =>
+        {
+            scrollState.Detach();
+            _logScrollStates.Remove(logBox);
+        };
         void CopyLogSelection() => CopyText(logBox.SelectedText);
         var copyKeyHandler = new KeyEventHandler((_, args) =>
         {
@@ -424,7 +428,6 @@ private static void WriteDiagnosticLog(string message)
     {
         private ScrollViewer? _scrollViewer;
         private bool _scrollScheduled;
-        private bool _scrollToEndRequested;
         public bool FollowOutput { get; private set; } = true;
 
         public bool IsAtBottom => _scrollViewer is null ||
@@ -441,10 +444,10 @@ private static void WriteDiagnosticLog(string message)
             _scrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(PauseOutputFollowing), true);
             _scrollViewer.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(PauseOutputFollowingForNavigation), true);
+            outputBox.LayoutUpdated += ScrollAfterLayout;
             verticalScrollBar.ValueChanged += value =>
             {
                 FollowOutput = false;
-                _scrollToEndRequested = false;
                 _scrollViewer.ChangeView(null, value, null, true);
             };
             horizontalScrollBar.ValueChanged += value =>
@@ -459,10 +462,14 @@ private static void WriteDiagnosticLog(string message)
             ScheduleScrollToEnd();
         }
 
+        public void Detach()
+        {
+            outputBox.LayoutUpdated -= ScrollAfterLayout;
+        }
+
         private void PauseOutputFollowing(object sender, PointerRoutedEventArgs args)
         {
             FollowOutput = false;
-            _scrollToEndRequested = false;
         }
 
         private void PauseOutputFollowingForNavigation(object sender, KeyRoutedEventArgs args)
@@ -470,13 +477,11 @@ private static void WriteDiagnosticLog(string message)
             if (args.Key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End)
             {
                 FollowOutput = false;
-                _scrollToEndRequested = false;
             }
         }
 
         public void ScheduleScrollToEnd()
         {
-            _scrollToEndRequested = true;
             ScheduleScrollBarUpdate();
         }
 
@@ -486,21 +491,20 @@ private static void WriteDiagnosticLog(string message)
                 return;
 
             _scrollScheduled = true;
-            outputBox.LayoutUpdated += ScrollAfterLayout;
+            if (!outputBox.DispatcherQueue.TryEnqueue(ScrollToCurrentBottom))
+                _scrollScheduled = false;
         }
 
         private void ScrollAfterLayout(object? sender, object args)
         {
-            outputBox.LayoutUpdated -= ScrollAfterLayout;
-            outputBox.DispatcherQueue.TryEnqueue(ScrollToCurrentBottom);
+            ScheduleScrollBarUpdate();
         }
 
         private void ScrollToCurrentBottom()
         {
             _scrollScheduled = false;
-            if (_scrollToEndRequested && _scrollViewer is { ScrollableHeight: > 0 } scrollViewer)
+            if (FollowOutput && _scrollViewer is { ScrollableHeight: > 0 } scrollViewer && !IsAtBottom)
                 scrollViewer.ChangeView(null, scrollViewer.ScrollableHeight, null, true);
-            _scrollToEndRequested = false;
             UpdateExternalScrollBars();
         }
 

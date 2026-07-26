@@ -372,7 +372,6 @@ public sealed partial class MainWindow : Window
     {
         var width = GetLogDialogWidth();
         var outputView = CreateLogOutputView(width, out var output);
-        var progress = new ProgressBar { IsIndeterminate = true, MinWidth = width };
         var copy = ActionButton("Copy Full Log", () => CopyTextFromFile(RunLog.Path));
         copy.IsEnabled = false;
         var folder = ActionButton("Open Log Folder", () => OpenFolder(Path.GetDirectoryName(RunLog.Path) ?? BootstrapManager.LogsDirectory));
@@ -390,7 +389,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = $"Running {workflow.Name}",
-            Content = new StackPanel { Spacing = 12, Width = width, Children = { progress, outputView, footer } },
+            Content = new StackPanel { Spacing = 12, Width = width, Children = { outputView, footer } },
             DefaultButton = ContentDialogButton.None
         };
         dialog.Resources["ContentDialogMinWidth"] = width;
@@ -409,7 +408,6 @@ public sealed partial class MainWindow : Window
             {
                 FlushOutputText(output);
                 _activeOutputBox = null;
-                progress.IsIndeterminate = false;
                 copy.IsEnabled = true;
                 done.Visibility = Visibility.Visible;
             });
