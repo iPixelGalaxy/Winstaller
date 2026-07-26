@@ -44,33 +44,57 @@ public static class SystemInfoImportService
     private static string AppDataLocalLow => Path.Combine(UserProfile, "AppData", "LocalLow");
     private const string BackupSuffix = ".winstaller-backup";
 
-    public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope, bool includeUpdates = false)
+    public static async Task<List<SystemInfoImportCandidate>> FindCandidatesAsync(WinstallerConfig config, SystemInfoImportScope scope, bool includeUpdates = false, Action<string>? progress = null)
     {
         var candidates = new List<SystemInfoImportCandidate>();
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Path)
+        {
+            progress?.Invoke("Scanning PATH entries…");
             candidates.AddRange(FindPathCandidates(config));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.NetworkDrives)
+        {
+            progress?.Invoke("Scanning network drives…");
             candidates.AddRange(FindNetworkDriveCandidates(config, includeUpdates));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.ShellFolders)
+        {
+            progress?.Invoke("Scanning shell folders…");
             candidates.AddRange(FindShellFolderCandidates(config, includeUpdates));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.AppInstaller)
+        {
+            progress?.Invoke("Scanning installed apps with winget…");
             candidates.AddRange(await FindWingetCandidatesAsync(config));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Fonts)
+        {
+            progress?.Invoke("Scanning installed fonts…");
             candidates.AddRange(FindFontCandidates(config));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Startup)
+        {
+            progress?.Invoke("Scanning startup items…");
             candidates.AddRange(FindStartupCandidates(config, includeUpdates));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Firewall)
+        {
+            progress?.Invoke("Checking firewall backup…");
             candidates.Add(new(SystemInfoImportScope.Firewall, "Current firewall rules", "Capture active rules into managed backup", new FirewallCaptureCandidate()));
+        }
 
         if (scope is SystemInfoImportScope.All or SystemInfoImportScope.Symlinks)
+        {
+            progress?.Invoke("Scanning profile symlinks…");
             candidates.AddRange(FindSymlinkCandidates(config));
+        }
 
         return candidates;
     }

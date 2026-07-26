@@ -30,8 +30,12 @@ public sealed partial class MainWindow
     {
         var page = new StackPanel { Spacing = 12 };
         page.Children.Add(PageTitle("Pre-reinstall Checklist", "Refresh managed backups, then review current Windows changes before reinstalling."));
-        var status = new TextBlock { Text = "Scanning current Windows configuration…", Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap };
-        page.Children.Add(status);
+        var scanStatus = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var spinner = new ProgressRing { IsActive = true, Width = 20, Height = 20, Visibility = Visibility.Collapsed };
+        scanStatus.Children.Add(spinner);
+        var status = new TextBlock { Text = "Scanning current Windows configuration…", Foreground = ResourceBrush("WinstallerSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        scanStatus.Children.Add(status);
+        page.Children.Add(scanStatus);
 
         var backupTasks = new StackPanel { Spacing = 6 };
         page.Children.Add(Card(new StackPanel
@@ -70,13 +74,18 @@ public sealed partial class MainWindow
         {
             run!.IsEnabled = false;
             scan!.IsEnabled = false;
+            spinner.Visibility = Visibility.Visible;
             status.Text = "Scanning current Windows configuration…";
             findings.Children.Clear();
             checks.Clear();
             ShowBackupTasks();
             try
             {
-                var candidates = (await Task.Run(async () => await SystemInfoImportService.FindCandidatesAsync(_config, SystemInfoImportScope.All, includeUpdates: true)))
+                var candidates = (await Task.Run(async () => await SystemInfoImportService.FindCandidatesAsync(
+                    _config,
+                    SystemInfoImportScope.All,
+                    includeUpdates: true,
+                    progress: message => DispatcherQueue.TryEnqueue(() => status.Text = message))))
                     .Where(candidate => candidate.Scope != SystemInfoImportScope.Firewall)
                     .ToList();
                 foreach (var group in candidates.GroupBy(candidate => candidate.Group == "Changed" ? "Changed configuration" : $"New {SplitName(candidate.Scope.ToString())}"))
@@ -103,6 +112,7 @@ public sealed partial class MainWindow
             }
             finally
             {
+                spinner.Visibility = Visibility.Collapsed;
                 scan!.IsEnabled = true;
             }
         }
