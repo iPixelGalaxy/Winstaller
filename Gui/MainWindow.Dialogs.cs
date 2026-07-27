@@ -208,12 +208,15 @@ public sealed partial class MainWindow : Window
 
     private async Task RunGuidedSetupAsync()
     {
-        var standard = new[] { "Symlinks", "App Installer", "Fonts", "Shell Folders", "Path" }
+        var standard = new[] { "Symlinks", "App Installer", "Fonts" }
             .Select(name => _modules.First(module => module.Name == name))
             .ToList();
 
         if ((await SystemInfoImportService.FindCandidatesAsync(_config, SystemInfoImportScope.NetworkDrives)).Count > 0)
             standard.Add(_modules.First(module => module.Name == "Network Drives"));
+
+        standard.AddRange(new[] { "Shell Folders", "Path" }
+            .Select(name => _modules.First(module => module.Name == name)));
 
         foreach (var module in standard)
         {

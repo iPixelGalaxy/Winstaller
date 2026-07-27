@@ -49,6 +49,7 @@ public class FontsModule : ModuleBase
         var windowsFontsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
         var success = true;
         var installed = 0;
+        var skipped = 0;
 
         foreach (var fontFile in fontFiles)
         {
@@ -61,8 +62,15 @@ public class FontsModule : ModuleBase
             {
                 Console.WriteLine($"  Installing {fontName}...");
 
+                if (File.Exists(destPath))
+                {
+                    Console.WriteLine($"    Skipped existing system font: {fileName}");
+                    skipped++;
+                    continue;
+                }
+
                 // Copy font file
-                File.Copy(fontFile, destPath, true);
+                File.Copy(fontFile, destPath);
 
                 // Register in registry
                 using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts", true);
@@ -79,7 +87,7 @@ public class FontsModule : ModuleBase
             }
         }
 
-        Console.WriteLine($"\nInstalled {installed}/{fontFiles.Length} fonts");
+        Console.WriteLine($"\nInstalled {installed}/{fontFiles.Length} fonts; skipped {skipped} existing fonts");
         return Task.FromResult(success);
     }
 

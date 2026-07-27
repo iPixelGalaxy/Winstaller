@@ -1542,7 +1542,7 @@ public static class SystemInfoImportService
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = "winget",
-                Arguments = "list --source winget --accept-source-agreements --disable-interactivity --no-progress",
+                Arguments = "list --source winget --accept-source-agreements --disable-interactivity",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

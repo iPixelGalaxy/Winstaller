@@ -100,15 +100,34 @@ public class AppInstallerModule : ModuleBase
             return false;
         }
 
-        await RunProcessAsync("winget", "upgrade Microsoft.AppInstaller --accept-source-agreements --accept-package-agreements --disable-interactivity --no-progress", 300000, false);
-        if (await RunProcessAsync("winget", "source update --disable-interactivity --no-progress", 120000, false) != 0 ||
-            await RunProcessAsync("winget", "show --id 9WZDNCRFHVN5 --exact --source msstore --accept-source-agreements --disable-interactivity --no-progress", 120000, false) != 0)
+        await RunProcessAsync("winget", "upgrade Microsoft.AppInstaller --accept-source-agreements --accept-package-agreements --disable-interactivity", 300000, false);
+        if (!await EnsureWingetSourcesAsync())
         {
             ConsoleHelper.WriteError("WinGet cannot access required sources.");
             return false;
         }
 
         return true;
+    }
+
+    private static async Task<bool> EnsureWingetSourcesAsync()
+    {
+        if (await UpdateAndCheckWingetSourcesAsync())
+            return true;
+
+        ConsoleHelper.WriteWarning("WinGet sources are unavailable. Resetting default sources...");
+        if (await RunProcessAsync("winget", "source reset --force", 120000, true) != 0)
+            return false;
+
+        return await UpdateAndCheckWingetSourcesAsync();
+    }
+
+    private static async Task<bool> UpdateAndCheckWingetSourcesAsync()
+    {
+        if (await RunProcessAsync("winget", "source update --disable-interactivity", 120000, true) != 0)
+            return false;
+
+        return await RunProcessAsync("winget", "show --id 9WZDNCRFHVN5 --exact --source msstore --accept-source-agreements --disable-interactivity", 120000, true) == 0;
     }
 
     private static Task<bool> IsStoreAvailableAsync()
@@ -149,7 +168,7 @@ public class AppInstallerModule : ModuleBase
             return false;
         }
 
-        var upgrade = await RunProcessAsync("winget", $"upgrade --id {RecommendedAppCatalog.HevcPackageId} --exact --source msstore --accept-source-agreements --accept-package-agreements --disable-interactivity --no-progress", Config.AppInstaller.DefaultTimeoutSeconds * 1000, true);
+        var upgrade = await RunProcessAsync("winget", $"upgrade --id {RecommendedAppCatalog.HevcPackageId} --exact --source msstore --accept-source-agreements --accept-package-agreements --disable-interactivity", Config.AppInstaller.DefaultTimeoutSeconds * 1000, true);
         return upgrade == 0;
     }
 

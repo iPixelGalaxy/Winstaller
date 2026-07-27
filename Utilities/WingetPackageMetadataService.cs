@@ -36,7 +36,7 @@ internal static class WingetPackageMetadataService
             using var process = Process.Start(new ProcessStartInfo
             {
                 FileName = "winget",
-                Arguments = $"show --id \"{EscapeWingetArgument(packageId)}\" --exact --source {(isMicrosoftStorePackage ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity --no-progress",
+                Arguments = $"show --id \"{EscapeWingetArgument(packageId)}\" --exact --source {(isMicrosoftStorePackage ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

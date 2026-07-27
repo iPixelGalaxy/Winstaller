@@ -616,7 +616,7 @@ internal static partial class AppIconService
             using var process = Process.Start(new ProcessStartInfo
             {
                 FileName = "winget",
-                Arguments = $"show --id \"{packageId}\" --exact --source {(IsMicrosoftStorePackage(packageId) ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity --no-progress",
+                Arguments = $"show --id \"{packageId}\" --exact --source {(IsMicrosoftStorePackage(packageId) ? "msstore" : "winget")} --accept-source-agreements --disable-interactivity",
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
             });
             if (process is null) return default;

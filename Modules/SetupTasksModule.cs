@@ -185,6 +185,9 @@ public class SetupTasksModule : ModuleBase
         if (!action.WaitForExit)
             return true;
 
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+
         try
         {
             if (action.TimeoutSeconds is > 0)
@@ -195,14 +198,27 @@ public class SetupTasksModule : ModuleBase
         catch (TimeoutException)
         {
             TryKill(process);
+            await Task.WhenAll(outputTask, errorTask);
+            WriteScriptOutput(outputTask.Result, errorTask.Result);
             ConsoleHelper.WriteError($"{action.Name}: timed out.");
             return false;
         }
 
+        await Task.WhenAll(outputTask, errorTask);
+
         if (process.ExitCode == 0)
             return true;
+        WriteScriptOutput(outputTask.Result, errorTask.Result);
         ConsoleHelper.WriteError($"{action.Name}: exit code {process.ExitCode}.");
         return false;
+    }
+
+    private static void WriteScriptOutput(string output, string error)
+    {
+        if (!string.IsNullOrWhiteSpace(output))
+            Console.WriteLine(output.Trim());
+        if (!string.IsNullOrWhiteSpace(error))
+            Console.Error.WriteLine(error.Trim());
     }
 
     private static ProcessStartInfo CreateScriptStartInfo(RunScriptAction action, string path)
@@ -219,6 +235,8 @@ public class SetupTasksModule : ModuleBase
         {
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardOutput = action.WaitForExit,
+            RedirectStandardError = action.WaitForExit,
             WorkingDirectory = ResolveWorkingDirectory(action.WorkingDirectory, path)
         };
         var arguments = ExpandEnvironmentVariables(action.Arguments);
